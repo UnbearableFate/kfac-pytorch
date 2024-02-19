@@ -8,17 +8,20 @@ from typing import Union
 import torch
 import torch.distributed as dist
 
+import kfac.mischief as mischief
 try:
     import apex_C  # type: ignore
 
     flatten = apex_C.flatten  # pragma: no cover
     unflatten = apex_C.unflatten  # pragma: no cover
 except ImportError:
+    """
     warnings.warn(
         'NVIDIA Apex is not installed or was not installed with --cpp_ext. '
         'Falling back to PyTorch flatten and unflatten.',
         stacklevel=2,
     )
+    """
     flatten = torch._utils._flatten_dense_tensors
     unflatten = torch._utils._unflatten_dense_tensors
 
@@ -270,6 +273,16 @@ class TorchDistributedCommunicator:
             NonSquareTensorError:
                 if symmetric is True and tensor is not a 2D square tensor.
         """
+        ### disconnection in inverse boardcast
+        if mischief.INVERSE_COMM_TRIGGER and src in mischief.DISCONNECTED_NODE and not mischief.is_connected_in_this_term():
+            #mischief.easy_log(f"do not boradcast from {src}",[0,1])
+            return tensor
+
+        clone_tensor = None
+        if mischief.INVERSE_COMM_TRIGGER and dist.get_rank() in mischief.DISCONNECTED_NODE and not mischief.is_connected_in_this_term():
+            #mischief.easy_log(f"broadcast without {dist.get_rank()}",[0,1])
+            clone_tensor = torch.clone(tensor)
+
         if get_world_size(group) == 1:
             return tensor
         shape = tensor.size()
@@ -295,6 +308,10 @@ class TorchDistributedCommunicator:
             future = future.then(  # pragma: no cover
                 lambda fut: fut.value()[0],
             )
+        ### disconnection in inverse boardcast 
+        if clone_tensor is not None:
+            future.wait()
+            return clone_tensor
         return future
 
     def allreduce_bucketed(
@@ -409,6 +426,9 @@ def get_world_size(group: dist.ProcessGroup | None = None) -> int:
         initialized.
     """
     if dist.is_initialized():
+        if ((mischief.INVERSE_COMM_TRIGGER or mischief.DDP_TRIGGER or mischief.INVERSE_COMM_TRIGGER ) and
+            (not mischief.is_connected_in_this_term())):
+            return dist.get_world_size(group) - len(mischief.DISCONNECTED_NODE)
         return dist.get_world_size(group)
     else:
         return 1

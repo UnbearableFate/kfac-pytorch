@@ -14,5 +14,6 @@ import kfac.preconditioner as preconditioner
 import kfac.scheduler as scheduler
 import kfac.tracing as tracing
 import kfac.warnings as warnings
+import kfac.mischief as mischief
 
 __version__ = importlib_metadata.version('kfac-pytorch')

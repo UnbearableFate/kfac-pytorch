@@ -46,9 +46,10 @@ def get_cifar(
         ],
     )
 
-    os.makedirs(args.data_dir, exist_ok=True)
+    #os.makedirs(args.data_dir, exist_ok=True)
 
-    download = True if args.local_rank == 0 else False
+    #download = True if args.local_rank == 0 else False
+    download = False
     if not download:
         dist.barrier()
     train_dataset = datasets.CIFAR10(

@@ -14,6 +14,7 @@ from kfac.distributed import TorchDistributedCommunicator
 from kfac.enums import AllreduceMethod
 from kfac.layers.modules import ModuleHelper
 
+import kfac.mischief as mischief
 
 class KFACBaseLayer:
     """KFAC base layer implementation.
@@ -299,12 +300,23 @@ class KFACBaseLayer:
             raise AssertionError(
                 f'Unknown allreduce_method={self.allreduce_method}',
             )
-        self.a_factor = allreduce(  # type: ignore
-            self.a_factor,
-            average=True,
-            symmetric=self.symmetric_factors and self.symmetry_aware,
-            group=group,
-        )
+        ### disconnection in reduce_a_factor
+        if (dist.get_rank() in mischief.DISCONNECTED_NODE
+                and mischief.FACTOR_COMM_TRIGGER
+                and not mischief.is_connected_in_this_term()):
+            allreduce(  # type: ignore
+                torch.zeros_like(self.a_factor),
+                average=True,
+                symmetric=self.symmetric_factors and self.symmetry_aware,
+                group=group,
+            )
+        else:
+            self.a_factor = allreduce(  # type: ignore
+                self.a_factor,
+                average=True,
+                symmetric=self.symmetric_factors and self.symmetry_aware,
+                group=group,
+            )
 
     def reduce_g_factor(self, group: dist.ProcessGroup | None = None) -> None:
         """Initiate reduction of G and store future to result.
@@ -327,12 +339,24 @@ class KFACBaseLayer:
             raise AssertionError(
                 f'Unknown allreduce_method={self.allreduce_method}',
             )
-        self.g_factor = allreduce(  # type: ignore
-            self.g_factor,
-            average=True,
-            symmetric=self.symmetric_factors and self.symmetry_aware,
-            group=group,
-        )
+        
+        ### disconnection in reduce_g_factor
+        if (dist.get_rank() in mischief.DISCONNECTED_NODE
+                and mischief.FACTOR_COMM_TRIGGER
+                and not mischief.is_connected_in_this_term()):
+            allreduce(  # type: ignore
+                torch.zeros_like(self.g_factor),
+                average=True,
+                symmetric=self.symmetric_factors and self.symmetry_aware,
+                group=group,
+            )
+        else:
+            self.g_factor = allreduce(  # type: ignore
+                self.g_factor,
+                average=True,
+                symmetric=self.symmetric_factors and self.symmetry_aware,
+                group=group,
+            )
 
     def reset_batch(self) -> None:
         """Clears current buffers for A and G."""
