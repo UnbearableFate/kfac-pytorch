@@ -4,14 +4,14 @@ import torch.distributed as dist
 import torch
 
 DISCONNECTED_NODE = [1,2]
-DISCONNECT_TERM = 3
-CONNECT_TERM = 7
+DISCONNECT_TERM = 4
+CONNECT_TERM = 6
 
 term = 0
 
-DDP_TRIGGER = False
-FACTOR_COMM_TRIGGER = False
-INVERSE_COMM_TRIGGER = False
+DDP_TRIGGER = True
+FACTOR_COMM_TRIGGER = True
+INVERSE_COMM_TRIGGER = True
 
 log_once = dict()
 def easy_log_once(words, rank=0):

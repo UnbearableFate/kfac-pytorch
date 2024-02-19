@@ -19,6 +19,8 @@ import examples.vision.optimizers as optimizers
 from examples.utils import save_checkpoint
 
 import kfac.mischief as mischief
+import logging
+logging.basicConfig(level=logging.NOTSET)
 
 try:
     from torch.cuda.amp import GradScaler
@@ -313,7 +315,10 @@ def main() -> None:
 
     os.makedirs(args.log_dir, exist_ok=True)
     args.checkpoint_format = os.path.join(args.log_dir, args.checkpoint_format)
-    args.log_writer = SummaryWriter(f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/test01")
+    if dist.get_rank() in mischief.DISCONNECTED_NODE:
+        args.log_writer = SummaryWriter(f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/test03_6_4_2_e")
+    else:
+        args.log_writer = SummaryWriter(f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/test03_6_4_2_o")
 
     args.resume_from_epoch = 0
     """
