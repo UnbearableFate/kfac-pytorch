@@ -140,3 +140,5 @@ dmypy.json
 
 data/
 *.txt
+job_req_torchrun.sh.e*
+job_req_torchrun.sh.o*

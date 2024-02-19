@@ -9,9 +9,9 @@ CONNECT_TERM = 7
 
 term = 0
 
-DDP_TRIGGER = True
-FACTOR_COMM_TRIGGER = True
-INVERSE_COMM_TRIGGER = True
+DDP_TRIGGER = False
+FACTOR_COMM_TRIGGER = False
+INVERSE_COMM_TRIGGER = False
 
 log_once = dict()
 def easy_log_once(words, rank=0):
