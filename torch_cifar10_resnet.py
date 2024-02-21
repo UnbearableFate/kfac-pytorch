@@ -310,15 +310,13 @@ def main() -> None:
     )
     mischief.add_hook_to_model(model)
 
-    # Add some tricks in DDP 
-    #add_hook_to_model(model)
-
     os.makedirs(args.log_dir, exist_ok=True)
     args.checkpoint_format = os.path.join(args.log_dir, args.checkpoint_format)
-    if dist.get_rank() in mischief.DISCONNECTED_NODE:
-        args.log_writer = SummaryWriter(f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/test03_6_4_2_e")
-    else:
-        args.log_writer = SummaryWriter(f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/test03_6_4_2_o")
+
+    board_dir = board_dir = (f"/work/NBB/yu_mingzhe/experiments/runs/"
+                 f"cifar10_resnet32/p{dist.get_world_size()}n_{len(mischief.DISCONNECTED_NODE)}e_"
+                 f"{mischief.CONNECT_TERM}ct_{mischief.DISCONNECT_TERM}dct/rank{dist.get_rank()}")
+    args.log_writer = SummaryWriter(board_dir)
 
     args.resume_from_epoch = 0
     """
@@ -370,6 +368,8 @@ def main() -> None:
 
     for epoch in range(args.resume_from_epoch + 1, args.epochs + 1):
         mischief.term = preconditioner.steps
+        if args.verbose :
+            print(f"term {mischief.term}")
         engine.train(
             epoch,
             model,

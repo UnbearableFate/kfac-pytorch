@@ -3,9 +3,9 @@ import logging
 import torch.distributed as dist
 import torch
 
-DISCONNECTED_NODE = [1,2]
-DISCONNECT_TERM = 4
-CONNECT_TERM = 6
+DISCONNECTED_NODE = [2]
+DISCONNECT_TERM = 1
+CONNECT_TERM = 9
 
 term = 0
 
