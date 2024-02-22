@@ -25,15 +25,95 @@ else
     NET_ADDR=$(cat $SHAREDFILE)
 fi
 
-# 运行torchrun
 torchrun --nproc_per_node=1 --nnodes=$OMPI_SIZE --node_rank=$OMPI_RANK \
  --rdzv-id=001 --rdzv-backend=c10d \
- --rdzv_endpoint=$NET_ADDR:29401 \
+ --rdzv_endpoint=$NET_ADDR:29511 \
  /work/NBB/yu_mingzhe/kfac-pytorch/torch_cifar10_resnet.py \
- --epochs=100 \
- --warmup-epochs=3 \
- --seed=43 \
- --kfac-inv-method
+ --epochs=200 \
+ --warmup-epochs=5 \
+ --seed=42 \
+ --kfac-inv-method \
+ --disconnect-node-number=4 \
+ --connect-terms=9 \
+ --disconnect-terms=1 \
+ --times=0
+
+sleep 3
+
+torchrun --nproc_per_node=1 --nnodes=$OMPI_SIZE --node_rank=$OMPI_RANK \
+ --rdzv-id=002 --rdzv-backend=c10d \
+ --rdzv_endpoint=$NET_ADDR:29512 \
+ /work/NBB/yu_mingzhe/kfac-pytorch/torch_cifar10_resnet.py \
+ --epochs=200 \
+ --warmup-epochs=5 \
+ --seed=42 \
+ --kfac-inv-method \
+ --disconnect-node-number=4 \
+ --connect-terms=8 \
+ --disconnect-terms=2 \
+ --times=0
+
+sleep 3
+
+torchrun --nproc_per_node=1 --nnodes=$OMPI_SIZE --node_rank=$OMPI_RANK \
+ --rdzv-id=003 --rdzv-backend=c10d \
+ --rdzv_endpoint=$NET_ADDR:29513 \
+ /work/NBB/yu_mingzhe/kfac-pytorch/torch_cifar10_resnet.py \
+ --epochs=200 \
+ --warmup-epochs=5 \
+ --seed=42 \
+ --kfac-inv-method \
+ --disconnect-node-number=4 \
+ --connect-terms=6 \
+ --disconnect-terms=4 \
+ --times=0
+
+sleep 3
+
+torchrun --nproc_per_node=1 --nnodes=$OMPI_SIZE --node_rank=$OMPI_RANK \
+ --rdzv-id=004 --rdzv-backend=c10d \
+ --rdzv_endpoint=$NET_ADDR:29514 \
+ /work/NBB/yu_mingzhe/kfac-pytorch/torch_cifar10_resnet.py \
+ --epochs=200 \
+ --warmup-epochs=5 \
+ --seed=42 \
+ --kfac-inv-method \
+ --disconnect-node-number=4 \
+ --connect-terms=4 \
+ --disconnect-terms=6 \
+ --times=0
+
+sleep 3
+
+torchrun --nproc_per_node=1 --nnodes=$OMPI_SIZE --node_rank=$OMPI_RANK \
+ --rdzv-id=005 --rdzv-backend=c10d \
+ --rdzv_endpoint=$NET_ADDR:29515 \
+ /work/NBB/yu_mingzhe/kfac-pytorch/torch_cifar10_resnet.py \
+ --epochs=200 \
+ --warmup-epochs=5 \
+ --seed=42 \
+ --kfac-inv-method \
+ --disconnect-node-number=4 \
+ --connect-terms=2 \
+ --disconnect-terms=8 \
+ --times=0
+
+sleep 3
+
+torchrun --nproc_per_node=1 --nnodes=$OMPI_SIZE --node_rank=$OMPI_RANK \
+ --rdzv-id=006 --rdzv-backend=c10d \
+ --rdzv_endpoint=$NET_ADDR:29516 \
+ /work/NBB/yu_mingzhe/kfac-pytorch/torch_cifar10_resnet.py \
+ --epochs=200 \
+ --warmup-epochs=5 \
+ --seed=42 \
+ --kfac-inv-method \
+ --disconnect-node-number=4 \
+ --connect-terms=0 \
+ --disconnect-terms=10 \
+ --times=0
+
+sleep 3
 
 # 如果是主节点，删除共享文件
 if [ "$OMPI_COMM_WORLD_RANK" -eq 0 ]; then

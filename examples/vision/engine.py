@@ -39,7 +39,7 @@ def train(
         total=math.ceil(len(train_loader) / args.batches_per_allreduce),
         bar_format='{l_bar}{bar:10}{r_bar}',
         desc=f'Epoch {epoch:3d}/{args.epochs:3d}',
-        disable=not args.verbose,
+        disable= True #not args.verbose,
     ) as t:
         for batch_idx, (data, target) in enumerate(train_loader):
             mini_step += 1
@@ -131,7 +131,7 @@ def test(
         total=len(val_loader),
         bar_format='{l_bar}{bar:10}|{postfix}',
         desc='             ',
-        disable=not args.verbose,
+        disable=True #not args.verbose,
     ) as t:
         with torch.no_grad():
             for i, (data, target) in enumerate(val_loader):

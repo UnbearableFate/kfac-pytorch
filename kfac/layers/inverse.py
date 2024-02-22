@@ -198,7 +198,11 @@ class KFACInverseLayer(KFACBaseLayer):
             self.a_factor.new(self.a_factor.shape[0]).fill_(damping),
         )
         a = self.a_factor + d
-        self.a_inv = torch.linalg.inv(a.to(torch.float32)).to(self.inv_dtype)
+        try:
+            self.a_inv = torch.linalg.inv(a.to(torch.float32)).to(self.inv_dtype)
+        except Exception as e:
+            print(f"error :{e} in layer {self}\n A: {a}")
+            self.a_inv = torch.linalg.pinv(a.to(torch.float32)).to(self.inv_dtype) 
 
     def compute_g_inv(self, damping: float = 0.001) -> None:
         """See `compute_g_inv`."""
@@ -209,7 +213,11 @@ class KFACInverseLayer(KFACBaseLayer):
             self.g_factor.new(self.g_factor.shape[0]).fill_(damping),
         )
         g = self.g_factor + d
-        self.g_inv = torch.linalg.inv(g.to(torch.float32)).to(self.inv_dtype)
+        try: ### temp
+            self.g_inv = torch.linalg.inv(g.to(torch.float32)).to(self.inv_dtype)
+        except Exception as e:
+            print(f"error :{e} in layer {self} \n G: {g}") 
+            self.g_inv = torch.linalg.pinv(g.to(torch.float32)).to(self.inv_dtype) 
 
     def preconditioned_grad(self, damping: float = 0.001) -> None:
         """Compute precondition gradient of each weight in module.
