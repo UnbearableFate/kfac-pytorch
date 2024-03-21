@@ -15,7 +15,16 @@ DDP_TRIGGER = True
 FACTOR_COMM_TRIGGER = True
 INVERSE_COMM_TRIGGER = True
 
+
 log_once = dict()
+
+def close_all():
+    global DDP_TRIGGER
+    global FACTOR_COMM_TRIGGER
+    global INVERSE_COMM_TRIGGER
+    DDP_TRIGGER = False
+    FACTOR_COMM_TRIGGER = False
+    INVERSE_COMM_TRIGGER = False
 def easy_log_once(words, rank=0):
     if dist.get_rank() == rank and words not in log_once:
         print(f"{words} in rank {rank}")
