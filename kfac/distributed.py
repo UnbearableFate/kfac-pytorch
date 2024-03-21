@@ -8,7 +8,9 @@ from typing import Union
 import torch
 import torch.distributed as dist
 
-import kfac.mischief as mischief
+#import kfac.mischief2 as mischief
+from kfac.mischief2 import MischiefHelper,Mischief
+
 try:
     import apex_C  # type: ignore
 
@@ -274,12 +276,12 @@ class TorchDistributedCommunicator:
                 if symmetric is True and tensor is not a 2D square tensor.
         """
         ### disconnection in inverse boardcast
-        if mischief.INVERSE_COMM_TRIGGER and src in mischief.DISCONNECTED_NODE and not mischief.is_connected_in_this_term():
+        if Mischief.INVERSE_COMM_TRIGGER and not MischiefHelper.is_connected_in(src):
             #mischief.easy_log(f"do not boradcast from {src}",[0,1])
             return tensor
 
         clone_tensor = None
-        if mischief.INVERSE_COMM_TRIGGER and dist.get_rank() in mischief.DISCONNECTED_NODE and not mischief.is_connected_in_this_term():
+        if Mischief.INVERSE_COMM_TRIGGER and not MischiefHelper.is_connected_in(dist.get_rank()):
             #mischief.easy_log(f"broadcast without {dist.get_rank()}",[0,1])
             clone_tensor = torch.clone(tensor)
 
@@ -426,13 +428,10 @@ def get_world_size(group: dist.ProcessGroup | None = None) -> int:
         initialized.
     """
     if dist.is_initialized():
-        if ((mischief.INVERSE_COMM_TRIGGER or mischief.DDP_TRIGGER or mischief.INVERSE_COMM_TRIGGER ) and
-            (not mischief.is_connected_in_this_term())):
-            return dist.get_world_size(group) - len(mischief.DISCONNECTED_NODE)
-        return dist.get_world_size(group)
+        return MischiefHelper.get_connnecting_world_size()
+        #return dist.get_world_size(group)
     else:
         return 1
-
 
 def get_triu(tensor: torch.Tensor) -> torch.Tensor:
     """Returns flattened upper triangle of 2D tensor."""

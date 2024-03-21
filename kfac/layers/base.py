@@ -14,7 +14,9 @@ from kfac.distributed import TorchDistributedCommunicator
 from kfac.enums import AllreduceMethod
 from kfac.layers.modules import ModuleHelper
 
-import kfac.mischief as mischief
+#import kfac.mischief2 as mischief
+
+from kfac.mischief2 import MischiefHelper, Mischief
 
 class KFACBaseLayer:
     """KFAC base layer implementation.
@@ -301,9 +303,7 @@ class KFACBaseLayer:
                 f'Unknown allreduce_method={self.allreduce_method}',
             )
         ### disconnection in reduce_a_factor
-        if (dist.get_rank() in mischief.DISCONNECTED_NODE
-                and mischief.FACTOR_COMM_TRIGGER
-                and not mischief.is_connected_in_this_term()):
+        if Mischief.FACTOR_COMM_TRIGGER and not MischiefHelper.is_connected_in(dist.get_rank()):
             allreduce(  # type: ignore
                 torch.zeros_like(self.a_factor),
                 average=True,
@@ -341,9 +341,7 @@ class KFACBaseLayer:
             )
         
         ### disconnection in reduce_g_factor
-        if (dist.get_rank() in mischief.DISCONNECTED_NODE
-                and mischief.FACTOR_COMM_TRIGGER
-                and not mischief.is_connected_in_this_term()):
+        if Mischief.FACTOR_COMM_TRIGGER and not MischiefHelper.is_connected_in(dist.get_rank()):
             allreduce(  # type: ignore
                 torch.zeros_like(self.g_factor),
                 average=True,
