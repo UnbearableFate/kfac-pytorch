@@ -99,14 +99,14 @@ class Mischief:
             return True
         return self.nodes[rank].is_connected
 
-    def close_all(self):
-        Mischief.DDP_TRIGGER = False
-        Mischief.FACTOR_COMM_TRIGGER = False
-        Mischief.INVERSE_COMM_TRIGGER = False
-
 MischiefHelper = Mischief(possible_disconnect_node=[1,2,3])
 
 log_once = dict()
+
+def close_all():
+    Mischief.DDP_TRIGGER = False
+    Mischief.FACTOR_COMM_TRIGGER = False
+    Mischief.INVERSE_COMM_TRIGGER = False
 
 def easy_log(words:str, ranks:list):
     if dist.get_rank() in ranks :

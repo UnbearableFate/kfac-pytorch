@@ -28,15 +28,7 @@ fi
 torchrun --nproc_per_node=1 --nnodes=$OMPI_SIZE --node_rank=$OMPI_RANK \
  --rdzv-id=001 --rdzv-backend=c10d \
  --rdzv_endpoint=$NET_ADDR:29511 \
- /work/NBB/yu_mingzhe/kfac-pytorch/torch_cifar10_resnet.py \
- --epochs=10 \
- --warmup-epochs=0 \
- --seed=42 \
- --kfac-inv-method \
- --disconnect-node-number=4 \
- --connect-terms=0 \
- --disconnect-terms=10 \
- --times=2
+ /work/NBB/yu_mingzhe/kfac-pytorch/pega_ver_simple_test.py
 
 # 如果是主节点，删除共享文件
 if [ "$OMPI_COMM_WORLD_RANK" -eq 0 ]; then
