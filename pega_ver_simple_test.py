@@ -16,8 +16,8 @@ import kfac
 
 from kfac.mischief2 import Mischief, MischiefHelper , add_hook_to_model ,close_all
 
-epochs = 50
-batch_size = 64
+epochs = 100
+batch_size = 128
 class MLP(nn.Module):
     def __init__(self):
         super(MLP, self).__init__()
@@ -45,7 +45,6 @@ class MLP(nn.Module):
         return self.layers(x)
 
 def main():
-    close_all()
     # Set up DDP environment
     timeout = datetime.timedelta(seconds=20)
     dist.init_process_group('nccl',timeout=timeout)
@@ -73,16 +72,25 @@ def main():
                                               num_workers=2)
 
     # Define the model, loss function, and optimizer
+    """
+    Mischief.DDP_TRIGGER = False
+    Mischief.WORLD_SIZE = dist.get_world_size()
+    Mischief.DISCONNECT_RATIO = 0.4
+    Mischief.MAX_DISCONNECTED_NODE_NUM = 2
+    Mischief.MAX_DISCONNECT_ITER = 3
+    MischiefHelper.contruct_node_status([1,2,3])
+    """
+    close_all()
     model = MLP().to(device)
-    model = DDP(model)
-    add_hook_to_model(model)
+    model = DDP(model) 
+    #add_hook_to_model(model)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
-    MischiefHelper.contruct_node_status([1,2])
-    Mischief.WORLD_SIZE = dist.get_world_size()
     preconditioner = kfac.preconditioner.KFACPreconditioner(model)
     dist.barrier()
-    writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/experiments/runs2/fashion_mnist_experiment_normal/{dist.get_rank()}")
+
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/experiments/runs2/fashion_mnist_experiment_normal_{timestamp}/{dist.get_rank()}")
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
 
@@ -107,10 +115,10 @@ def train(model, train_loader,train_sampler, criterion, optimizer ,preconditione
             loss.backward()
             preconditioner.step()
             optimizer.step()
-            if writer is not None and batch_idx %25 == 0:
-                writer.add_scalar('Loss/train', loss.item(), epoch*len(train_loader)+batch_idx)
             t.update()
-
+        if writer is not None:
+            writer.add_scalar('Loss/train', loss.item(), epoch+1)
+    
     # Testing function
 def test(model, test_loader, criterion, epoch,writer):
     model.eval()

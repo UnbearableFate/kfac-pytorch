@@ -47,7 +47,7 @@ class Mischief:
     FACTOR_COMM_TRIGGER = True
     INVERSE_COMM_TRIGGER = True
 
-    POSSIBLE_DISCONNECTED_NODE = []
+    POSSIBLE_DISCONNECTED_NODE = [1,2]
     MAX_DISCONNECTED_NODE_NUM = 4
     MAX_DISCONNECT_ITER = 3
     ITER = 0
@@ -56,23 +56,8 @@ class Mischief:
     WORLD_SIZE = 8
     DISCONNECT_RATIO = 0.2
 
-    def __init__(self,ddp_trigger = True, factor_comm_trigger = True,
-             inverse_comm_trigger = True, possible_disconnect_node=[],
-             max_disconnect_iter = 3,max_disconnect_node_num = 2,
-                 world_size = 8):
-        Mischief.DDP_TRIGGER = ddp_trigger
-        Mischief.FACTOR_COMM_TRIGGER = factor_comm_trigger
-        Mischief.INVERSE_COMM_TRIGGER = inverse_comm_trigger
-        Mischief.POSSIBLE_DISCONNECTED_NODE = possible_disconnect_node
-        Mischief.MAX_DISCONNECT_ITER = max_disconnect_iter
-        Mischief.MAX_DISCONNECTED_NODE_NUM = max_disconnect_node_num
-        Mischief.ITER = 0
-        Mischief.WORLD_SIZE = world_size
-
+    def __init__(self):
         self.nodes = dict()
-        random.seed(12)
-        for n in Mischief.POSSIBLE_DISCONNECTED_NODE:
-            self.nodes[n] = NodeStatus(n,random.randint(1,Mischief.MAX_DISCONNECT_ITER))
 
     def contruct_node_status(self,possible_disconnect_node):
         Mischief.POSSIBLE_DISCONNECTED_NODE = possible_disconnect_node
@@ -85,6 +70,8 @@ class Mischief:
             Mischief.ITER = iter_para
         else:
             Mischief.ITER += 1
+        if Mischief.DDP_TRIGGER or Mischief.FACTOR_COMM_TRIGGER or Mischief.INVERSE_COMM_TRIGGER == False: 
+            return
         for rank, node in self.nodes.items():
             if node.disconnect_start_time == Mischief.ITER: # 如果满了推迟到下一次
                 if len(Mischief.DISCONNECTING_NODES)+1 > Mischief.MAX_DISCONNECTED_NODE_NUM:
@@ -99,7 +86,7 @@ class Mischief:
             return True
         return self.nodes[rank].is_connected
 
-MischiefHelper = Mischief(possible_disconnect_node=[1,2,3])
+MischiefHelper = Mischief()
 
 log_once = dict()
 

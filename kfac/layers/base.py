@@ -16,7 +16,7 @@ from kfac.layers.modules import ModuleHelper
 
 #import kfac.mischief2 as mischief
 
-from kfac.mischief2 import MischiefHelper, Mischief
+from kfac.mischief2 import MischiefHelper, Mischief ,easy_log_once
 
 class KFACBaseLayer:
     """KFAC base layer implementation.

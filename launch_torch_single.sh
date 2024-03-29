@@ -13,10 +13,14 @@ OMPI_RANK=$OMPI_COMM_WORLD_RANK
 if [ "$OMPI_COMM_WORLD_RANK" -eq 0 ]; then
     # 获取主节点的网络地址
     NET_ADDR=$(hostname -I | awk '{print $1}')
+    if [ -f $SHAREDFILE ]; then
+        rm $SHAREDFILE
+    fi
     # 将网络地址写入共享文件
     echo $NET_ADDR > $SHAREDFILE
 else
     # 等待主节点地址文件被创建
+    sleep 1
     while [ ! -f $SHAREDFILE ]
     do
       sleep 1

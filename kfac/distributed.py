@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 
 #import kfac.mischief2 as mischief
-from kfac.mischief2 import MischiefHelper,Mischief
+from kfac.mischief2 import MischiefHelper,Mischief,easy_log_once
 
 try:
     import apex_C  # type: ignore
@@ -277,12 +277,12 @@ class TorchDistributedCommunicator:
         """
         ### disconnection in inverse boardcast
         if Mischief.INVERSE_COMM_TRIGGER and not MischiefHelper.is_connected_in(src):
-            #mischief.easy_log(f"do not boradcast from {src}",[0,1])
+            easy_log_once(f"do not boradcast from {src}")
             return tensor
 
         clone_tensor = None
         if Mischief.INVERSE_COMM_TRIGGER and not MischiefHelper.is_connected_in(dist.get_rank()):
-            #mischief.easy_log(f"broadcast without {dist.get_rank()}",[0,1])
+            easy_log_once(f"broadcast without {dist.get_rank()}")
             clone_tensor = torch.clone(tensor)
 
         if get_world_size(group) == 1:
