@@ -46,12 +46,14 @@ def main():
     # Set up DDP environment
     timeout = datetime.timedelta(seconds=20)
     dist.init_process_group('nccl',timeout=timeout)
-    #torch.set_default_device("cuda:0")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if not dist.is_initialized():
         return
     rank = dist.get_rank()
     world_size = dist.get_world_size()
+    mischief.mischief_init(world_size=world_size, possible_disconnect_node=[0, 1, 2, 3],
+                           max_disconnect_iter=3, disconnect_ratio=0.2, max_disconnected_node_num=3,
+                           ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
     if rank == 0:
         # set logging level NOTSET to enable all logging
         logging.basicConfig(level=logging.NOTSET)
@@ -71,25 +73,20 @@ def main():
 
     # Define the model, loss function, and optimizer
 
-    Mischief.DDP_TRIGGER = True
-    Mischief.WORLD_SIZE = dist.get_world_size()
-    Mischief.DISCONNECT_RATIO = 0.5
-    Mischief.MAX_DISCONNECTED_NODE_NUM = 2
-    Mischief.MAX_DISCONNECT_ITER = 5
-    MischiefHelper.contruct_node_status([1,2,3])
-
     model = MLP().to(device)
     model = DDP(model)
-    add_hook_to_model(model)
+    mischief.add_hook_to_model(model)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
-    preconditioner = None #kfac.preconditioner.KFACPreconditioner(model)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model)
     dist.barrier()
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/experiments/runs3/fashion_mnist_experiment_sgd_sick_{timestamp}/{dist.get_rank()}")
+
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
+        """
         if epoch+1 % 10 == 0:
             node_list = set(range(world_size))
             node_list -= Mischief.DISCONNECTING_NODES
@@ -101,7 +98,9 @@ def main():
             # 然后平均化
                 param.data /= dist.get_world_size(group=new_pg)
             dist.destroy_process_group(group=new_pg)
+        """
         test(model,test_loader,epoch,writer)
+
     dist.destroy_process_group()
 
 def train(model, train_loader,train_sampler, criterion, optimizer ,preconditioner,epoch,writer):
@@ -116,12 +115,12 @@ def train(model, train_loader,train_sampler, criterion, optimizer ,preconditione
         for batch_idx, (data, target) in enumerate(train_loader):
             data = data.cuda()
             target = target.cuda()
-            MischiefHelper.update_iter()
+            mischief.update_iter()
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
-            #preconditioner.step()
+            preconditioner.step()
             optimizer.step()
             t.update()
         if writer is not None:
