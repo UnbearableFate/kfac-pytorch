@@ -12,9 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import logging
 import kfac
-#import kfac.mischief as mischief
-
-from kfac.mischief2 import Mischief, MischiefHelper , add_hook_to_model ,close_all
+import kfac.mischief as mischief
 
 epochs = 100
 batch_size = 128
@@ -108,7 +106,7 @@ def train(model, train_loader,train_sampler, criterion, optimizer ,preconditione
         for batch_idx, (data, target) in enumerate(train_loader):
             data = data.cuda()
             target = target.cuda()
-            MischiefHelper.update_iter()
+            update_iter()
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)

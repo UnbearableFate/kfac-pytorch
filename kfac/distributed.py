@@ -8,8 +8,7 @@ from typing import Union
 import torch
 import torch.distributed as dist
 
-#import kfac.mischief2 as mischief
-from kfac.mischief2 import MischiefHelper,Mischief,easy_log_once
+import kfac.mischief as mischief
 
 try:
     import apex_C  # type: ignore
@@ -276,13 +275,13 @@ class TorchDistributedCommunicator:
                 if symmetric is True and tensor is not a 2D square tensor.
         """
         ### disconnection in inverse boardcast
-        if Mischief.INVERSE_COMM_TRIGGER and not MischiefHelper.is_connected_in(src):
-            easy_log_once(f"do not boradcast from {src}")
+        if mischief.INVERSE_COMM_TRIGGER and mischief.is_sick_at(src):
+            mischief.easy_log_once(f"do not boradcast from {src}")
             return tensor
 
         clone_tensor = None
-        if Mischief.INVERSE_COMM_TRIGGER and not MischiefHelper.is_connected_in(dist.get_rank()):
-            easy_log_once(f"broadcast without {dist.get_rank()}")
+        if mischief.INVERSE_COMM_TRIGGER and mischief.is_sick_at(dist.get_rank()):
+            mischief.easy_log_once(f"broadcast without {dist.get_rank()}")
             clone_tensor = torch.clone(tensor)
 
         if get_world_size(group) == 1:
@@ -428,7 +427,7 @@ def get_world_size(group: dist.ProcessGroup | None = None) -> int:
         initialized.
     """
     if dist.is_initialized():
-        return MischiefHelper.get_connnecting_world_size()
+        return mischief.get_connnecting_world_size()
         #return dist.get_world_size(group)
     else:
         return 1
