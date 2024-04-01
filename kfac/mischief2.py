@@ -90,7 +90,7 @@ MischiefHelper = Mischief()
 
 log_once = dict()
 
-def close_all():
+def open_all():
     Mischief.DDP_TRIGGER = False
     Mischief.FACTOR_COMM_TRIGGER = False
     Mischief.INVERSE_COMM_TRIGGER = False
@@ -109,7 +109,7 @@ def easy_log_once(words, rank=0):
         log_once[words] = 1
 
 def all_reduce_with_disconnected(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
-    if MischiefHelper.is_connected_in(dist.get_rank()):
+    if not MischiefHelper.is_connected_in(dist.get_rank()):
         easy_log_once("ddp miss", rank=1)
         dist.all_reduce(tensor=torch.zeros_like(bucket.buffer()), async_op=True)
         fut = torch.futures.Future()

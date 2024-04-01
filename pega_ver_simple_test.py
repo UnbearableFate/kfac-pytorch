@@ -11,10 +11,8 @@ from torchvision import datasets, transforms
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import logging
-import kfac
-#import kfac.mischief as mischief
-
-from kfac.mischief2 import Mischief, MischiefHelper , add_hook_to_model ,close_all
+#import kfac
+from kfac.mischief2 import Mischief, MischiefHelper , add_hook_to_model
 
 epochs = 100
 batch_size = 128
@@ -67,33 +65,43 @@ def main():
     test_sampler = DistributedSampler(test_dataset,num_replicas=dist.get_world_size(),rank=dist.get_rank())
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=(train_sampler is None),
-                                               sampler=train_sampler, num_workers=2)
+                                               sampler=train_sampler, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, sampler=test_sampler,
-                                              num_workers=2)
+                                              num_workers=4)
 
     # Define the model, loss function, and optimizer
-    """
-    Mischief.DDP_TRIGGER = False
+    
+    Mischief.DDP_TRIGGER = True
     Mischief.WORLD_SIZE = dist.get_world_size()
-    Mischief.DISCONNECT_RATIO = 0.4
+    Mischief.DISCONNECT_RATIO = 0.5
     Mischief.MAX_DISCONNECTED_NODE_NUM = 2
-    Mischief.MAX_DISCONNECT_ITER = 3
+    Mischief.MAX_DISCONNECT_ITER = 5
     MischiefHelper.contruct_node_status([1,2,3])
-    """
-    close_all()
+    
     model = MLP().to(device)
-    model = DDP(model) 
-    #add_hook_to_model(model)
+    model = DDP(model)
+    add_hook_to_model(model)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model)
+    preconditioner = None #kfac.preconditioner.KFACPreconditioner(model)
     dist.barrier()
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/experiments/runs2/fashion_mnist_experiment_normal_{timestamp}/{dist.get_rank()}")
+    writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/experiments/runs3/fashion_mnist_experiment_sgd_sick_{timestamp}/{dist.get_rank()}")
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
-
+        if epoch+1 % 10 == 0:
+            node_list = set(range(world_size))
+            node_list -= Mischief.DISCONNECTING_NODES
+            new_pg = dist.new_group(list(node_list))
+            for param in model.parameters():
+            # 使用all_reduce来计算所有节点的参数和
+                print(f"epoch {epoch} ,allreduce : {param.names}")
+                dist.all_reduce(param.data, op=dist.ReduceOp.SUM,group=new_pg)
+            # 然后平均化
+                param.data /= dist.get_world_size(group=new_pg)
+            dist.destroy_process_group(group=new_pg)
+        test(model,test_loader,epoch,writer)
     dist.destroy_process_group()
 
 def train(model, train_loader,train_sampler, criterion, optimizer ,preconditioner,epoch,writer):
@@ -113,29 +121,27 @@ def train(model, train_loader,train_sampler, criterion, optimizer ,preconditione
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
-            preconditioner.step()
+            #preconditioner.step()
             optimizer.step()
             t.update()
         if writer is not None:
-            writer.add_scalar('Loss/train', loss.item(), epoch+1)
+            writer.add_scalar('Loss/train', loss.item(), epoch)
     
     # Testing function
-def test(model, test_loader, criterion, epoch,writer):
+def test(model, test_loader,epoch,writer):
     model.eval()
-    test_loss = 0
     correct = 0
+    total = 0
     with torch.no_grad():
         for data, target in test_loader:
-            data, target = data, target
+            data, target = data.cuda(), target.cuda()
             output = model(data)
-            test_loss += criterion(output, target).item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
+            total += target.size(0)
 
-    # save loss/epoch into tensorboard
-    test_loss /= len(test_loader.dataset)
-    if dist.get_rank() == 0:
-        writer.add_scalar('Loss/test', test_loss, epoch)
+    accuracy = correct / total
+    writer.add_scalar('Precision/test', accuracy, epoch)
 
 if __name__ == '__main__':
     main()
