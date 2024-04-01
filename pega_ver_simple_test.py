@@ -11,8 +11,8 @@ from torchvision import datasets, transforms
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import logging
-#import kfac
-from kfac.mischief2 import Mischief, MischiefHelper , add_hook_to_model
+import kfac
+import kfac.mischief as mischief
 
 epochs = 100
 batch_size = 128
@@ -70,14 +70,14 @@ def main():
                                               num_workers=4)
 
     # Define the model, loss function, and optimizer
-    
+
     Mischief.DDP_TRIGGER = True
     Mischief.WORLD_SIZE = dist.get_world_size()
     Mischief.DISCONNECT_RATIO = 0.5
     Mischief.MAX_DISCONNECTED_NODE_NUM = 2
     Mischief.MAX_DISCONNECT_ITER = 5
     MischiefHelper.contruct_node_status([1,2,3])
-    
+
     model = MLP().to(device)
     model = DDP(model)
     add_hook_to_model(model)

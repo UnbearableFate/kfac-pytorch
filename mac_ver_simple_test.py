@@ -11,12 +11,11 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import logging
 import kfac
-#import kfac.mischief as mischief
 
-from kfac.mischief2 import Mischief, MischiefHelper , add_hook_to_model
+import kfac.mischief as mischief
 
-epochs = 3
-batch_size = 16
+epochs = 1
+batch_size = 32
 class MLP(nn.Module):
     def __init__(self):
         super(MLP, self).__init__()
@@ -44,13 +43,15 @@ class MLP(nn.Module):
         return self.layers(x)
 
 def main():
-
     # Set up DDP environment
     dist.init_process_group('gloo')
     if not dist.is_initialized():
         return
     rank = dist.get_rank()
     world_size = dist.get_world_size()
+    mischief.mischief_init(world_size=world_size,possible_disconnect_node=[0,1,2,3],
+                           max_disconnect_iter=3,disconnect_ratio=0.2,max_disconnected_node_num=3,
+                           ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
     if rank == 0:
         # set logging level NOTSET to enable all logging
         logging.basicConfig(level=logging.NOTSET)
@@ -71,17 +72,12 @@ def main():
     # Define the model, loss function, and optimizer
     model = MLP()
     model = DDP(model)
-    add_hook_to_model(model)
+    mischief.add_hook_to_model(model)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
-    MischiefHelper.contruct_node_status([1,2])
-    Mischief.WORLD_SIZE = dist.get_world_size()
     preconditioner = kfac.preconditioner.KFACPreconditioner(model)
     dist.barrier()
-    if rank == 0:
-        writer = SummaryWriter(log_dir=f"runs/fashion_mnist_experiment/{dist.get_rank()}")
-    else:
-        writer = None
+    writer = SummaryWriter(log_dir=f"runs/fashion_mnist_experiment/{dist.get_rank()}")
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
 
@@ -95,15 +91,15 @@ def train(model, train_loader,train_sampler, criterion, optimizer ,preconditione
         disable= (dist.get_rank() != 0)
     ) as t:
         for batch_idx, (data, target) in enumerate(train_loader):
-            MischiefHelper.update_iter()
+            mischief.update_iter()
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
             preconditioner.step()
             optimizer.step()
-            if writer is not None and batch_idx %20 == 0:
-                writer.add_scalar('Loss/train', loss.item(), epoch*len(train_loader)+batch_idx)
+            if batch_idx % 10 == 0:
+                mischief.print_node_status()
             t.update()
 
     # Testing function
