@@ -14,7 +14,7 @@ import logging
 import kfac
 import kfac.mischief as mischief
 
-epochs = 100
+epochs = 20
 batch_size = 128
 class MLP(nn.Module):
     def __init__(self):
@@ -53,7 +53,7 @@ def main():
     world_size = dist.get_world_size()
     mischief.mischief_init(world_size=world_size, possible_disconnect_node=[0, 1, 2, 3],
                            max_disconnect_iter=7, disconnect_ratio=0.2, max_disconnected_node_num=3,
-                           ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
+                           ddp_trigger=False, factor_comm_trigger=False, inverse_comm_trigger=False)
     if rank == 0:
         # set logging level NOTSET to enable all logging
         logging.basicConfig(level=logging.NOTSET)
@@ -86,7 +86,7 @@ def main():
 
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
-        mischief.average_health_nodes_param2(model,epoch)
+        #mischief.average_health_nodes_param2(model,epoch)
         test(model,test_loader,epoch,writer)
 
     dist.destroy_process_group()

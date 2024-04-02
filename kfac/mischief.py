@@ -193,7 +193,7 @@ def add_hook_to_model(model):
     model.register_comm_hook(state=None, hook=all_reduce_with_disconnected)
 
 
-def reduce_a_factor_with_sick(self, group: dist.ProcessGroup | None = None) -> bool:
+def reduce_a_factor_with_sick(self, group: dist.ProcessGroup) -> bool:
     """Initiate reduction of A and store future to result.
 
     Note:
@@ -228,7 +228,7 @@ def reduce_a_factor_with_sick(self, group: dist.ProcessGroup | None = None) -> b
     return True
 
 
-def reduce_g_factor_with_sick(self, group: dist.ProcessGroup | None = None) -> bool:
+def reduce_g_factor_with_sick(self, group: dist.ProcessGroup) -> bool:
     """Initiate reduction of G and store future to result.
 
     Note:
@@ -267,9 +267,9 @@ def broadcast_with_sick(
     tensor: torch.Tensor,
     *,
     src: int,
-    group: dist.ProcessGroup | None = None,
+    group: dist.ProcessGroup,
     symmetric: bool = False
-) :
+):
     """Broadcast tensor from src to all other workers asynchronously.
 
     Args:
