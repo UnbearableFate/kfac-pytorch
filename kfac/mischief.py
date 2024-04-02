@@ -124,6 +124,38 @@ def print_node_status():
     for rank, node in POSSIBLE_DISCONNECTED_NODE.items():
         print(node)
 
+def get_health_nodes():
+    health_nodes = [i for i in range(WORLD_SIZE)]
+    for rank, node in POSSIBLE_DISCONNECTED_NODE.items():
+        if not node.is_connected:
+            health_nodes.remove(rank)
+    return health_nodes
+
+
+def average_health_nodes_param(model,epoch):
+    if epoch % 2 == 0:
+        new_pg = dist.new_group(get_health_nodes())
+        if dist.get_rank() == 0:
+            print(f"epoch {epoch} ,health nodes : {get_health_nodes()}")
+        for param in model.parameters():
+        # 使用all_reduce来计算所有节点的参数和
+            #print(f"epoch {epoch} ,allreduce : {param.names}")
+            dist.all_reduce(param.data, op=dist.ReduceOp.SUM,group=new_pg)
+        # 然后平均化
+            param.data /= dist.get_world_size(group=new_pg)
+        dist.destroy_process_group(group=new_pg)
+
+def average_health_nodes_param2(model,epoch):
+    if epoch % 2 == 0:
+        for param in model.parameters():
+            health_nodes = get_health_nodes()
+            if dist.get_rank() in health_nodes:
+                dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+            else:
+                dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
+        # 然后平均化
+            param.data /= len(health_nodes)
+
 log_once = dict()
 
 def easy_log(words:str, ranks:list):

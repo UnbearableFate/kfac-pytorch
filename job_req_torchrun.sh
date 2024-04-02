@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #PBS -A NBB
-#PBS -q gpu_low
+#PBS -q gpu
 #PBS -T openmpi
 #PBS -b 8
 #PBS -l elapstim_req=00:10:00

@@ -52,7 +52,7 @@ def main():
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     mischief.mischief_init(world_size=world_size, possible_disconnect_node=[0, 1, 2, 3],
-                           max_disconnect_iter=3, disconnect_ratio=0.2, max_disconnected_node_num=3,
+                           max_disconnect_iter=7, disconnect_ratio=0.2, max_disconnected_node_num=3,
                            ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
     if rank == 0:
         # set logging level NOTSET to enable all logging
@@ -82,23 +82,11 @@ def main():
     dist.barrier()
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/experiments/runs3/fashion_mnist_experiment_sgd_sick_{timestamp}/{dist.get_rank()}")
+    writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/fashion_mnist_experiment_all_sick_{timestamp}/{dist.get_rank()}")
 
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
-        """
-        if epoch+1 % 10 == 0:
-            node_list = set(range(world_size))
-            node_list -= Mischief.DISCONNECTING_NODES
-            new_pg = dist.new_group(list(node_list))
-            for param in model.parameters():
-            # 使用all_reduce来计算所有节点的参数和
-                print(f"epoch {epoch} ,allreduce : {param.names}")
-                dist.all_reduce(param.data, op=dist.ReduceOp.SUM,group=new_pg)
-            # 然后平均化
-                param.data /= dist.get_world_size(group=new_pg)
-            dist.destroy_process_group(group=new_pg)
-        """
+        mischief.average_health_nodes_param2(model,epoch)
         test(model,test_loader,epoch,writer)
 
     dist.destroy_process_group()
