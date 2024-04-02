@@ -51,7 +51,7 @@ def main():
     world_size = dist.get_world_size()
     mischief.mischief_init(world_size=world_size,possible_disconnect_node=[0,1,2,3],
                            max_disconnect_iter=3,disconnect_ratio=0.2,max_disconnected_node_num=3,
-                           ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
+                           ddp_trigger=False, factor_comm_trigger=False, inverse_comm_trigger=False)
     if rank == 0:
         # set logging level NOTSET to enable all logging
         logging.basicConfig(level=logging.NOTSET)
@@ -98,8 +98,6 @@ def train(model, train_loader,train_sampler, criterion, optimizer ,preconditione
             loss.backward()
             preconditioner.step()
             optimizer.step()
-            if batch_idx % 10 == 0:
-                mischief.print_node_status()
             t.update()
 
     # Testing function

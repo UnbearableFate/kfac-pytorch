@@ -290,6 +290,8 @@ class KFACBaseLayer:
                 operation. All ranks in the group should enter this function.
                 Defaults to None, the default process group.
         """
+        if mischief.reduce_a_factor_with_sick(self, group): return
+        mischief.easy_log_once("ok a factor comm", rank=dist.get_rank())
         if self.a_factor is None:
             raise RuntimeError('a_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:
@@ -300,21 +302,12 @@ class KFACBaseLayer:
             raise AssertionError(
                 f'Unknown allreduce_method={self.allreduce_method}',
             )
-        ### disconnection in reduce_a_factor
-        if mischief.FACTOR_COMM_TRIGGER and mischief.is_sick_at(dist.get_rank()):
-            allreduce(  # type: ignore
-                torch.zeros_like(self.a_factor),
-                average=True,
-                symmetric=self.symmetric_factors and self.symmetry_aware,
-                group=group,
-            )
-        else:
-            self.a_factor = allreduce(  # type: ignore
-                self.a_factor,
-                average=True,
-                symmetric=self.symmetric_factors and self.symmetry_aware,
-                group=group,
-            )
+        self.a_factor = allreduce(  # type: ignore
+            self.a_factor,
+            average=True,
+            symmetric=self.symmetric_factors and self.symmetry_aware,
+            group=group,
+        )
 
     def reduce_g_factor(self, group: dist.ProcessGroup | None = None) -> None:
         """Initiate reduction of G and store future to result.
@@ -327,6 +320,8 @@ class KFACBaseLayer:
                 operation. All ranks in the group should enter this function.
                 Defaults to None, the default process group.
         """
+        if mischief.reduce_g_factor_with_sick(self, group): return
+        mischief.easy_log_once("ok g factor comm", rank=dist.get_rank())
         if self.g_factor is None:
             raise RuntimeError('g_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:
@@ -337,22 +332,12 @@ class KFACBaseLayer:
             raise AssertionError(
                 f'Unknown allreduce_method={self.allreduce_method}',
             )
-        
-        ### disconnection in reduce_g_factor
-        if mischief.FACTOR_COMM_TRIGGER and not mischief.is_sick_at(dist.get_rank()):
-            allreduce(  # type: ignore
-                torch.zeros_like(self.g_factor),
-                average=True,
-                symmetric=self.symmetric_factors and self.symmetry_aware,
-                group=group,
-            )
-        else:
-            self.g_factor = allreduce(  # type: ignore
-                self.g_factor,
-                average=True,
-                symmetric=self.symmetric_factors and self.symmetry_aware,
-                group=group,
-            )
+        self.g_factor = allreduce(  # type: ignore
+            self.g_factor,
+            average=True,
+            symmetric=self.symmetric_factors and self.symmetry_aware,
+            group=group,
+        )
 
     def reset_batch(self) -> None:
         """Clears current buffers for A and G."""

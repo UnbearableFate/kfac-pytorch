@@ -3,6 +3,7 @@ import random
 
 import torch.distributed as dist
 import torch
+from kfac.enums import AllreduceMethod
 
 class NodeStatus:
     def __init__(self,rank,discon_start_time = -1):
@@ -174,7 +175,7 @@ def easy_log_once(words, rank=0):
 
 def all_reduce_with_disconnected(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
     if is_sick_at(dist.get_rank()):
-        easy_log_once("ddp miss", rank=1)
+        easy_log_once("ddp miss", rank=dist.get_rank())
         dist.all_reduce(tensor=torch.zeros_like(bucket.buffer()), async_op=True)
         fut = torch.futures.Future()
         fut.set_result(bucket.buffer())
@@ -190,3 +191,146 @@ def add_hook_to_model(model):
     if not DDP_TRIGGER:
         return
     model.register_comm_hook(state=None, hook=all_reduce_with_disconnected)
+
+
+def reduce_a_factor_with_sick(self, group: dist.ProcessGroup | None = None) -> bool:
+    """Initiate reduction of A and store future to result.
+
+    Note:
+        all ranks should enter this function.
+
+    Args:
+        group (ProcessGroup): process group to use for the reduce
+            operation. All ranks in the group should enter this function.
+            Defaults to None, the default process group.
+    """
+    if not (FACTOR_COMM_TRIGGER and is_sick_at(dist.get_rank())):
+        return False
+    easy_log_once("sick a factor comm", rank=dist.get_rank())
+    if self.a_factor is None:
+        raise RuntimeError('a_factor is None, cannot reduce')
+    if self.allreduce_method == AllreduceMethod.ALLREDUCE:
+        allreduce = self.tdc.allreduce
+    elif self.allreduce_method == AllreduceMethod.ALLREDUCE_BUCKETED:
+        allreduce = self.tdc.allreduce_bucketed
+    else:
+        raise AssertionError(
+            f'Unknown allreduce_method={self.allreduce_method}',
+        )
+    ### disconnection in reduce_a_factor
+    allreduce(  # type: ignore
+        torch.zeros_like(self.a_factor),
+        average=True,
+        symmetric=self.symmetric_factors and self.symmetry_aware,
+        group=group,
+    )
+
+    return True
+
+
+def reduce_g_factor_with_sick(self, group: dist.ProcessGroup | None = None) -> bool:
+    """Initiate reduction of G and store future to result.
+
+    Note:
+        all ranks should enter this function.
+
+    Args:
+        group (ProcessGroup): process group to use for the reduce
+            operation. All ranks in the group should enter this function.
+            Defaults to None, the default process group.
+    """
+    if not (FACTOR_COMM_TRIGGER and is_sick_at(dist.get_rank())):
+        return False
+    easy_log_once("sick g factor comm", rank=dist.get_rank())
+    if self.g_factor is None:
+        raise RuntimeError('g_factor is None, cannot reduce')
+    if self.allreduce_method == AllreduceMethod.ALLREDUCE:
+        allreduce = self.tdc.allreduce
+    elif self.allreduce_method == AllreduceMethod.ALLREDUCE_BUCKETED:
+        allreduce = self.tdc.allreduce_bucketed
+    else:
+        raise AssertionError(
+            f'Unknown allreduce_method={self.allreduce_method}',
+        )
+    allreduce(  # type: ignore
+        torch.zeros_like(self.g_factor),
+        average=True,
+        symmetric=self.symmetric_factors and self.symmetry_aware,
+        group=group,
+    )
+
+    return True
+
+
+def broadcast_with_sick(
+    NonSquareTensorError, get_triu, fill_triu, get_world_size,
+    tensor: torch.Tensor,
+    *,
+    src: int,
+    group: dist.ProcessGroup | None = None,
+    symmetric: bool = False
+) :
+    """Broadcast tensor from src to all other workers asynchronously.
+
+    Args:
+        tensor (torch.Tensor): tensor for broadcast.
+        src (int): rank of worker with src tensor.
+        group (torch.distributed.ProcessGroup): optional process group
+            to perform communication within.
+        symmetric (bool): communicate symmetric tensor using upper
+            triangle.
+
+    Returns:
+        Future to tensor. Tensor can be retrieved with `future.wait()`.
+        The returned tensor buffer may be different from the input buffer
+        depending on the bucketing configuration.
+
+        If group size is 1, no communication is performed and the tensor
+        is returned.
+
+    Raises:
+        NonSquareTensorError:
+            if symmetric is True and tensor is not a 2D square tensor.
+    """
+    if (not INVERSE_COMM_TRIGGER) and (not is_sick_at(dist.get_rank() and not is_sick_at(src))):
+        return None
+
+    if is_sick_at(src):
+        easy_log_once(f"can not get boradcast from {src}",dist.get_rank())
+        return tensor
+
+    clone_tensor = None
+    if is_sick_at(dist.get_rank()):
+        easy_log_once(f"broadcast without {dist.get_rank()} from {src}",dist.get_rank())
+        clone_tensor = torch.clone(tensor)
+
+    if get_world_size(group) == 1:
+        return tensor
+    shape = tensor.size()
+    if symmetric:
+        if len(shape) != 2 or shape[0] != shape[1]:
+            raise NonSquareTensorError(
+                'Symmetric communication can only be done with a 2D '
+                f'square tensor. Got tensor with shape {shape}.',
+            )
+        tensor = get_triu(tensor)
+    tensor = tensor.contiguous()
+    future = dist.broadcast(
+        tensor,
+        src=src,
+        group=group,
+        async_op=True,
+    ).get_future()
+    if symmetric:
+        future = future.then(  # pragma: no cover
+            lambda fut: fill_triu(shape, fut.value()[0]),
+        )
+    else:
+        future = future.then(  # pragma: no cover
+            lambda fut: fut.value()[0],
+        )
+    ### disconnection in inverse boardcast
+    if clone_tensor is not None:
+        future.wait()
+        return clone_tensor
+    return future

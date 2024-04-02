@@ -274,16 +274,11 @@ class TorchDistributedCommunicator:
             NonSquareTensorError:
                 if symmetric is True and tensor is not a 2D square tensor.
         """
-        ### disconnection in inverse boardcast
-        if mischief.INVERSE_COMM_TRIGGER and mischief.is_sick_at(src):
-            mischief.easy_log_once(f"do not boradcast from {src}")
-            return tensor
+        if (result := mischief.broadcast_with_sick(NonSquareTensorError, get_triu, fill_triu, get_world_size,
+                                                  tensor= tensor,src= src,group= group,symmetric=symmetric)) is not None:
+            return result
 
-        clone_tensor = None
-        if mischief.INVERSE_COMM_TRIGGER and mischief.is_sick_at(dist.get_rank()):
-            mischief.easy_log_once(f"broadcast without {dist.get_rank()}")
-            clone_tensor = torch.clone(tensor)
-
+        mischief.easy_log_once("broadcast ok",dist.get_rank())
         if get_world_size(group) == 1:
             return tensor
         shape = tensor.size()
@@ -309,10 +304,6 @@ class TorchDistributedCommunicator:
             future = future.then(  # pragma: no cover
                 lambda fut: fut.value()[0],
             )
-        ### disconnection in inverse boardcast 
-        if clone_tensor is not None:
-            future.wait()
-            return clone_tensor
         return future
 
     def allreduce_bucketed(
