@@ -13,7 +13,7 @@ from tqdm import tqdm
 import logging
 import kfac
 import kfac.mischief as mischief
-from my_module.custom_resnet import CustomResNet18, transform
+#from my_module.custom_resnet import CustomResNet18, transform
 
 epochs = 1
 batch_size = 128
@@ -22,6 +22,33 @@ gpu = torch.device("cuda:0")
 DATA_DIR = "/home/yu/data"
 
 LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs"
+
+class MLP(nn.Module):
+    transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    def __init__(self):
+        super(MLP, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(28*28, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 10),
+            nn.Softmax(dim=1)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
 
 def main():
     # Set up DDP environment
@@ -36,7 +63,7 @@ def main():
         logging.basicConfig(level=logging.NOTSET)
 
     # Load the FashionMNIST dataset
-    #transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
     train_dataset = datasets.FashionMNIST(os.path.join(DATA_DIR,'FashionMNIST'), train=True, download=False, transform=transform)
     test_dataset = datasets.FashionMNIST(os.path.join(DATA_DIR,'FashionMNIST'), train=False, download=False, transform=transform)
 
@@ -58,7 +85,7 @@ def main():
 
     # Define the model, loss function, and optimizer
 
-    model = CustomResNet18().to(gpu)
+    model = MLP().to(gpu)
     model = DDP(model)
     mischief.add_hook_to_model(model)
     criterion = nn.CrossEntropyLoss()
@@ -67,7 +94,7 @@ def main():
     dist.barrier()
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    writer = SummaryWriter(log_dir= os.path.join(LOG_DIR,f"fashion_minist_resnet18/fashion_mnist_experiment_{timestamp}/{dist.get_rank()}"))
+    writer = SummaryWriter(log_dir= os.path.join(LOG_DIR,f"fashion_minist_mlp8/fashion_mnist_experiment_{timestamp}/{dist.get_rank()}"))
 
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
