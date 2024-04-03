@@ -77,7 +77,7 @@ def mischief_init(world_size, max_disconnected_node_num=3,
             raise ValueError("possible disconnect node out of world size")
         contruct_node_status(possible_disconnect_node)
     else:
-        contruct_node_status([i for i in range(world_size-1)])
+        contruct_node_status([i for i in range(world_size)])
 
     DDP_TRIGGER = ddp_trigger
     FACTOR_COMM_TRIGGER = factor_comm_trigger
@@ -146,16 +146,25 @@ def average_health_nodes_param(model,epoch):
             param.data /= dist.get_world_size(group=new_pg)
         dist.destroy_process_group(group=new_pg)
 
+def normalizer_sick_nodes_param():
+    weight_sum = WORLD_SIZE - DISCONNECT_RATIO * len(POSSIBLE_DISCONNECTED_NODE)
+    return  (1- DISCONNECT_RATIO) / weight_sum
+
+def normalizer_health_nodes_param(data):
+    weight_sum = WORLD_SIZE - DISCONNECT_RATIO * len(POSSIBLE_DISCONNECTED_NODE)
+    return 1 / weight_sum
+
 def average_health_nodes_param2(model,epoch):
-    if epoch % 2 == 0:
+    if epoch % 1 == 0:
+        health_nodes = get_health_nodes()
+        if dist.get_rank() == 0:
+            print(f"epoch {epoch} ,health nodes : {health_nodes}")
         for param in model.parameters():
-            health_nodes = get_health_nodes()
             if dist.get_rank() in health_nodes:
-                dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+                dist.all_reduce(param.data, op=dist.ReduceOp.SUM,async_op=True).result()
+                param.data /= len(health_nodes)
             else:
                 dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
-        # 然后平均化
-            param.data /= len(health_nodes)
 
 log_once = dict()
 

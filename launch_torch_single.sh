@@ -32,8 +32,7 @@ fi
 torchrun --nproc_per_node=1 --nnodes=$OMPI_SIZE --node_rank=$OMPI_RANK \
  --rdzv-id=001 --rdzv-backend=c10d \
  --rdzv_endpoint=$NET_ADDR:29511 \
- /work/NBB/yu_mingzhe/kfac-pytorch/pega_ver_simple_test.py
-
+ /work/NBB/yu_mingzhe/kfac-pytorch/pg_resnet34_fashion_minst.py
 # 如果是主节点，删除共享文件
 if [ "$OMPI_COMM_WORLD_RANK" -eq 0 ]; then
     rm $SHAREDFILE

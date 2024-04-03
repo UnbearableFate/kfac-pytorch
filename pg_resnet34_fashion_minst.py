@@ -13,34 +13,10 @@ from tqdm import tqdm
 import logging
 import kfac
 import kfac.mischief as mischief
+from my_module.custom_resnet import CustomResNet34, transform
 
 epochs = 20
-batch_size = 128
-class MLP(nn.Module):
-    def __init__(self):
-        super(MLP, self).__init__()
-        self.layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(28*28, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, 10),
-            nn.Softmax(dim=1)
-        )
-
-    def forward(self, x):
-        return self.layers(x)
+batch_size = 256
 
 def main():
     # Set up DDP environment
@@ -56,7 +32,7 @@ def main():
         logging.basicConfig(level=logging.NOTSET)
 
     # Load the FashionMNIST dataset
-    transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    #transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
     train_dataset = datasets.FashionMNIST('/work/NBB/yu_mingzhe/kfac-pytorch/data/FashionMNIST', train=True, download=False, transform=transform)
     test_dataset = datasets.FashionMNIST('/work/NBB/yu_mingzhe/kfac-pytorch/data/FashionMNIST', train=False, download=False, transform=transform)
 
@@ -78,7 +54,7 @@ def main():
 
     # Define the model, loss function, and optimizer
 
-    model = MLP().to(device)
+    model = CustomResNet34().to(device)
     model = DDP(model)
     mischief.add_hook_to_model(model)
     criterion = nn.CrossEntropyLoss()
@@ -87,7 +63,7 @@ def main():
     dist.barrier()
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/fashion_minist_MLP8/fashion_mnist_experiment_{timestamp}/{dist.get_rank()}")
+    writer = SummaryWriter(log_dir=f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/fashion_minist_resnet34/fashion_mnist_experiment_{timestamp}/{dist.get_rank()}")
 
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
