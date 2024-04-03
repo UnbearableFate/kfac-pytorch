@@ -15,6 +15,18 @@ class CustomResNet34(nn.Module):
     def forward(self, x):
         return self.resnet34(x)
 
+class CustomResNet18(nn.Module):
+    def __init__(self, num_classes=10):
+        super(CustomResNet18, self).__init__()
+        # 加载预训练的resnet18模型
+        self.resnet18 = models.resnet18()
+        # 替换最后的全连接层以匹配FashionMNIST的10个类别
+        num_ftrs = self.resnet18.fc.in_features
+        self.resnet18.fc = nn.Linear(num_ftrs, num_classes)
+
+    def forward(self, x):
+        return self.resnet18(x)
+
 # 定义数据转换
 transform = transforms.Compose([
     transforms.Resize((224, 224)),  # 将图像调整为224x224

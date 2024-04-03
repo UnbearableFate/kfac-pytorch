@@ -61,11 +61,15 @@ SICK_NODES_NUM = 0
 
 WORLD_SIZE = 8
 
+sick_weight_magnification_ratio = 1
+health_weight_magnification_ratio = 1
+
 def mischief_init(world_size, max_disconnected_node_num=3,
                   max_disconnect_iter=3, disconnect_ratio=0.2,possible_disconnect_node=[],
                   ddp_trigger=False, factor_comm_trigger=False, inverse_comm_trigger=False,seed = 12):
     global WORLD_SIZE, MAX_DISCONNECTED_NODE_NUM, MAX_DISCONNECT_ITER, DISCONNECT_RATIO
     global DDP_TRIGGER,FACTOR_COMM_TRIGGER,INVERSE_COMM_TRIGGER
+    global sick_weight_magnification_ratio, health_weight_magnification_ratio
 
     random.seed(seed)
     WORLD_SIZE = world_size
@@ -82,6 +86,10 @@ def mischief_init(world_size, max_disconnected_node_num=3,
     DDP_TRIGGER = ddp_trigger
     FACTOR_COMM_TRIGGER = factor_comm_trigger
     INVERSE_COMM_TRIGGER = inverse_comm_trigger
+
+    if len(POSSIBLE_DISCONNECTED_NODE) != world_size and len(POSSIBLE_DISCONNECTED_NODE) != 0:
+        health_weight_magnification_ratio =  WORLD_SIZE / (WORLD_SIZE - DISCONNECT_RATIO * len(POSSIBLE_DISCONNECTED_NODE)) 
+        sick_weight_magnification_ratio = (1- DISCONNECT_RATIO) * health_weight_magnification_ratio
 
 def open_all_trigger():
     global DDP_TRIGGER,FACTOR_COMM_TRIGGER,INVERSE_COMM_TRIGGER
@@ -132,28 +140,6 @@ def get_health_nodes():
             health_nodes.remove(rank)
     return health_nodes
 
-
-def average_health_nodes_param(model,epoch):
-    if epoch % 2 == 0:
-        new_pg = dist.new_group(get_health_nodes())
-        if dist.get_rank() == 0:
-            print(f"epoch {epoch} ,health nodes : {get_health_nodes()}")
-        for param in model.parameters():
-        # 使用all_reduce来计算所有节点的参数和
-            #print(f"epoch {epoch} ,allreduce : {param.names}")
-            dist.all_reduce(param.data, op=dist.ReduceOp.SUM,group=new_pg)
-        # 然后平均化
-            param.data /= dist.get_world_size(group=new_pg)
-        dist.destroy_process_group(group=new_pg)
-
-def normalizer_sick_nodes_param():
-    weight_sum = WORLD_SIZE - DISCONNECT_RATIO * len(POSSIBLE_DISCONNECTED_NODE)
-    return  (1- DISCONNECT_RATIO) / weight_sum
-
-def normalizer_health_nodes_param(data):
-    weight_sum = WORLD_SIZE - DISCONNECT_RATIO * len(POSSIBLE_DISCONNECTED_NODE)
-    return 1 / weight_sum
-
 def average_health_nodes_param2(model,epoch):
     if epoch % 1 == 0:
         health_nodes = get_health_nodes()
@@ -161,8 +147,11 @@ def average_health_nodes_param2(model,epoch):
             print(f"epoch {epoch} ,health nodes : {health_nodes}")
         for param in model.parameters():
             if dist.get_rank() in health_nodes:
-                dist.all_reduce(param.data, op=dist.ReduceOp.SUM,async_op=True).result()
-                param.data /= len(health_nodes)
+                if dist.get_rank() in POSSIBLE_DISCONNECTED_NODE:
+                    ratio = sick_weight_magnification_ratio / len(health_nodes)
+                else:
+                    ratio = health_weight_magnification_ratio / len(health_nodes)
+                param.data = dist.all_reduce(param.data, op=dist.ReduceOp.SUM,async_op=True).value()[0] * ratio
             else:
                 dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
 

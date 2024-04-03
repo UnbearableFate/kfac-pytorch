@@ -13,20 +13,20 @@ from tqdm import tqdm
 import logging
 import kfac
 import kfac.mischief as mischief
-from my_module.custom_resnet import CustomResNet34, transform
+from my_module.custom_resnet import CustomResNet18, transform
 
-epochs = 20
-batch_size = 256
+epochs = 1
+batch_size = 128
+gpu = torch.device("cuda:0")
 
-DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
+DATA_DIR = "/home/yu/data"
 
-LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/log"
+LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs"
 
 def main():
     # Set up DDP environment
     timeout = datetime.timedelta(seconds=20)
-    dist.init_process_group('nccl',timeout=timeout)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    dist.init_process_group('gloo',timeout=timeout)
     if not dist.is_initialized():
         return
     rank = dist.get_rank()
@@ -47,7 +47,7 @@ def main():
                                                sampler=train_sampler, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, sampler=test_sampler,
                                               num_workers=4)
-    sick_iter_ratio = 0.1
+    sick_iter_ratio = 0.05
     max_disconnect_iter =  int(len(train_loader.dataset) / batch_size * sick_iter_ratio)
     if rank == 0:
         print(f"max_disconnect_iter: {max_disconnect_iter}")
@@ -58,7 +58,7 @@ def main():
 
     # Define the model, loss function, and optimizer
 
-    model = CustomResNet34().to(device)
+    model = CustomResNet18().to(gpu)
     model = DDP(model)
     mischief.add_hook_to_model(model)
     criterion = nn.CrossEntropyLoss()
@@ -67,7 +67,7 @@ def main():
     dist.barrier()
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    writer = SummaryWriter(log_dir= os.path.join(LOG_DIR,f"fashion_minist_resnet34/fashion_mnist_experiment_{timestamp}/{dist.get_rank()}"))
+    writer = SummaryWriter(log_dir= os.path.join(LOG_DIR,f"fashion_minist_resnet18/fashion_mnist_experiment_{timestamp}/{dist.get_rank()}"))
 
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
@@ -88,8 +88,8 @@ def train(model, train_loader,train_sampler, criterion, optimizer ,preconditione
         disable= (dist.get_rank() != 0)
     ) as t:
         for batch_idx, (data, target) in enumerate(train_loader):
-            data = data.cuda()
-            target = target.cuda()
+            data = data.to(gpu)
+            target = target.to(gpu)
             mischief.update_iter()
             optimizer.zero_grad()
             output = model(data)
@@ -108,7 +108,7 @@ def test(model, test_loader,epoch,writer):
     total = 0
     with torch.no_grad():
         for data, target in test_loader:
-            data, target = data.cuda(), target.cuda()
+            data, target = data.to(gpu), target.to(gpu)
             output = model(data)
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
