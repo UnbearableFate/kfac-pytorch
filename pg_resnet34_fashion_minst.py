@@ -20,7 +20,7 @@ batch_size = 256
 
 DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
 
-LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/log"
+LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs"
 
 def main():
     # Set up DDP environment
@@ -47,19 +47,19 @@ def main():
                                                sampler=train_sampler, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, sampler=test_sampler,
                                               num_workers=4)
-    sick_iter_ratio = 0.1
-    max_disconnect_iter =  int(len(train_loader.dataset) / batch_size * sick_iter_ratio)
+    sick_iter_ratio = 0.05
+    max_disconnect_iter =  4 #int(len(train_loader.dataset) / batch_size * sick_iter_ratio)
     if rank == 0:
         print(f"max_disconnect_iter: {max_disconnect_iter}")
 
     mischief.mischief_init(world_size=world_size, possible_disconnect_node=None,
                            max_disconnect_iter=max_disconnect_iter, disconnect_ratio=0.2, max_disconnected_node_num=3,
-                           ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
+                           ddp_trigger=False, factor_comm_trigger=True, inverse_comm_trigger=True)
 
     # Define the model, loss function, and optimizer
 
     model = CustomResNet34().to(device)
-    model = DDP(model)
+    #model = DDP(model)
     mischief.add_hook_to_model(model)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
@@ -68,10 +68,8 @@ def main():
 
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     writer = SummaryWriter(log_dir= os.path.join(LOG_DIR,f"fashion_minist_resnet34/fashion_mnist_experiment_{timestamp}/{dist.get_rank()}"))
-
     for epoch in range(epochs):
         train(model,train_loader,train_sampler,criterion, optimizer,preconditioner,epoch,writer)
-        #mischief.average_health_nodes_param2(model,epoch)
         test(model,test_loader,epoch,writer)
     
     if rank == 0:
@@ -97,6 +95,8 @@ def train(model, train_loader,train_sampler, criterion, optimizer ,preconditione
             loss.backward()
             preconditioner.step()
             optimizer.step()
+            if mischief.ITER % 20 == 0 or mischief.get_connnecting_world_size() == dist.get_world_size():
+                mischief.average_health_nodes_param(model)
             t.update()
         if writer is not None:
             writer.add_scalar('Loss/train', loss.item(), epoch)
