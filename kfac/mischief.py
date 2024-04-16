@@ -140,20 +140,21 @@ def get_health_nodes():
             health_nodes.remove(rank)
     return health_nodes
 
-def average_health_nodes_param2(model,epoch):
-    if epoch % 1 == 0:
-        health_nodes = get_health_nodes()
-        if dist.get_rank() == 0:
-            print(f"epoch {epoch} ,health nodes : {health_nodes}")
-        for param in model.parameters():
-            if dist.get_rank() in health_nodes:
-                if dist.get_rank() in POSSIBLE_DISCONNECTED_NODE:
-                    ratio = sick_weight_magnification_ratio / len(health_nodes)
-                else:
-                    ratio = health_weight_magnification_ratio / len(health_nodes)
-                param.data = dist.all_reduce(param.data, op=dist.ReduceOp.SUM,async_op=True).value()[0] * ratio
-            else:
-                dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
+def average_health_nodes_param(model):
+    health_nodes = get_health_nodes()
+    ratio = 0
+    if dist.get_rank() in POSSIBLE_DISCONNECTED_NODE:
+        ratio = sick_weight_magnification_ratio / len(health_nodes)
+    else:
+        ratio = health_weight_magnification_ratio / len(health_nodes)
+    if dist.get_rank() == 0:
+        print(f"T{ITER} ,health nodes : {health_nodes} ,ratio {ratio}")
+    for param in model.parameters():
+        if dist.get_rank() in health_nodes:
+            dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+            param.data.mul_(ratio)
+        else:
+            dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
 
 log_once = dict()
 
