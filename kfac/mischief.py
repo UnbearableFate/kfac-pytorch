@@ -72,6 +72,7 @@ def mischief_init(world_size, max_disconnected_node_num=3,
     global WORLD_SIZE, MAX_DISCONNECTED_NODE_NUM, MAX_DISCONNECT_ITER, DISCONNECT_RATIO
     global DDP_TRIGGER,FACTOR_COMM_TRIGGER,INVERSE_COMM_TRIGGER
     global sick_weight_magnification_ratio, health_weight_magnification_ratio
+    global POSSIBLE_DISCONNECTED_NODE, ITER, SICK_NODES_NUM
 
     random.seed(seed)
     WORLD_SIZE = world_size
@@ -92,6 +93,9 @@ def mischief_init(world_size, max_disconnected_node_num=3,
     if len(POSSIBLE_DISCONNECTED_NODE) != world_size and len(POSSIBLE_DISCONNECTED_NODE) != 0:
         health_weight_magnification_ratio =  WORLD_SIZE / (WORLD_SIZE - DISCONNECT_RATIO * len(POSSIBLE_DISCONNECTED_NODE)) 
         sick_weight_magnification_ratio = (1- DISCONNECT_RATIO) * health_weight_magnification_ratio
+    
+    ITER = 0
+    SICK_NODES_NUM = 0
 
 def open_all_trigger():
     global DDP_TRIGGER,FACTOR_COMM_TRIGGER,INVERSE_COMM_TRIGGER

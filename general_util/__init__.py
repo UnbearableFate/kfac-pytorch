@@ -14,18 +14,15 @@ from general_util.GeneralManager import GeneralManager
 import torch.nn as nn
 import os
 
-def general_main(data_dir,dataset_name,log_dir,device=torch.device("cuda:0"),com_back = 'gloo',
+def general_main(data_dir,log_dir,dataset_name,timestamp,device=torch.device("cuda:0"),
                   max_sick_iter_ratio=0.2, disconnect_ratio = 0.2,
                   possible_disconnect_node = None ,max_disconnected_node_num = 2,
                   ModelType=MLP):
     # Set up DDP environment
-    timeout = datetime.timedelta(seconds=30)
+    
     batch_size=64
-    epochs=5
+    epochs=1
 
-    dist.init_process_group(com_back, timeout=timeout)
-    if not dist.is_initialized():
-        return
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     if rank == 0:
@@ -49,9 +46,8 @@ def general_main(data_dir,dataset_name,log_dir,device=torch.device("cuda:0"),com
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, update_factors_in_hook=False)
 
     experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{world_size}"
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     writer = SummaryWriter(
-        log_dir=os.path.join(log_dir, f"{dataset_name}_{ModelType.__name__}/{experiment_name_detail}_{timestamp}/{dist.get_rank()}"))
+        log_dir=os.path.join(log_dir, f"{dataset_name}_{ModelType.__name__}/{timestamp}/{experiment_name_detail}/{dist.get_rank()}"))
 
     mgr = GeneralManager(model=model, data_manager=data_manager, loss_func=criterion, optimizer=optimizer,
                                       preconditioner=preconditioner, epochs=epochs, world_size=world_size, rank=rank, device=device,
@@ -60,6 +56,5 @@ def general_main(data_dir,dataset_name,log_dir,device=torch.device("cuda:0"),com
 
     if rank == 0:
         mischief.print_node_status()
-    dist.destroy_process_group()
-
-    # Testing function
+    
+    writer.close()

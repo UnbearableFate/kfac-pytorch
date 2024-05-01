@@ -59,10 +59,19 @@ def main():
 
     if rank == 0:
         mischief.print_node_status()
-    dist.destroy_process_group()
+    
 
     # Testing function
 
 if __name__ == '__main__':
-    general_util.general_main(DATA_DIR, "FashionMNIST", LOG_DIR ,ModelType=MLP)
+    timeout = datetime.timedelta(seconds=30)
+    dist.init_process_group("gloo", timeout=timeout)
+    if not dist.is_initialized():
+        raise RuntimeError("Unable to initialize process group.")
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "FashionMNIST",
+                              timestamp= timestamp,ModelType=MLP,disconnect_ratio=0.2)
+    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "FashionMNIST",
+                              timestamp= timestamp, ModelType=MLP,disconnect_ratio=0.4)
+    dist.destroy_process_group()
     print("Done!")
