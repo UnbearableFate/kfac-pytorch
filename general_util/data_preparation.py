@@ -1,0 +1,83 @@
+import os.path
+from torchvision import datasets, transforms
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader, BatchSampler
+
+from torch.utils.data import Sampler
+import numpy as np
+
+
+class SimpleNonIIDSampler(Sampler):
+    def __init__(self, dataset, world_size, rank):
+        super().__init__()
+        self.dataset = dataset
+        self.rank = rank
+        self.world_size = world_size
+        self.epoch = 0
+
+        # 数据集按标签排序
+        self.sorted_indices = self.sort_dataset_by_labels()
+
+        # 根据 world_size 划分数据集
+        self.partitioned_indices = self.partition_dataset()
+
+    def sort_dataset_by_labels(self):
+        # 获取标签并排序
+        labels = np.array(self.dataset.targets)
+        sorted_indices = labels.argsort()
+        return sorted_indices
+
+    def partition_dataset(self):
+        # 分割数据集
+        num_samples = len(self.sorted_indices) // self.world_size
+        partitions = [self.sorted_indices[i * num_samples: (i + 1) * num_samples] for i in range(self.world_size)]
+        return partitions
+
+    def __iter__(self):
+        # 打乱当前节点的数据
+        np.random.seed(self.epoch)  # 保证每个 epoch 打乱方式一致
+        indices = self.partitioned_indices[self.rank]
+        np.random.shuffle(indices)
+        return iter(indices)
+
+    def __len__(self):
+        return len(self.partitioned_indices[self.rank])
+
+    def set_epoch(self, epoch):
+        # 设置 epoch，以便重新打乱
+        self.epoch = epoch
+
+
+class DataPreparer:
+    transform_dict = {
+        "FashionMNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    }
+
+    dataset_func = {
+        "FashionMNIST": datasets.FashionMNIST
+    }
+
+    def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None):
+        self.data_path = os.path.join(data_path_root, dataset_name)
+        self.transform = DataPreparer.transform_dict[dataset_name]
+        self.train_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=True, download=False,
+                                                                     transform=self.transform)
+        self.test_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=False, download=False,
+                                                                    transform=self.transform)
+        self.batch_size = batch_size
+
+        if sampler is None:
+            self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank)
+        else:
+            self.train_sampler = sampler(self.train_dataset,world_size,rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
+
+        self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
+
+        self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=(self.train_sampler is None),
+                                       sampler=self.train_sampler, num_workers=4)
+        self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False,
+                                      sampler=self.test_sampler,
+                                      num_workers=4)
+    def set_epoch(self,epoch):
+        if self.train_sampler is not None and hasattr(self.train_sampler,"set_epoch"):
+            self.train_sampler.set_epoch(epoch)

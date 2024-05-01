@@ -291,7 +291,7 @@ class KFACBaseLayer:
                 Defaults to None, the default process group.
         """
         if mischief.reduce_a_factor_with_sick(self, group): return
-        mischief.easy_log_once("ok a factor comm", rank=dist.get_rank())
+        #mischief.easy_log_once("ok a factor comm", rank=dist.get_rank())
         if self.a_factor is None:
             raise RuntimeError('a_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:
@@ -321,7 +321,7 @@ class KFACBaseLayer:
                 Defaults to None, the default process group.
         """
         if mischief.reduce_g_factor_with_sick(self, group): return
-        mischief.easy_log_once("ok g factor comm", rank=dist.get_rank())
+        #mischief.easy_log_once("ok g factor comm", rank=dist.get_rank())
         if self.g_factor is None:
             raise RuntimeError('g_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:

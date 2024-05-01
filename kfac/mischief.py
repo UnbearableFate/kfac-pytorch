@@ -10,6 +10,7 @@ class NodeStatus:
         self.is_connected = True
         self.resume_countdown = -1
         self.disconnect_start_time = discon_start_time
+        self.connect_start_time = 0
         self.disconnect_time_count = 0
         self.rank = rank
 
@@ -29,6 +30,7 @@ class NodeStatus:
 
     def connect_resume(self):
         global POSSIBLE_DISCONNECTED_NODE, SICK_NODES_NUM
+        self.connect_start_time = ITER
         self.is_connected = True
         self.resume_countdown = -1
         self.disconnect_start_time = -1
@@ -55,7 +57,7 @@ MAX_DISCONNECTED_NODE_NUM = 4
 MAX_DISCONNECT_ITER = 3
 DISCONNECT_RATIO = 0.2
 
-POSSIBLE_DISCONNECTED_NODE = dict()
+POSSIBLE_DISCONNECTED_NODE : dict[int, NodeStatus] = {}
 ITER = 0
 SICK_NODES_NUM = 0
 
@@ -147,14 +149,33 @@ def average_health_nodes_param(model):
         ratio = sick_weight_magnification_ratio / len(health_nodes)
     else:
         ratio = health_weight_magnification_ratio / len(health_nodes)
-    if dist.get_rank() == 0:
-        print(f"T{ITER} ,health nodes : {health_nodes} ,ratio {ratio}")
     for param in model.parameters():
         if dist.get_rank() in health_nodes:
             dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
             param.data.mul_(ratio)
         else:
             dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
+
+def average_health_nodes_param_without_just_start(model,rank):  # temp no use
+    health_nodes = get_health_nodes()
+    ratio = 0
+    allreduce_num = len(health_nodes)
+    for node in POSSIBLE_DISCONNECTED_NODE.values():
+        if node.connect_start_time == ITER:
+            allreduce_num -= 1
+    if rank in POSSIBLE_DISCONNECTED_NODE:
+        ratio = sick_weight_magnification_ratio / allreduce_num
+    else:
+        ratio = health_weight_magnification_ratio / allreduce_num
+    for param in model.parameters():
+        if dist.get_rank() in health_nodes:
+            if POSSIBLE_DISCONNECTED_NODE[rank].connect_start_time == ITER:
+                param.data.zero_()
+            dist.all_reduce(param.data, op=dist.ReduceOp.SUM)
+            param.data.mul_(ratio)
+        else:
+            dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
+
 
 log_once = dict()
 
@@ -205,7 +226,7 @@ def reduce_a_factor_with_sick(self, group: dist.ProcessGroup) -> bool:
     """
     if not (FACTOR_COMM_TRIGGER and is_sick_at(dist.get_rank())):
         return False
-    easy_log_once("sick a factor comm", rank=dist.get_rank())
+    #easy_log_once("sick a factor comm", rank=dist.get_rank())
     if self.a_factor is None:
         raise RuntimeError('a_factor is None, cannot reduce')
     if self.allreduce_method == AllreduceMethod.ALLREDUCE:
@@ -295,12 +316,12 @@ def broadcast_with_sick(
         return None
 
     if is_sick_at(src):
-        easy_log_once(f"can not get boradcast from {src}",dist.get_rank())
+        #easy_log_once(f"can not get boradcast from {src}",dist.get_rank())
         return tensor
 
     clone_tensor = None
     if is_sick_at(dist.get_rank()):
-        easy_log_once(f"broadcast without {dist.get_rank()} from {src}",dist.get_rank())
+        #easy_log_once(f"broadcast without {dist.get_rank()} from {src}",dist.get_rank())
         clone_tensor = torch.clone(tensor)
 
     if get_world_size(group) == 1:
