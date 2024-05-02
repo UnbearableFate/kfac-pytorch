@@ -40,14 +40,15 @@ def general_main(data_dir,log_dir,dataset_name,timestamp,device=torch.device("cu
                            ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
 
     # Define the model, loss function, and optimizer
-    model = model_func.to(device)
+    model = model_func().to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, update_factors_in_hook=False)
 
     experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{world_size}"
+    writer_name = f"{dataset_name}_{type(model).__name__}/{timestamp}/{experiment_name_detail}/{dist.get_rank()}"
     writer = SummaryWriter(
-        log_dir=os.path.join(log_dir, f"{dataset_name}_{model.__name__}/{timestamp}/{experiment_name_detail}/{dist.get_rank()}"))
+        log_dir=os.path.join(log_dir, writer_name))
 
     mgr = GeneralManager(model=model, data_manager=data_manager, loss_func=criterion, optimizer=optimizer,
                                       preconditioner=preconditioner, epochs=epochs, world_size=world_size, rank=rank, device=device,

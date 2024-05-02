@@ -8,10 +8,10 @@ from torch.utils.tensorboard import SummaryWriter
 import logging
 import kfac
 import kfac.mischief as mischief
-from my_module.custom_resnet import CustomResNet18, MLP
+from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.data_preparation import DataPreparer, SimpleNonIIDSampler
 import general_util
-
+from functools import partial
 gpu = torch.device("cuda:0")
 DATA_DIR = "/home/yu/data"
 LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs"
@@ -69,9 +69,10 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "FashionMNIST",
-                              timestamp= timestamp,ModelType=MLP,disconnect_ratio=0.2)
-    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "FashionMNIST",
-                              timestamp= timestamp, ModelType=MLP,disconnect_ratio=0.4)
+    model_fn = partial(ResNetForCIFAR10, layers=18)
+    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "CIFAR10",
+                              timestamp= timestamp,model_func=model_fn,disconnect_ratio=0.2,device='cpu')
+    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "CIFAR10",
+                              timestamp= timestamp, ModelType=model_fn,disconnect_ratio=0.4,device='cpu')
     dist.destroy_process_group()
     print("Done!")

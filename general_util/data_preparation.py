@@ -82,7 +82,8 @@ class DataPreparer:
     }
 
     dataset_func = {
-        "FashionMNIST": datasets.FashionMNIST
+        "FashionMNIST": datasets.FashionMNIST,
+        "CIFAR10": datasets.CIFAR10,
     }
 
     def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None):
