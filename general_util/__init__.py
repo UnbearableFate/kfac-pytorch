@@ -17,7 +17,7 @@ import os
 def general_main(data_dir,log_dir,dataset_name,timestamp,device=torch.device("cuda:0"),
                   max_sick_iter_ratio=0.2, disconnect_ratio = 0.2,
                   possible_disconnect_node = None ,max_disconnected_node_num = 2,
-                  ModelType=MLP):
+                  model_func = MLP):
     # Set up DDP environment
     
     batch_size=64
@@ -40,14 +40,14 @@ def general_main(data_dir,log_dir,dataset_name,timestamp,device=torch.device("cu
                            ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
 
     # Define the model, loss function, and optimizer
-    model = ModelType().to(device)
+    model = model_func.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, update_factors_in_hook=False)
 
     experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{world_size}"
     writer = SummaryWriter(
-        log_dir=os.path.join(log_dir, f"{dataset_name}_{ModelType.__name__}/{timestamp}/{experiment_name_detail}/{dist.get_rank()}"))
+        log_dir=os.path.join(log_dir, f"{dataset_name}_{model.__name__}/{timestamp}/{experiment_name_detail}/{dist.get_rank()}"))
 
     mgr = GeneralManager(model=model, data_manager=data_manager, loss_func=criterion, optimizer=optimizer,
                                       preconditioner=preconditioner, epochs=epochs, world_size=world_size, rank=rank, device=device,

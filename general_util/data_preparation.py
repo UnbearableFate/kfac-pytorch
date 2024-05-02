@@ -48,9 +48,37 @@ class SimpleNonIIDSampler(Sampler):
         self.epoch = epoch
 
 
+cifar10_transform_train = transforms.Compose(
+    [
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            (0.4914, 0.4822, 0.4465),
+            (0.2023, 0.1994, 0.2010),
+        ),
+    ],
+)
+
+cifar10_transform_test = transforms.Compose(
+    [
+        transforms.ToTensor(),
+        transforms.Normalize(
+            (0.4914, 0.4822, 0.4465),
+            (0.2023, 0.1994, 0.2010),
+        ),
+    ],
+)
+
 class DataPreparer:
-    transform_dict = {
-        "FashionMNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    train_transform_dict = {
+        "FashionMNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]),
+        "CIFAR10": cifar10_transform_train,
+    }
+
+    test_transform_dict = {
+        "FashionMNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]),
+        "CIFAR10": cifar10_transform_test,
     }
 
     dataset_func = {
@@ -59,11 +87,12 @@ class DataPreparer:
 
     def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None):
         self.data_path = os.path.join(data_path_root, dataset_name)
-        self.transform = DataPreparer.transform_dict[dataset_name]
+        self.train_transform = DataPreparer.train_transform_dict[dataset_name]
+        self.test_transform = DataPreparer.test_transform_dict[dataset_name]
         self.train_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=True, download=False,
-                                                                     transform=self.transform)
+                                                                     transform=self.train_transform)
         self.test_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=False, download=False,
-                                                                    transform=self.transform)
+                                                                    transform=self.test_transform)
         self.batch_size = batch_size
 
         if sampler is None:
