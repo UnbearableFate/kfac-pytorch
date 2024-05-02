@@ -15,13 +15,14 @@ import torch.nn as nn
 import os
 
 def general_main(data_dir,log_dir,dataset_name,timestamp,device=torch.device("cuda:0"),
+                  model_avg_time_in_one_epoch=20,
                   max_sick_iter_ratio=0.2, disconnect_ratio = 0.2,
                   possible_disconnect_node = None ,max_disconnected_node_num = 2,
                   model_func = MLP):
     # Set up DDP environment
     
     batch_size=64
-    epochs=1
+    epochs=3
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -30,6 +31,7 @@ def general_main(data_dir,log_dir,dataset_name,timestamp,device=torch.device("cu
 
     data_manager = DataPreparer(data_path_root=data_dir, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                 sampler=None, batch_size=batch_size)
+    iter_in_epoch = int(len(data_manager.train_dataset) / batch_size / world_size)
     if rank == 0:
         print(f"iteration in loop {int(len(data_manager.train_dataset) / batch_size /world_size)}")
     max_disconnect_iter = int(len(data_manager.train_dataset) / batch_size / world_size * max_sick_iter_ratio)
@@ -52,7 +54,7 @@ def general_main(data_dir,log_dir,dataset_name,timestamp,device=torch.device("cu
 
     mgr = GeneralManager(model=model, data_manager=data_manager, loss_func=criterion, optimizer=optimizer,
                                       preconditioner=preconditioner, epochs=epochs, world_size=world_size, rank=rank, device=device,
-                                      writer=writer)
+                                      writer=writer,interval=int(iter_in_epoch/model_avg_time_in_one_epoch))
     mgr.train_and_test()
 
     if rank == 0:

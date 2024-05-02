@@ -1,4 +1,5 @@
 import math
+import time
 
 import torch
 from tqdm import tqdm
@@ -8,7 +9,7 @@ import torch.distributed as dist
 
 class GeneralManager:
     def __init__(self, model, data_manager: DataPreparer, loss_func, optimizer, preconditioner, epochs, world_size,
-                 rank, device, writer):
+                 rank, device, writer ,interval=20):
         self.writer = writer
         self.device = device
         self.model = model
@@ -20,9 +21,11 @@ class GeneralManager:
         self.world_size = world_size
         self.rank = rank
 
+        self.model_avg_interval = interval
+
     def train_and_test(self):
         for i in range(0, self.epochs):
-            self.train(epoch=i)
+            self.train_async_avg(epoch=i)
             #self.train_but_stop_in_sick(epoch=i)
             self.test_all(epoch=i)
 
@@ -47,9 +50,46 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
-                if mischief.ITER % 10 == 0:
+                if mischief.ITER+1 % self.model_avg_interval == 0:
                     mischief.average_health_nodes_param(self.model)
                 t.update()
+            if self.writer is not None:
+                self.writer.add_scalar('Loss/train', loss.item(), epoch)
+
+    def train_async_avg(self, epoch, fl_mode=True):
+        self.model.train()
+        self.data_manager.set_epoch(epoch)
+        train_loader = self.data_manager.train_loader
+        with tqdm(
+                total=math.ceil(len(train_loader)),
+                bar_format='{l_bar}{bar:6}{r_bar}',
+                desc=f'Epoch {epoch:3d}/{self.epochs:3d}',
+                disable=(self.rank != 0)
+        ) as t:
+            for batch_idx, (data, target) in enumerate(train_loader):
+                data = data.to(self.device)
+                target = target.to(self.device)
+                mischief.update_iter()
+
+                self.optimizer.zero_grad()
+                output = self.model(data)
+                loss = self.loss_func(output, target)
+                loss.backward()
+
+                async_handlers = None
+                if mischief.ITER+1 % self.model_avg_interval == 0:
+                    async_handlers = mischief.average_health_nodes_param_async(self.model)
+
+                if self.preconditioner is not None:
+                    self.preconditioner.step()
+                
+                if async_handlers is not None:
+                    while any(not work.is_completed() for work in async_handlers):
+                        time.sleep(0.1)
+
+                self.optimizer.step()
+                t.update()
+
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
     
@@ -75,7 +115,7 @@ class GeneralManager:
                     self.preconditioner.step()
                 if not mischief.is_sick_at(self.rank):
                     self.optimizer.step()
-                if mischief.ITER % 10 == 0:
+                if mischief.ITER +1 % self.model_avg_interval == 0:
                         mischief.average_health_nodes_param_2(self.model,self.rank)
                 t.update()
             if self.writer is not None:

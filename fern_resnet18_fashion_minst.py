@@ -69,10 +69,10 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    model_fn = partial(ResNetForCIFAR10, layers=18)
-    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "CIFAR10",
-                              timestamp= timestamp,model_func=model_fn,disconnect_ratio=0.2,device='cpu')
-    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "CIFAR10",
-                              timestamp= timestamp, ModelType=model_fn,disconnect_ratio=0.4,device='cpu')
+    #model_fn = partial(ResNetForCIFAR10, layers=18)
+    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "FashionMNIST",
+                              timestamp= timestamp,model_func=MLP,model_avg_time_in_one_epoch=21,disconnect_ratio=0.2)
+    general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "FashionMNIST",
+                              timestamp= timestamp, model_func=MLP,model_avg_time_in_one_epoch=21,disconnect_ratio=0.4)
     dist.destroy_process_group()
     print("Done!")

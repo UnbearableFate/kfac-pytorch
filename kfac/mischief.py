@@ -160,6 +160,22 @@ def average_health_nodes_param(model):
         else:
             dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
 
+def average_health_nodes_param_async(model):
+    health_nodes = get_health_nodes()
+    ratio = 0
+    result_list = []
+    if dist.get_rank() in POSSIBLE_DISCONNECTED_NODE:
+        ratio = sick_weight_magnification_ratio / len(health_nodes)
+    else:
+        ratio = health_weight_magnification_ratio / len(health_nodes)
+    for param in model.parameters():
+        if dist.get_rank() in health_nodes:
+            result_list.append(dist.all_reduce(param.data.mul_(ratio), op=dist.ReduceOp.SUM,async_op=True))
+        else:
+            result_list.append(dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM,async_op=True))
+    
+    return result_list
+
 def average_health_nodes_param_without_just_start(model,rank):  # temp no use
     health_nodes = get_health_nodes()
     ratio = 0
