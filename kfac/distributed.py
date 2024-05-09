@@ -418,6 +418,8 @@ def get_world_size(group: dist.ProcessGroup | None = None) -> int:
         initialized.
     """
     if dist.is_initialized():
+        if mischief.is_normal():
+            return dist.get_world_size(group)
         return mischief.get_connnecting_world_size()
         #return dist.get_world_size(group)
     else:

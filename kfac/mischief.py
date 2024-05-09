@@ -53,18 +53,22 @@ class NodeStatus:
 DDP_TRIGGER = False
 FACTOR_COMM_TRIGGER = False
 INVERSE_COMM_TRIGGER = False
-MAX_DISCONNECTED_NODE_NUM = 4
-MAX_DISCONNECT_ITER = 3
-DISCONNECT_RATIO = 0.2
+MAX_DISCONNECTED_NODE_NUM = 0
+MAX_DISCONNECT_ITER = 0
+DISCONNECT_RATIO = 0
 
 POSSIBLE_DISCONNECTED_NODE : dict[int, NodeStatus] = {}
 ITER = 0
+LAST_AVG_ITER = 0
 SICK_NODES_NUM = 0
 
 WORLD_SIZE = 8
 
 sick_weight_magnification_ratio = 1
 health_weight_magnification_ratio = 1
+
+def is_normal():
+    return not (DDP_TRIGGER or FACTOR_COMM_TRIGGER or INVERSE_COMM_TRIGGER)
 
 def mischief_init(world_size, max_disconnected_node_num=3,
                   max_disconnect_iter=3, disconnect_ratio=0.2,possible_disconnect_node=[],
@@ -96,6 +100,7 @@ def mischief_init(world_size, max_disconnected_node_num=3,
     
     ITER = 0
     SICK_NODES_NUM = 0
+    LAST_AVG_ITER = 0
 
 def open_all_trigger():
     global DDP_TRIGGER,FACTOR_COMM_TRIGGER,INVERSE_COMM_TRIGGER
@@ -147,6 +152,7 @@ def get_health_nodes():
     return health_nodes
 
 def average_health_nodes_param(model):
+    global LAST_AVG_ITER
     health_nodes = get_health_nodes()
     ratio = 0
     if dist.get_rank() in POSSIBLE_DISCONNECTED_NODE:
@@ -159,8 +165,10 @@ def average_health_nodes_param(model):
             param.data.mul_(ratio)
         else:
             dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM)
+    LAST_AVG_ITER = ITER
 
 def average_health_nodes_param_async(model):
+    global LAST_AVG_ITER
     health_nodes = get_health_nodes()
     ratio = 0
     result_list = []
@@ -173,7 +181,7 @@ def average_health_nodes_param_async(model):
             result_list.append(dist.all_reduce(param.data.mul_(ratio), op=dist.ReduceOp.SUM,async_op=True))
         else:
             result_list.append(dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM,async_op=True))
-    
+    LAST_AVG_ITER = ITER
     return result_list
 
 def average_health_nodes_param_without_just_start(model,rank):  # temp no use
@@ -201,7 +209,7 @@ log_once = dict()
 
 def easy_log(words:str, ranks:list):
     if dist.get_rank() in ranks :
-        print(f"{words} in rank {dist.get_rank()} in iter {iter}")
+        print(f"{words} in rank {dist.get_rank()} in iter {ITER}")
 
 def loglog(logger :logging.Logger,ranks, words, lv = logging.INFO):
     if dist.get_rank() in ranks:
