@@ -178,9 +178,11 @@ def average_health_nodes_param_async(model):
         ratio = health_weight_magnification_ratio / len(health_nodes)
     for param in model.parameters():
         if dist.get_rank() in health_nodes:
-            result_list.append(dist.all_reduce(param.data.mul_(ratio), op=dist.ReduceOp.SUM,async_op=True))
+            fut = dist.all_reduce(param.data, op=dist.ReduceOp.SUM,async_op=True).get_future()
+            fut.then(lambda fut: fut.value()[0].mul_(ratio))
+            result_list.append(fut)
         else:
-            result_list.append(dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM,async_op=True))
+            result_list.append(dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM,async_op=True).get_future())
     LAST_AVG_ITER = ITER
     return result_list
 

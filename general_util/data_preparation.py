@@ -86,10 +86,17 @@ class DataPreparer:
         "CIFAR10": datasets.CIFAR10,
     }
 
-    def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None):
+    def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None, train_transform =None,test_transform=None):
         self.data_path = os.path.join(data_path_root, dataset_name)
-        self.train_transform = DataPreparer.train_transform_dict[dataset_name]
-        self.test_transform = DataPreparer.test_transform_dict[dataset_name]
+        if train_transform is not None:
+            self.train_transform = train_transform
+        else:
+            self.train_transform = DataPreparer.train_transform_dict[dataset_name]
+        if test_transform is not None:
+            self.test_transform = test_transform
+        else:
+            self.test_transform = DataPreparer.test_transform_dict[dataset_name]
+        
         self.train_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=True, download=False,
                                                                      transform=self.train_transform)
         self.test_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=False, download=False,

@@ -75,14 +75,14 @@ def general_main(data_dir,log_dir,dataset_name,timestamp,model,device=torch.devi
 
     # Define the model, loss function, and optimizer
     model = model.to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters())
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
+    criterion = nn.CrossEntropyLoss() 
+    optimizer = torch.optim.Adam(model.parameters(),lr=0.05)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, accumulation_steps=13,update_factors_in_hook=False,lr=0.2,damping=0.07)
 
     model_name =  type(model).__name__
     if hasattr(model, "model_name"):
         model_name = model.model_name
-    experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{world_size}"
+    experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{world_size}_avg{model_avg_interval}"
     writer_name = f"{dataset_name}_{model_name}/{timestamp}/{experiment_name_detail}/{dist.get_rank()}"
     writer = SummaryWriter(
         log_dir=os.path.join(log_dir, writer_name))
@@ -90,8 +90,8 @@ def general_main(data_dir,log_dir,dataset_name,timestamp,model,device=torch.devi
     mgr = GeneralManager(model=model, data_manager=data_manager, loss_func=criterion, optimizer=optimizer,
                                       preconditioner=preconditioner, epochs=epochs, world_size=world_size, rank=rank, device=device,
                                       writer=writer,interval=model_avg_interval)
-    #mgr.train_and_test()
-    mgr.train_and_test_async()
+    mgr.train_and_test_semi_async()
+    #mgr.train_and_test_with_hook_ddp()
     if rank == 0:
         mischief.print_node_status()
 
