@@ -76,8 +76,8 @@ def general_main(data_dir,log_dir,dataset_name,timestamp,model,device=torch.devi
     # Define the model, loss function, and optimizer
     model = model.to(device)
     criterion = nn.CrossEntropyLoss() 
-    optimizer = torch.optim.Adam(model.parameters(),lr=0.05)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, accumulation_steps=13,update_factors_in_hook=False,lr=0.2,damping=0.07)
+    optimizer = torch.optim.Adam(model.parameters())
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
 
     model_name =  type(model).__name__
     if hasattr(model, "model_name"):
@@ -90,7 +90,7 @@ def general_main(data_dir,log_dir,dataset_name,timestamp,model,device=torch.devi
     mgr = GeneralManager(model=model, data_manager=data_manager, loss_func=criterion, optimizer=optimizer,
                                       preconditioner=preconditioner, epochs=epochs, world_size=world_size, rank=rank, device=device,
                                       writer=writer,interval=model_avg_interval)
-    mgr.train_and_test_semi_async()
+    mgr.train_and_test_async()
     #mgr.train_and_test_with_hook_ddp()
     if rank == 0:
         mischief.print_node_status()

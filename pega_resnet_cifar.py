@@ -35,7 +35,7 @@ if __name__ == '__main__':
     
     general_util.general_main(data_dir= DATA_DIR,log_dir= LOG_DIR ,dataset_name= "CIFAR10",
                               timestamp= timestamp,model=model,
-                              model_avg_interval=5,
+                              model_avg_interval=25,
                               disconnect_ratio=args.disconnect_ratio,
                               max_sick_iter_ratio=args.max_sick_iter_ratio,
                               max_disconnected_node_num=args.max_disconnected_node_num)

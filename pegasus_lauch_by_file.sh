@@ -21,9 +21,3 @@ current_time=$(date "+%Y%m%d%H%M")
  python /work/NBB/yu_mingzhe/kfac-pytorch/pega_resnet_cifar.py \
  --timestamp=$current_time \
  --disconnect_ratio=0.4
-
-/system/apps/ubuntu/22.04-202404/openmpi/4.1.6/nvhpc23.1-cuda12.0-ucx1.15.0/bin/mpirun \
- -x PATH -np 16 --map-by ppr:1:node:PE=24 --report-bindings $NQSII_MPIOPTS \
- python /work/NBB/yu_mingzhe/kfac-pytorch/pega_resnet_cifar.py \
- --timestamp=$current_time \
- --disconnect_ratio=0.6

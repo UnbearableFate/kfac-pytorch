@@ -4,7 +4,7 @@ import random
 import torch.distributed as dist
 import torch
 from kfac.enums import AllreduceMethod
-
+from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 class NodeStatus:
     def __init__(self,rank,discon_start_time = -1):
         self.is_connected = True
@@ -185,6 +185,28 @@ def average_health_nodes_param_async(model):
             result_list.append(dist.all_reduce(torch.zeros_like(param.data), op=dist.ReduceOp.SUM,async_op=True).get_future())
     LAST_AVG_ITER = ITER
     return result_list
+
+def average_health_nodes_param_tensor_fusion_async(model):
+    global LAST_AVG_ITER
+    health_nodes = get_health_nodes()
+    ratio = 0
+    result_list = []
+    if dist.get_rank() in POSSIBLE_DISCONNECTED_NODE:
+        ratio = sick_weight_magnification_ratio / len(health_nodes)
+    else:
+        ratio = health_weight_magnification_ratio / len(health_nodes)
+    
+    flat_tensor = fuse_model_paramenters(model)
+    if dist.get_rank() in health_nodes:
+        fut = dist.all_reduce(flat_tensor, op=dist.ReduceOp.SUM,async_op=True).get_future()
+        fut.then(lambda fut: fut.value()[0].mul_(ratio)).then(lambda fut: unfuse_tensors_to_model(fut.value()[0], model))
+        result_list.append(fut)
+    else:
+        result_list.append(dist.all_reduce(torch.zeros_like(flat_tensor), op=dist.ReduceOp.SUM,async_op=True).get_future())
+    
+        LAST_AVG_ITER = ITER
+    return result_list
+
 
 def average_health_nodes_param_without_just_start(model,rank):  # temp no use
     health_nodes = get_health_nodes()
