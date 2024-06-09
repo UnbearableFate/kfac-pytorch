@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 import kfac
 from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
-
+import kfac.rpc_distributed as rpc_distributed
 class GeneralManager:
     def __init__(self,data_dir,dataset_name,model,sampler_func = None,is_ddp=False,interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0")):
         batch_size=64
@@ -30,7 +30,9 @@ class GeneralManager:
         self.loss_func = nn.CrossEntropyLoss() 
         self.optimizer = torch.optim.Adam(model.parameters())
         if is_2nd_order:
-            self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
+            self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,update_factors_in_hook=False)
+            rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner)
+            self.rpc_communicator = rpc_distributed.global_communicator
         else:
             self.preconditioner = None
 
@@ -68,8 +70,8 @@ class GeneralManager:
             self.train(epoch=i)
             self.test_all(epoch=i)
         
-        if self.rank == 0 and self.is_fault:
-            mischief.print_node_status()
+        #if self.rank == 0 and self.is_fault:
+        #    mischief.print_node_status()
         
         self.writer.close()
     def train(self, epoch):
@@ -86,6 +88,7 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 mischief.update_iter()
+                self.rpc_communicator.update_self_t()
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = self.loss_func(output, target)
@@ -96,9 +99,15 @@ class GeneralManager:
                 if not self.is_ddp and self.model_avg_interval > 0:
                     if mischief.ITER >= mischief.LAST_AVG_ITER + self.model_avg_interval :
                         mischief.average_health_nodes_param_async(self.model)
+                if self.rank == 0 and batch_idx % 20 == 0:
+                    with open("log.txt", "a") as f:
+                        f.write(repr(rpc_distributed.global_communicator))
+                if self.writer is not None:
+                    self.writer.add_scalar('Loss/train', loss.item(), batch_idx*epoch)
                 t.update()
-            if self.writer is not None:
-                self.writer.add_scalar('Loss/train', loss.item(), epoch)
+            rpc_distributed.global_communicator.clear_count_dict()
+            #if self.writer is not None:
+            #    self.writer.add_scalar('Loss/train', loss.item(), epoch)
 
     def test_all(self, epoch):
         self.model.eval()
@@ -116,8 +125,6 @@ class GeneralManager:
         correct_total_tensor = torch.tensor([correct,total]).to(self.device)
 
         # 使用dist.reduce把所有节点的correct和total累加到rank 0节点
-        #print(f"Rank {self.rank} correct_tensor: {correct_total_tensor} in epoch {epoch}")
-        #dist.barrier()
         dist.all_reduce(correct_total_tensor)
 
         # 只在rank 0上计算最终的准确率并记录

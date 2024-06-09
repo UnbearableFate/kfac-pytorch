@@ -85,6 +85,7 @@ def register_modules(
                 continue
 
             kfac_layer = kfac_layer_type(module_helper, **layer_kwargs)
+            kfac_layer.name = name
 
             # get_flattened_modules() should never give us modules with the
             # same name

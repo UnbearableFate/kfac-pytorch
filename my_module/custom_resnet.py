@@ -59,30 +59,30 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
+import torch.nn as nn
+import torchvision.transforms as transforms
+
 
 class MLP(nn.Module):
-    transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
-    def __init__(self):
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    def __init__(self, input_size=28 * 28, hidden_size=64, num_hidden_layers=5, output_size=10):
         super(MLP, self).__init__()
-        self.layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(28*28,64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 10),
-            nn.Softmax(dim=1)
-        )
+        layers = [nn.Flatten()]
+
+        # Add the first layer
+        layers.append(nn.Linear(input_size, hidden_size))
+        layers.append(nn.ReLU())
+
+        # Add hidden layers
+        for _ in range(num_hidden_layers - 1):  # subtract 1 because the first layer is already added
+            layers.append(nn.Linear(hidden_size, hidden_size))
+            layers.append(nn.ReLU())
+
+        # Add the output layer
+        layers.append(nn.Linear(hidden_size, output_size))
+        layers.append(nn.Softmax(dim=1))
+
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.layers(x)

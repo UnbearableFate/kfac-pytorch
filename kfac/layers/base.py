@@ -15,7 +15,7 @@ from kfac.enums import AllreduceMethod
 from kfac.layers.modules import ModuleHelper
 
 import kfac.mischief as mischief
-
+import kfac.rpc_distributed as rpc_distributed
 class KFACBaseLayer:
     """KFAC base layer implementation.
 
@@ -86,6 +86,8 @@ class KFACBaseLayer:
         self._g_factor: torch.Tensor | FutureType | None = None
         # Preconditioned gradient
         self._grad: torch.Tensor | FutureType | None = None
+
+        self.name = "layer"
 
     def __repr__(self) -> str:
         """Representation of KFACBaseLayer."""
@@ -291,7 +293,14 @@ class KFACBaseLayer:
                 Defaults to None, the default process group.
         """
         if mischief.reduce_a_factor_with_sick(self, group): return
-        #mischief.easy_log_once("ok a factor comm", rank=dist.get_rank())
+        rpc_distributed.global_communicator.send_kfac_factor(self.name, "A")
+        if rpc_distributed.global_communicator.is_factor_ready(self.name, "A"):
+            mischief.easy_log_once("A factor is ready")
+            if rpc_distributed.global_communicator.rpc_layers[self.name].factor["A"] is not None:
+                mischief.easy_log_once(f"A factor before {self.a_factor}")
+                self.a_factor = rpc_distributed.global_communicator.rpc_layers[self.name].factor["A"].clone().detach()
+                return
+
         if self.a_factor is None:
             raise RuntimeError('a_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:
@@ -321,7 +330,13 @@ class KFACBaseLayer:
                 Defaults to None, the default process group.
         """
         if mischief.reduce_g_factor_with_sick(self, group): return
-        #mischief.easy_log_once("ok g factor comm", rank=dist.get_rank())
+        rpc_distributed.global_communicator.send_kfac_factor(self.name, "G")
+        if rpc_distributed.global_communicator.is_factor_ready(self.name, "G"):
+            mischief.easy_log_once("G factor is ready")
+            #if rpc_distributed.global_communicator.load_factor(self.name, "G") is not None:
+            #    self.g_factor = rpc_distributed.global_communicator.rpc_layers[self.name].factor["G"].clone().detach()
+            #return
+
         if self.g_factor is None:
             raise RuntimeError('g_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:
