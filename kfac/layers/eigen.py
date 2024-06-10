@@ -14,7 +14,6 @@ from kfac.distributed import TorchDistributedCommunicator
 from kfac.enums import AllreduceMethod
 from kfac.layers.base import KFACBaseLayer
 from kfac.layers.modules import ModuleHelper
-import kfac.rpc_distributed as rpc_distributed
 
 
 class KFACEigenLayer(KFACBaseLayer):
@@ -225,9 +224,6 @@ class KFACEigenLayer(KFACBaseLayer):
                 group=group,
             )
 
-        if src == dist.get_rank():
-            rpc_distributed.global_communicator.send_kfac_eigen_tensor(self.name, self.qa, self.da, dd=None,factor_type="A")
-
     def broadcast_g_inv(
         self,
         src: int,
@@ -294,9 +290,6 @@ class KFACEigenLayer(KFACBaseLayer):
                 src=src,
                 group=group,
             )
-
-        if src == dist.get_rank():
-            rpc_distributed.global_communicator.send_kfac_eigen_tensor(self.name,self.qa,self.da,dd=self.dgda,factor_type="G")
 
     def compute_a_inv(self, damping: float = 0.001) -> None:
         """Compute A inverse on assigned rank.

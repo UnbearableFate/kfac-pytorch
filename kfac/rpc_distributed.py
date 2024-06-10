@@ -1,26 +1,51 @@
+import datetime
 import torch
 import torch.distributed.rpc as rpc
 import threading
 from typing import Dict
+import logging
+
+import torch
+
+def normalized_l2_similarity(tensor1, tensor2):
+    """
+    计算两个任意维度 Tensor 之间的归一化 L2 范数相似度。
+
+    Args:
+        tensor1 (torch.Tensor): 第一个输入 Tensor
+        tensor2 (torch.Tensor): 第二个输入 Tensor
+
+    Returns:
+        float: 两个 Tensor 之间的归一化 L2 范数相似度，值范围在 [0, 1] 之间
+    """
+    if tensor1.shape != tensor2.shape:
+        raise ValueError("Both tensors must have the same shape")
+
+    l2_norm = torch.norm(tensor1 - tensor2)
+    max_norm = torch.norm(tensor1) + torch.norm(tensor2)
+    similarity = l2_norm / max_norm
+    return round(similarity.item(),6)
 
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
 class KfacRPCLayer:
-    def __init__(self,a_handler=None,g_handler=None):
+    def __init__(self,a_handler=None,g_handler=None ,name=None):
         self.factor : Dict[str:torch.Tensor] = {"A" : None, "G": None }
         self.factor_recv_ct : Dict[str:Dict[int, int]] = {"A" : {}, "G": {} } # {t: count}
-        self.a_handler = a_handler
+        self.assigned_worker :Dict[str : int]= {}
+        self.assigned_worker['A'] = a_handler
         self.qa = None
         self.da = None
         self.recv_handled_a_iter = -2 # if inverse a belongs to this rank, =-1
-        self.g_handler = g_handler
+        self.assigned_worker['G'] = g_handler
         self.qg = None
         self.dg = None
         self.dgda = None
         self.recv_handled_g_iter = -2
-        self.outdated_weight_param = 1.1
-        self.ahead_weight_param = 0.9
+        self.outdated_weight_param = 1
+        self.ahead_weight_param = 1
+        self.name = name
 
     def update_local_factor(self, recv_factor, local_t, recv_t, factor_type):
         self.factor_recv_ct[factor_type][recv_t] = self.factor_recv_ct[factor_type].get(recv_t, 0) + 1
@@ -32,7 +57,8 @@ class KfacRPCLayer:
             recv_world_weight *= self.outdated_weight_param
         if local_t < recv_t:
             recv_world_weight *= self.ahead_weight_param
-        self.factor[factor_type] = (1 - recv_world_weight) * self.factor[factor_type] + recv_world_weight * recv_factor
+        temp = (1 - recv_world_weight) * self.factor[factor_type] + recv_world_weight * recv_factor
+        self.factor[factor_type] = temp
 
     def update_local_eigen_a(self, qa, da, t):
         self.qa = qa
@@ -49,20 +75,20 @@ class KfacRPCLayer:
         n = 3
         for factor_type in self.factor_recv_ct.keys():
             self.factor_recv_ct[factor_type] = {k: v for k, v in self.factor_recv_ct[factor_type].items() if k >= local_t - n}
+
+
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner):
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size)
         self.world_size = world_size
         self.rank = rank
-        self.kfac_layers = {} # {layer_name: { factor type name: factor A /G}}
-        self.rpc_layers = {} # {layer_name: KfacRPCLayer}
+        self.rpc_layers: Dict[str:KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
         self.computer_type = "" #eigen / inverse
 
         for name, kfac_layer in preconditioner._layers.values():
-            self.kfac_layers[name] = kfac_layer
             a_handler = preconditioner._assignment.inv_worker(name, 'A')
             g_handler = preconditioner._assignment.inv_worker(name, 'G')
-            self.rpc_layers[name] = KfacRPCLayer(a_handler,g_handler)
+            self.rpc_layers[name] = KfacRPCLayer(a_handler,g_handler ,name)
 
         self.iter_of_rank = [-1] * world_size # the latest iteration of each rank received
         self.lock = threading.Lock()
@@ -72,8 +98,30 @@ class KFacRPCCommunicator:
         if rpc.is_available():
             print(f"RPC Communicator initialized for rank {rank}")
 
+
+        # 创建日志记录器
+        self.logger = logging.getLogger('my_logger')
+        self.logger.setLevel(logging.DEBUG)  # 设置日志级别
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+        # 创建一个 FileHandler，并设置级别为 DEBUG
+        file_handler = logging.FileHandler(f'app_{self.rank}_{timestamp}.log')
+        file_handler.setLevel(logging.DEBUG)
+
+        # 创建一个日志格式器，并将其添加到 FileHandler
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+
+        # 将 FileHandler 添加到日志记录器
+        self.logger.addHandler(file_handler)
+
+        # 移除默认的 StreamHandler（终端输出）
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
+            self.logger.addHandler(file_handler)
+
         global global_communicator
         global_communicator = self
+
     def __repr__(self):
         log = f"Rank {self.rank} : iter {self.current_t()}\n"
         for name, layer in self.rpc_layers.items():
@@ -85,8 +133,8 @@ class KFacRPCCommunicator:
             log += f"\tG eigen: {layer.qg}, {layer.dg}, {layer.dgda}\n"
             log += f"\thandled A recv iter: {layer.recv_handled_a_iter}\n"
             log += f"\thandled G recv iter: {layer.recv_handled_g_iter}\n"
-            log += f"\tA handler: {layer.a_handler}\n"
-            log += f"\tG handler: {layer.g_handler}\n"
+            log += f"\tA handler: {layer.assigned_worker['A']}\n"
+            log += f"\tG handler: {layer.assigned_worker['G']}\n"
         return log
 
     def clear_count_dict(self):
@@ -100,32 +148,39 @@ class KFacRPCCommunicator:
     def current_t(self):
         return self.iter_of_rank[self.rank]
 
-    def send_kfac_factor(self,layer_name:str, factor_type:str):
-        factor = None
-        target = 0
-        if factor_type == "A":
-            factor = self.kfac_layers[layer_name].a_factor
-            target = rpc_work_name(self.rpc_layers[layer_name].a_handler)
-        elif factor_type == "G":
-            factor = self.kfac_layers[layer_name].g_factor
-            target = rpc_work_name(self.rpc_layers[layer_name].g_handler)
-        t = self.current_t()
-        try:
-            rpc.rpc_async(
-                to=target,
-                func=receive_kfac_factor,
-                args=(self.rank, layer_name, factor, t, factor_type)
-            )
-        except Exception as e:
-            print(f"Failed to send factor to {target}: {e}")
-
     def update_other_rank_iter(self, from_rank,t):
         self.iter_of_rank[from_rank] = max(self.iter_of_rank[from_rank], t)
 
-    def is_factor_ready(self, layer_name,factor_type):
+    def is_factor_ready(self, layer_name, factor_type):
+        if self.rpc_layers[layer_name].assigned_worker[factor_type] != self.rank:
+            return True
         with self.lock:
             current_t = self.current_t()
             return self.rpc_layers[layer_name].factor_recv_ct[factor_type].get(current_t,0) >= self.necessary_ct
+    
+    def assigned_worker(self, layer_name, factor_type):
+        return self.rpc_layers[layer_name].assigned_worker[factor_type]
+    
+    def send_kfac_factor(self,layer_name:str,factor_tensor :torch.Tensor, factor_type:str):
+        target = 0
+        if factor_type == "A":
+            target = self.rpc_layers[layer_name].assigned_worker['A']
+        elif factor_type == "G":
+            target = self.rpc_layers[layer_name].assigned_worker['G']
+        t = self.current_t()
+
+        fut = None
+        try:
+            fut =  rpc.rpc_async(
+                to=rpc_work_name(target),
+                func=receive_kfac_factor,
+                args=(self.rank, layer_name, factor_tensor, t, factor_type)
+            )
+        except Exception as e:
+            print(f"Failed to send factor to {target}: {e}")
+        if fut is not None and target == self.rank:
+            fut.wait()
+
     def send_kfac_eigen_tensor(self, layer_name,q,d,dd, factor_type):
         t = self.current_t()
         for target_rank in range(self.world_size):

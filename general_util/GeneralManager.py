@@ -1,5 +1,4 @@
 import math
-
 import torch
 from tqdm import tqdm
 import kfac.mischief as mischief
@@ -30,9 +29,8 @@ class GeneralManager:
         self.loss_func = nn.CrossEntropyLoss() 
         self.optimizer = torch.optim.Adam(model.parameters())
         if is_2nd_order:
-            self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,update_factors_in_hook=False)
+            self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,update_factors_in_hook=False,compute_method=kfac.enums.ComputeMethod.INVERSE)
             rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner)
-            self.rpc_communicator = rpc_distributed.global_communicator
         else:
             self.preconditioner = None
 
@@ -70,10 +68,8 @@ class GeneralManager:
             self.train(epoch=i)
             self.test_all(epoch=i)
         
-        #if self.rank == 0 and self.is_fault:
-        #    mischief.print_node_status()
-        
         self.writer.close()
+
     def train(self, epoch):
         self.model.train()
         self.data_manager.set_epoch(epoch)
@@ -88,7 +84,7 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 mischief.update_iter()
-                self.rpc_communicator.update_self_t()
+                rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = self.loss_func(output, target)
@@ -98,16 +94,12 @@ class GeneralManager:
                 self.optimizer.step()
                 if not self.is_ddp and self.model_avg_interval > 0:
                     if mischief.ITER >= mischief.LAST_AVG_ITER + self.model_avg_interval :
-                        mischief.average_health_nodes_param_async(self.model)
-                if self.rank == 0 and batch_idx % 20 == 0:
-                    with open("log.txt", "a") as f:
-                        f.write(repr(rpc_distributed.global_communicator))
-                if self.writer is not None:
-                    self.writer.add_scalar('Loss/train', loss.item(), batch_idx*epoch)
+                        fut_list = mischief.average_health_nodes_param_async(self.model)
+                        torch.futures.wait_all(fut_list)
                 t.update()
             rpc_distributed.global_communicator.clear_count_dict()
-            #if self.writer is not None:
-            #    self.writer.add_scalar('Loss/train', loss.item(), epoch)
+            if self.writer is not None:
+                self.writer.add_scalar('Loss/train', loss.item(), epoch)
 
     def test_all(self, epoch):
         self.model.eval()

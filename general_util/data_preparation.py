@@ -72,16 +72,19 @@ cifar10_transform_test = transforms.Compose(
 
 class DataPreparer:
     train_transform_dict = {
+        "MNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]),
         "FashionMNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]),
         "CIFAR10": cifar10_transform_train,
     }
 
     test_transform_dict = {
+        "MNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]),
         "FashionMNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]),
         "CIFAR10": cifar10_transform_test,
     }
 
     dataset_func = {
+        "MNIST": datasets.MNIST,
         "FashionMNIST": datasets.FashionMNIST,
         "CIFAR10": datasets.CIFAR10,
     }
