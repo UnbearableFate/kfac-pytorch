@@ -24,7 +24,7 @@ def normalized_l2_similarity(tensor1, tensor2):
     l2_norm = torch.norm(tensor1 - tensor2)
     max_norm = torch.norm(tensor1) + torch.norm(tensor2)
     similarity = l2_norm / max_norm
-    return round(similarity.item(),6)
+    return round(similarity.item(),5)
 
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
@@ -181,7 +181,7 @@ class KFacRPCCommunicator:
         if fut is not None and target == self.rank:
             fut.wait()
 
-    def send_kfac_eigen_tensor(self, layer_name,q,d,dd, factor_type):
+    def send_kfac_eigen_tensor(self, layer_name,q,d,dd= None, factor_type = "A"):
         t = self.current_t()
         for target_rank in range(self.world_size):
             if target_rank == self.rank:

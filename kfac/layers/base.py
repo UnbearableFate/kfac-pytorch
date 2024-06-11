@@ -293,7 +293,6 @@ class KFACBaseLayer:
                 operation. All ranks in the group should enter this function.
                 Defaults to None, the default process group.
         """
-        '''
         #if mischief.reduce_a_factor_with_sick(self, group): return
         rpc_distributed.global_communicator.send_kfac_factor(self.name,self.a_factor, "A")
         if rpc_distributed.global_communicator.assigned_worker(self.name,"A") == get_rank():
@@ -303,7 +302,6 @@ class KFACBaseLayer:
             #rpc_distributed.global_communicator.logger.debug(f"Layer {self.name}: A factor updated , similarity: {similarity} in {rpc_distributed.global_communicator.current_t()}")
             self.a_factor = rpc_distributed.global_communicator.rpc_layers[self.name].factor["A"].clone().detach()
         return
-        '''
         if self.a_factor is None:
             raise RuntimeError('a_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:
@@ -333,14 +331,12 @@ class KFACBaseLayer:
                 Defaults to None, the default process group.
         """
         #if mischief.reduce_g_factor_with_sick(self, group): return
-        '''
         rpc_distributed.global_communicator.send_kfac_factor(self.name,self.g_factor, "G")
         if rpc_distributed.global_communicator.assigned_worker(self.name,"G") == get_rank():
             while not rpc_distributed.global_communicator.is_factor_ready(self.name, "G"):
                 time.sleep(0.1)
             self.g_factor = rpc_distributed.global_communicator.rpc_layers[self.name].factor["G"].clone().detach()
         return
-        '''
 
         if self.g_factor is None:
             raise RuntimeError('g_factor is None, cannot reduce')

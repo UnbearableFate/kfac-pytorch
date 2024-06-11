@@ -29,7 +29,7 @@ class GeneralManager:
         self.loss_func = nn.CrossEntropyLoss() 
         self.optimizer = torch.optim.Adam(model.parameters())
         if is_2nd_order:
-            self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,update_factors_in_hook=False,compute_method=kfac.enums.ComputeMethod.INVERSE)
+            self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
             rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner)
         else:
             self.preconditioner = None

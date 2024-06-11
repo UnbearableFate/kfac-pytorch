@@ -14,7 +14,7 @@ from kfac.distributed import TorchDistributedCommunicator
 from kfac.enums import AllreduceMethod
 from kfac.layers.base import KFACBaseLayer
 from kfac.layers.modules import ModuleHelper
-
+import kfac.rpc_distributed as rpc_dist
 
 class KFACEigenLayer(KFACBaseLayer):
     """KFAC layer that preconditions gradients with eigen decomposition."""
@@ -210,7 +210,9 @@ class KFACEigenLayer(KFACBaseLayer):
                 device=self.a_factor.device,
                 dtype=self.inv_dtype,
             )
-
+        # rpc part
+        rpc_dist.global_communicator.send_kfac_eigen_tensor(layer_name=self.name,q=self.qa, d=self.da, factor_type='A')
+        return
         self.qa = self.tdc.broadcast(  # type: ignore
             self.qa,
             src=src,
