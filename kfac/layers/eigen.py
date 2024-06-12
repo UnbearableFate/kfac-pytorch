@@ -1,6 +1,7 @@
 """Eigen decomposition preconditioning implementation."""
 from __future__ import annotations
 
+import time
 from typing import Callable
 from typing import cast
 
@@ -191,6 +192,11 @@ class KFACEigenLayer(KFACBaseLayer):
                 A inv. All ranks in group should enter this function.
                 Defaults to None, the default process group.
         """
+        ### RPC communication
+        if rpc_dist.global_communicator is not None :
+            rpc_dist.global_communicator.send_kfac_eigen_tensor(layer_name=self.name, q=self.qa, d=self.da, dd=self.dgda, factor_type='A')
+            return
+
         if self.qa is None or (
             not self.prediv_eigenvalues and self.da is None
         ):
@@ -210,9 +216,6 @@ class KFACEigenLayer(KFACBaseLayer):
                 device=self.a_factor.device,
                 dtype=self.inv_dtype,
             )
-        # rpc part
-        rpc_dist.global_communicator.send_kfac_eigen_tensor(layer_name=self.name,q=self.qa, d=self.da, factor_type='A')
-        return
         self.qa = self.tdc.broadcast(  # type: ignore
             self.qa,
             src=src,
@@ -243,6 +246,12 @@ class KFACEigenLayer(KFACBaseLayer):
                 G inv. All ranks in group should enter this function.
                 Defaults to None, the default process group.
         """
+        ### RPC communication
+        if rpc_dist.global_communicator is not None :
+            rpc_dist.global_communicator.send_kfac_eigen_tensor(layer_name=self.name, q=self.qg, d=self.dg, dd=self.dgda,
+                                                                factor_type='G')
+            return
+
         if (
             self.qg is None
             or (not self.prediv_eigenvalues and self.dg is None)
@@ -302,6 +311,9 @@ class KFACEigenLayer(KFACBaseLayer):
             damping (float, optional): damping value to condition inverse
                 (default: 0.001).
         """
+        if rpc_dist.global_communicator is not None :
+            rpc_dist.global_communicator.load_factor(kfac_layer=self,factor_type='A')
+
         if not isinstance(self.a_factor, torch.Tensor):
             raise RuntimeError(
                 'Cannot eigendecompose A before A has been computed',
@@ -323,6 +335,10 @@ class KFACEigenLayer(KFACBaseLayer):
 
     def compute_g_inv(self, damping: float = 0.001) -> None:
         """See `compute_g_inv`."""
+
+        if rpc_dist.global_communicator is not None :
+            rpc_dist.global_communicator.load_factor(kfac_layer=self,factor_type='G')
+
         if not isinstance(self.g_factor, torch.Tensor):
             raise RuntimeError(
                 'Cannot eigendecompose G before G has been computed',

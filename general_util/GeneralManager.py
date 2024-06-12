@@ -13,6 +13,7 @@ from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, un
 import kfac.rpc_distributed as rpc_distributed
 class GeneralManager:
     def __init__(self,data_dir,dataset_name,model,sampler_func = None,is_ddp=False,interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0")):
+        self.writer = None
         batch_size=64
         rank = dist.get_rank()
         world_size = dist.get_world_size()
@@ -43,6 +44,7 @@ class GeneralManager:
         self.model_avg_interval = interval
         self.is_ddp = is_ddp
         self.batch_size = batch_size
+        self.is_fault = False
 
     def init_mischief(self,disconnect_ratio=0,max_sick_iter_ratio=0.2,max_disconnected_node_num = 2, possible_disconnect_node = None):
         max_disconnect_iter = int(len(self.data_manager.train_dataset) / self.batch_size / self.world_size * max_sick_iter_ratio)
@@ -120,7 +122,7 @@ class GeneralManager:
         dist.all_reduce(correct_total_tensor)
 
         # 只在rank 0上计算最终的准确率并记录
-        if self.rank == 0:  # 假设self.rank存储了当前进程的rank
+        if self.writer is not None and self.rank == 0:  # 假设self.rank存储了当前进程的rank
             correct_sum, total_sum = correct_total_tensor.unbind()
             accuracy = correct_sum.item() / total_sum.item()
             self.writer.add_scalar('Accuracy/test', accuracy, epoch)

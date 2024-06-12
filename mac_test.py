@@ -4,12 +4,8 @@ import torch.distributed as dist
 from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 gpu = torch.device("cuda:0")
-import os
 DATA_DIR = "/Users/unbearablefate/workspace/data"
 LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs2"
-#DATA_DIR = "/home/yu/data"
-#LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs"
-import logging
 
 if __name__ == '__main__':
     timeout = datetime.timedelta(seconds=30)

@@ -14,6 +14,7 @@ from kfac.assignment import WorkAssignment
 from kfac.distributed import get_rank
 from kfac.distributed import TorchDistributedCommunicator
 from kfac.layers.base import KFACBaseLayer
+import kfac.rpc_distributed as rpc_dist
 
 logger = logging.getLogger(__name__)
 
@@ -362,14 +363,22 @@ class BaseKFACPreconditioner:
             self._tdc.flush_allreduce_buckets()
 
         # Compute Preconditioned Gradients
-        for name, layer in reversed(list(self._layers.values())):
-            if self._assignment.is_grad_worker(name):
-                layer.preconditioned_grad(damping=self.damping)
-            if self._assignment.broadcast_gradients():
-                layer.broadcast_grad(
-                    src=self._assignment.src_grad_worker(name),
-                    group=self._assignment.grad_receiver_group(name),
-                )
+        ct = len(self._layers.values())
+        for i in range(rpc_dist.global_communicator.load_inverse_max_loop):
+            for name, layer in reversed(list(self._layers.values())):
+                if not rpc_dist.global_communicator.load_eigen_tensor(layer,i):
+                    continue
+                else:
+                    ct -= 1
+                if self._assignment.is_grad_worker(name):
+                    layer.preconditioned_grad(damping=self.damping)
+                if self._assignment.broadcast_gradients():
+                    layer.broadcast_grad(
+                        src=self._assignment.src_grad_worker(name),
+                        group=self._assignment.grad_receiver_group(name),
+                    )
+            if ct == 0:
+                break
         self._tdc.flush_allreduce_buckets()
 
         scale = None if self.kl_clip is None else self._compute_grad_scale()
