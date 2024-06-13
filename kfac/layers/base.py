@@ -393,6 +393,10 @@ class KFACBaseLayer:
         Args:
             alpha (float): running average parameter (default: 0.95).
         """
+        # RPC part
+        if self.name not in rpc_distributed.global_communicator.factor_computer_list:
+            return
+
         if self._a_batch is None:
             return
         if self._a_count > 1:
@@ -409,6 +413,9 @@ class KFACBaseLayer:
         Args:
             alpha (float): running average parameter (default: 0.95).
         """
+        # RPC part
+        if self.name not in rpc_distributed.global_communicator.factor_computer_list:
+            return
         if self._g_batch is None:
             return
         if self._g_count > 1:

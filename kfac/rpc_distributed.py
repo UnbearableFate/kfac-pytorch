@@ -1,4 +1,5 @@
 import datetime
+import random
 import time
 
 import torch
@@ -105,19 +106,23 @@ class KfacRPCLayer:
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner):
+        self.skip_inverse_computation_flag = 0
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size)
         self.world_size = world_size
         self.rank = rank
         self.rpc_layers: Dict[str:KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
         self.computer_type = "" #eigen / inverse
-
+        self.factor_computer_list = []
         for name, kfac_layer in preconditioner._layers.values():
             a_handler = preconditioner._assignment.inv_worker(name, 'A')
             g_handler = preconditioner._assignment.inv_worker(name, 'G')
             self.rpc_layers[name] = KfacRPCLayer(a_handler,g_handler ,name ,kfac_layer.prediv_eigenvalues)
+            self.factor_computer_list.append(name)
 
         self.iter_of_rank = [-1] * world_size # the latest iteration of each rank received
         self.lock = threading.Lock()
+
+
 
         # hyperparameters
         self.necessary_ct = world_size - 1
@@ -209,7 +214,8 @@ class KFacRPCCommunicator:
         return self.rpc_layers[layer_name].assigned_worker[factor_type]
     
     def send_kfac_factor(self,layer_name:str,factor_tensor :torch.Tensor, factor_type:str):
-
+        if layer_name not in self.factor_computer_list:
+            return True
         target = 0
         if factor_type == "A":
             target = self.rpc_layers[layer_name].assigned_worker['A']
@@ -266,7 +272,20 @@ class KFacRPCCommunicator:
                     func=receive_eigen_tensor_g,
                     args=(self.rank, layer_name, q, d,dd, t)
                 )
-
+    def facotr_comput_lazy_wl_rebal(self):
+        forward_than_local = sum(t > self.current_t() for t in self.iter_of_rank)
+        late_than_local = sum(t > self.current_t() for t in self.iter_of_rank)
+        if forward_than_local > self.world_size * 0.5: # local is too slow, work less
+            if len(self.factor_computer_list) > 0:
+                self.factor_computer_list.pop(random.randint(0,len(self.factor_computer_list)-1))
+                return
+            else:
+                self.skip_inverse_computation_flag = 4
+        if late_than_local > self.world_size * 0.5: # local is quick, work more
+            if len(self.factor_computer_list) < len(self.rpc_layers):
+                for layer_name in self.rpc_layers.keys():
+                    if layer_name not in self.factor_computer_list:
+                        self.factor_computer_list.append(layer_name)
 
 global_communicator: KFacRPCCommunicator
 
