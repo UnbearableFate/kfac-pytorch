@@ -1,4 +1,5 @@
 import datetime
+import math
 import random
 import time
 
@@ -12,6 +13,10 @@ if TYPE_CHECKING:
     from kfac.layers.eigen import KFACEigenLayer,KFACBaseLayer
 
 import torch
+
+# 创建日志记录器
+logger = logging.getLogger('my_logger')
+logger.setLevel(logging.DEBUG)  # 设置日志级别
 
 def normalized_l2_similarity(tensor1, tensor2):
     """
@@ -93,8 +98,9 @@ class KfacRPCLayer:
 
     def load_eigen_tensor(self, kfac_layer: 'KFACEigenLayer', t):
         assert self.name == kfac_layer.name
-        if self.qa is None or self.qg is None:
+        while self.qa is None or self.qg is None:
             time.sleep(0.1)
+            #logger.debug(f"Waiting for eigen tensor of {self.name} to be ready")
         kfac_layer.qa = self.qa.clone()
         kfac_layer.qg = self.qg.clone()
         if self.prediv_eigenvalues:
@@ -122,35 +128,30 @@ class KFacRPCCommunicator:
         self.iter_of_rank = [-1] * world_size # the latest iteration of each rank received
         self.lock = threading.Lock()
 
-
-
         # hyperparameters
-        self.necessary_ct = world_size - 1
+        self.necessary_ct = world_size - 2
         self.load_inverse_max_loop = 3
         if rpc.is_available():
             print(f"RPC Communicator initialized for rank {rank}")
 
-        """
-        # 创建日志记录器
-        self.logger = logging.getLogger('my_logger')
-        self.logger.setLevel(logging.DEBUG)  # 设置日志级别
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
         # 创建一个 FileHandler，并设置级别为 DEBUG
-        file_handler = logging.FileHandler(f'app_{self.rank}_{timestamp}.log')
+        file_handler = logging.FileHandler(f'log_{rank}_{timestamp}.log')
         file_handler.setLevel(logging.DEBUG)
 
         # 创建一个日志格式器，并将其添加到 FileHandler
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(formatter)
-
+        
+        global logger
         # 将 FileHandler 添加到日志记录器
-        self.logger.addHandler(file_handler)
+        logger.addHandler(file_handler)
 
         # 移除默认的 StreamHandler（终端输出）
-        if self.logger.hasHandlers():
-            self.logger.handlers.clear()
-            self.logger.addHandler(file_handler)
-        """
+        if logger.hasHandlers():
+            logger.handlers.clear()
+            logger.addHandler(file_handler)
+
 
         global global_communicator
         global_communicator = self
@@ -174,6 +175,7 @@ class KFacRPCCommunicator:
         if self.assigned_worker(kfac_layer.name, factor_type) == self.rank:
             while not self.is_factor_ready(kfac_layer.name, factor_type):
                 time.sleep(0.1)
+                #logger.debug(f"Waiting for factor of {kfac_layer.name} to be ready")
             assert self.rpc_layers[kfac_layer.name].factor[factor_type] is not None
             kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
         return True
@@ -275,17 +277,26 @@ class KFacRPCCommunicator:
     def facotr_comput_lazy_wl_rebal(self):
         forward_than_local = sum(t > self.current_t() for t in self.iter_of_rank)
         late_than_local = sum(t > self.current_t() for t in self.iter_of_rank)
-        if forward_than_local > self.world_size * 0.5: # local is too slow, work less
-            if len(self.factor_computer_list) > 0:
-                self.factor_computer_list.pop(random.randint(0,len(self.factor_computer_list)-1))
+        if forward_than_local >= math.ceil(self.world_size * 0.7): # local is too slow, work less
+            if len(self.factor_computer_list) > 1:
+                layer_name = random.choice(self.factor_computer_list)
+                while (self.rpc_layers[layer_name].assigned_worker['A'] == self.rank or 
+                       self.rpc_layers[layer_name].assigned_worker['G'] == self.rank):
+                    layer_name = random.choice(self.factor_computer_list)
+                self.factor_computer_list.remove(layer_name)
+                logger.info(f"Skip computing factor for {layer_name} in rank {self.rank}")
                 return
             else:
                 self.skip_inverse_computation_flag = 4
-        if late_than_local > self.world_size * 0.5: # local is quick, work more
+        if late_than_local >= 1: #math.ceil(self.world_size * 0.3): # local is quick, work more
             if len(self.factor_computer_list) < len(self.rpc_layers):
                 for layer_name in self.rpc_layers.keys():
                     if layer_name not in self.factor_computer_list:
                         self.factor_computer_list.append(layer_name)
+                        logger.info(f"Add computing factor for {layer_name} in rank {self.rank}")
+
+    #def send_model_param(self, model):
+    #    for param in model.parameters():
 
 global_communicator: KFacRPCCommunicator
 

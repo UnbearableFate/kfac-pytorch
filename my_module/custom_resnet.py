@@ -62,9 +62,7 @@ transform = transforms.Compose([
 import torch.nn as nn
 import torchvision.transforms as transforms
 
-
 class MLP(nn.Module):
-    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
     def __init__(self, input_size=28 * 28, hidden_size=64, num_hidden_layers=5, output_size=10):
         super(MLP, self).__init__()
         layers = [nn.Flatten()]
@@ -83,6 +81,13 @@ class MLP(nn.Module):
         layers.append(nn.Softmax(dim=1))
 
         self.layers = nn.Sequential(*layers)
+        self._initialize_weights()
 
+    def _initialize_weights(self):
+        for layer in self.layers:
+            if isinstance(layer, nn.Linear):
+                nn.init.kaiming_uniform_(layer.weight, nonlinearity='relu')
+                nn.init.zeros_(layer.bias)
+    
     def forward(self, x):
         return self.layers(x)

@@ -1,4 +1,5 @@
 import math
+import time
 import torch
 from tqdm import tqdm
 import kfac.mischief as mischief
@@ -98,6 +99,7 @@ class GeneralManager:
                     if mischief.ITER >= mischief.LAST_AVG_ITER + self.model_avg_interval :
                         fut_list = mischief.average_health_nodes_param_async(self.model)
                         torch.futures.wait_all(fut_list)
+                rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 t.update()
             rpc_distributed.global_communicator.clear_count_dict()
             if self.writer is not None:

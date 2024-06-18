@@ -1,6 +1,7 @@
 """Base KFAC layer implementation."""
 from __future__ import annotations
 
+import random
 import time
 from typing import Callable
 from typing import cast
@@ -393,10 +394,11 @@ class KFACBaseLayer:
         Args:
             alpha (float): running average parameter (default: 0.95).
         """
+        # slow down the computation
         # RPC part
-        if self.name not in rpc_distributed.global_communicator.factor_computer_list:
+        if rpc_distributed.global_communicator is not None and self.name not in rpc_distributed.global_communicator.factor_computer_list:
             return
-
+        
         if self._a_batch is None:
             return
         if self._a_count > 1:
