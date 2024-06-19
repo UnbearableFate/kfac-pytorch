@@ -130,7 +130,6 @@ class KFacRPCCommunicator:
 
         self.iter_of_rank = [-1] * world_size # the latest iteration of each rank received
         self.lock = threading.Lock()
-        self.param_lock = threading.Lock()
 
         # hyperparameters
         self.necessary_ct = world_size - 2
@@ -139,7 +138,7 @@ class KFacRPCCommunicator:
             print(f"RPC Communicator initialized for rank {rank}")
 
         #self.init_logger(rank)
-        self.model_avg_rpc = model_param_avg_rpc.ModelAvgRPCCommunicator(world_size, rank, model ,self.current_t)
+        self.model_avg_rpc = model_param_avg_rpc.ModelAvgRPCCommunicator(world_size, rank, model ,self)
 
         global global_communicator
         global_communicator = self
@@ -163,6 +162,9 @@ class KFacRPCCommunicator:
             logger.handlers.clear()
             logger.addHandler(file_handler)
 
+    def print_rpc_state(self):
+        print(f"Iter : {self.iter_of_rank}") 
+    
     def __repr__(self):
         log = f"Rank {self.rank} : iter {self.current_t()}\n"
         for name, layer in self.rpc_layers.items():
@@ -294,9 +296,11 @@ class KFacRPCCommunicator:
                 #logger.info(f"Skip computing factor for {layer_name} in rank {self.rank}")
                 return
             else:
-                self.skip_inverse_computation_flag = 4
+                self.skip_inverse_computation_flag = True
         if late_than_local >= 1: #math.ceil(self.world_size * 0.3): # local is quick, work more
-            if len(self.factor_computer_list) < len(self.rpc_layers):
+            if self.skip_inverse_computation_flag:
+                self.skip_inverse_computation_flag = False
+            elif len(self.factor_computer_list) < len(self.rpc_layers):
                 for layer_name in self.rpc_layers.keys():
                     if layer_name not in self.factor_computer_list:
                         self.factor_computer_list.append(layer_name)

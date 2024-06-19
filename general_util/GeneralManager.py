@@ -70,6 +70,7 @@ class GeneralManager:
         for i in range(0, self.epochs):
             self.train_with_rpc(epoch=i)
             #self.test_all(epoch=i)
+        dist.barrier()
         self.writer.close()
 
     def train_with_rpc(self, epoch):
@@ -99,6 +100,11 @@ class GeneralManager:
                         rpc_distributed.global_communicator.send_model_param()
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 t.update()
+
+                if batch_idx % 20 == 0:
+                    if self.rank == 1:
+                        rpc_distributed.global_communicator.print_rpc_state()
+
             rpc_distributed.global_communicator.clear_count_dict()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
