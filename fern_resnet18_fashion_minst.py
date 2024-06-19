@@ -5,10 +5,10 @@ from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 gpu = torch.device("cuda:0")
 import os
-#DATA_DIR = "/Users/unbearablefate/workspace/data"
-#LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs2"
-DATA_DIR = "/home/yu/data"
-LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs0613"
+DATA_DIR = "/Users/unbearablefate/workspace/data"
+LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs2"
+#DATA_DIR = "/home/yu/data"
+#LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs0613"
 import logging
 
 if __name__ == '__main__':
@@ -20,7 +20,7 @@ if __name__ == '__main__':
     model = MLP(num_hidden_layers=3)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         is_ddp=False, interval=13, is_2nd_order=True, epochs=10,device='cpu')
+                         is_ddp=False, interval=3, is_2nd_order=True, epochs=5,device='cpu')
     #mgr.init_mischief(disconnect_ratio=0.2, max_sick_iter_ratio=0.2, max_disconnected_node_num=2)
     mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="avg_test")
     dist.destroy_process_group()

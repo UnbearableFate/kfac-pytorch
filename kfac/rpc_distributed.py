@@ -14,9 +14,11 @@ if TYPE_CHECKING:
 
 import torch
 
+import kfac.model_param_avg_rpc as model_param_avg_rpc
+
 # 创建日志记录器
-logger = logging.getLogger('my_logger')
-logger.setLevel(logging.DEBUG)  # 设置日志级别
+#logger = logging.getLogger('my_logger')
+#ogger.setLevel(logging.DEBUG)  # 设置日志级别
 
 def normalized_l2_similarity(tensor1, tensor2):
     """
@@ -111,7 +113,8 @@ class KfacRPCLayer:
         self.last_load_handled_tensor_version = t
 
 class KFacRPCCommunicator:
-    def __init__(self, world_size, rank, preconditioner):
+    def __init__(self, world_size, rank, preconditioner ,model):
+        self.io_layers = None
         self.skip_inverse_computation_flag = 0
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size)
         self.world_size = world_size
@@ -127,6 +130,7 @@ class KFacRPCCommunicator:
 
         self.iter_of_rank = [-1] * world_size # the latest iteration of each rank received
         self.lock = threading.Lock()
+        self.param_lock = threading.Lock()
 
         # hyperparameters
         self.necessary_ct = world_size - 2
@@ -134,6 +138,13 @@ class KFacRPCCommunicator:
         if rpc.is_available():
             print(f"RPC Communicator initialized for rank {rank}")
 
+        #self.init_logger(rank)
+        self.model_avg_rpc = model_param_avg_rpc.ModelAvgRPCCommunicator(world_size, rank, model ,self.current_t)
+
+        global global_communicator
+        global_communicator = self
+
+    def init_logger(self,rank):
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
         # 创建一个 FileHandler，并设置级别为 DEBUG
         file_handler = logging.FileHandler(f'log_{rank}_{timestamp}.log')
@@ -142,7 +153,7 @@ class KFacRPCCommunicator:
         # 创建一个日志格式器，并将其添加到 FileHandler
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(formatter)
-        
+
         global logger
         # 将 FileHandler 添加到日志记录器
         logger.addHandler(file_handler)
@@ -151,10 +162,6 @@ class KFacRPCCommunicator:
         if logger.hasHandlers():
             logger.handlers.clear()
             logger.addHandler(file_handler)
-
-
-        global global_communicator
-        global_communicator = self
 
     def __repr__(self):
         log = f"Rank {self.rank} : iter {self.current_t()}\n"
@@ -284,7 +291,7 @@ class KFacRPCCommunicator:
                        self.rpc_layers[layer_name].assigned_worker['G'] == self.rank):
                     layer_name = random.choice(self.factor_computer_list)
                 self.factor_computer_list.remove(layer_name)
-                logger.info(f"Skip computing factor for {layer_name} in rank {self.rank}")
+                #logger.info(f"Skip computing factor for {layer_name} in rank {self.rank}")
                 return
             else:
                 self.skip_inverse_computation_flag = 4
@@ -293,10 +300,10 @@ class KFacRPCCommunicator:
                 for layer_name in self.rpc_layers.keys():
                     if layer_name not in self.factor_computer_list:
                         self.factor_computer_list.append(layer_name)
-                        logger.info(f"Add computing factor for {layer_name} in rank {self.rank}")
+                        #logger.info(f"Add computing factor for {layer_name} in rank {self.rank}")
 
-    #def send_model_param(self, model):
-    #    for param in model.parameters():
+    def send_model_param(self):
+        self.model_avg_rpc.send_all_model_param()
 
 global_communicator: KFacRPCCommunicator
 

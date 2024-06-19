@@ -32,7 +32,7 @@ class GeneralManager:
         self.optimizer = torch.optim.Adam(model.parameters())
         if is_2nd_order:
             self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
-            rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner)
+            rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model)
         else:
             self.preconditioner = None
 
@@ -68,10 +68,40 @@ class GeneralManager:
             log_dir=os.path.join(log_dir, writer_name)) 
 
         for i in range(0, self.epochs):
-            self.train(epoch=i)
-            self.test_all(epoch=i)
-        
+            self.train_with_rpc(epoch=i)
+            #self.test_all(epoch=i)
         self.writer.close()
+
+    def train_with_rpc(self, epoch):
+        self.model.train()
+        self.data_manager.set_epoch(epoch)
+        train_loader = self.data_manager.train_loader
+        with tqdm(
+                total=math.ceil(len(train_loader)),
+                bar_format='{l_bar}{bar:6}{r_bar}',
+                desc=f'Epoch {epoch:3d}/{self.epochs:3d}',
+                disable=(self.rank != 0)
+        ) as t:
+            for batch_idx, (data, target) in enumerate(train_loader):
+                data = data.to(self.device)
+                target = target.to(self.device)
+                mischief.update_iter()
+                rpc_distributed.global_communicator.update_self_t()
+                self.optimizer.zero_grad()
+                output = self.model(data)
+                loss = self.loss_func(output, target)
+                loss.backward()
+                if self.preconditioner is not None:
+                    self.preconditioner.step()
+                self.optimizer.step()
+                if not self.is_ddp and self.model_avg_interval > 0:
+                    if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
+                        rpc_distributed.global_communicator.send_model_param()
+                rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                t.update()
+            rpc_distributed.global_communicator.clear_count_dict()
+            if self.writer is not None:
+                self.writer.add_scalar('Loss/train', loss.item(), epoch)
 
     def train(self, epoch):
         self.model.train()

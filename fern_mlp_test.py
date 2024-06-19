@@ -4,7 +4,6 @@ import torch.distributed as dist
 from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 gpu = torch.device("cuda:0")
-import debugpy
 import os
 import sys
 #DATA_DIR = "/Users/unbearablefate/workspace/data"
