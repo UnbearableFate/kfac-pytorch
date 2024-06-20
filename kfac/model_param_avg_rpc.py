@@ -59,7 +59,7 @@ class ModelAvgRPCCommunicator:
         for layer_name, layer in self.io_layers.items():
             if target == self.rank:
                 target = (target + 1) % self.world_size
-                self.send_model_param(target, layer_name, layer.weight, layer.bias)
+            self.send_model_param(target, layer_name, layer.weight, layer.bias)
             target = (target + 1) % self.world_size
         self.start_target = (self.start_target + 1) % self.world_size
 
@@ -68,8 +68,10 @@ model_avg_rpc_communicator: ModelAvgRPCCommunicator
 
 def receive_model_param(from_rank, from_rank_iter ,layer_name, weight, bias):
     global model_avg_rpc_communicator
-    world_size = model_avg_rpc_communicator.world_size
     model_avg_rpc_communicator.rpc_communicator.update_other_rank_iter(from_rank,from_rank_iter)
-    with torch.no_grad() and model_avg_rpc_communicator.lock:
+    with torch.no_grad():
+        if not model_avg_rpc_communicator.lock.acquire(timeout= 5):
+            raise Exception("lock acquire failed")
         model_avg_rpc_communicator.io_layers[layer_name].weight = model_avg_rpc_communicator.io_layers[layer_name].weight * 0.5 + weight * 0.5
         model_avg_rpc_communicator.io_layers[layer_name].bias = model_avg_rpc_communicator.io_layers[layer_name].bias *0.5 + bias * 0.5
+        model_avg_rpc_communicator.lock.release()

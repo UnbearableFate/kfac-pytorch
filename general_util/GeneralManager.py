@@ -69,8 +69,8 @@ class GeneralManager:
 
         for i in range(0, self.epochs):
             self.train_with_rpc(epoch=i)
-            #self.test_all(epoch=i)
-        dist.barrier()
+            self.test_all(epoch=i)
+        #dist.barrier()
         self.writer.close()
 
     def train_with_rpc(self, epoch):
@@ -95,15 +95,17 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
+                #if self.rank == 2:
+                #    time.sleep(0.1)
                 if not self.is_ddp and self.model_avg_interval > 0:
                     if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
                         rpc_distributed.global_communicator.send_model_param()
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                if self.rank == 2:
+                    time.sleep(0.1)
                 t.update()
-
-                if batch_idx % 20 == 0:
-                    if self.rank == 1:
-                        rpc_distributed.global_communicator.print_rpc_state()
+                if batch_idx % 50 == 0:
+                    rpc_distributed.global_communicator.print_rpc_state()
 
             rpc_distributed.global_communicator.clear_count_dict()
             if self.writer is not None:
@@ -142,6 +144,30 @@ class GeneralManager:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
 
     def test_all(self, epoch):
+        self.model.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for data, target in self.data_manager.test_loader:
+                data, target = data.to(self.device), target.to(self.device)
+                output = self.model(data)
+                pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+                correct += pred.eq(target.view_as(pred)).sum().item()
+                total += target.size(0)
+
+        # 把 correct 和 total 转换成tensor以便进行分布式计算
+        correct_total_tensor = torch.tensor([correct,total]).to(self.device)
+
+        # 使用dist.reduce把所有节点的correct和total累加到rank 0节点
+        dist.all_reduce(correct_total_tensor)
+
+        # 只在rank 0上计算最终的准确率并记录
+        if self.writer is not None and self.rank == 0:  # 假设self.rank存储了当前进程的rank
+            correct_sum, total_sum = correct_total_tensor.unbind()
+            accuracy = correct_sum.item() / total_sum.item()
+            self.writer.add_scalar('Accuracy/test', accuracy, epoch)
+    
+    def test_by_rpc(self, epoch):
         self.model.eval()
         correct = 0
         total = 0

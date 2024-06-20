@@ -297,6 +297,8 @@ class KFACBaseLayer:
         #if mischief.reduce_a_factor_with_sick(self, group): return
         # RPC communication
         if rpc_distributed.global_communicator is not None:
+            if rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
+                return
             rpc_distributed.global_communicator.send_kfac_factor(self.name,self.a_factor, "A")
             return
 
@@ -331,6 +333,8 @@ class KFACBaseLayer:
         #if mischief.reduce_g_factor_with_sick(self, group): return
         # RPC communication
         if rpc_distributed.global_communicator is not None:
+            if rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
+                return
             rpc_distributed.global_communicator.send_kfac_factor(self.name,self.g_factor, "G")
             return
 
@@ -396,7 +400,7 @@ class KFACBaseLayer:
         """
         # slow down the computation
         # RPC part
-        if rpc_distributed.global_communicator is not None and self.name not in rpc_distributed.global_communicator.factor_computer_list:
+        if rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
             return
         
         if self._a_batch is None:
@@ -416,8 +420,9 @@ class KFACBaseLayer:
             alpha (float): running average parameter (default: 0.95).
         """
         # RPC part
-        if self.name not in rpc_distributed.global_communicator.factor_computer_list:
+        if rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
             return
+        
         if self._g_batch is None:
             return
         if self._g_count > 1:
