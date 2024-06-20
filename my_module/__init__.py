@@ -1,1 +1,2 @@
 import my_module.custom_resnet as custom_resnet
+import my_module.model_split as model_split
