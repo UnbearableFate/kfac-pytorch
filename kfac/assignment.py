@@ -151,6 +151,7 @@ class KAISAAssignment(WorkAssignment):
                 the same inverse worker. Otherwise, distribute the factors
                 across layers in the gradient worker group (default: False).
         """
+        self.work = work
         if 0 > grad_worker_fraction or 1 < grad_worker_fraction:
             raise ValueError(
                 'grad_worker_fraction must be in [0, 1]. '

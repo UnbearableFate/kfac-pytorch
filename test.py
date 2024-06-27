@@ -1,10 +1,15 @@
-from my_module.model_split import ModelSplitter
+import kfac
+import torch.distributed as dist
 from my_module.custom_resnet import MLP
-mlp = MLP(hidden_size=317, num_hidden_layers=5)
-split_model = ModelSplitter(mlp, split_threshold=50)
+import kfac.rpc_distributed as rpc_distributed
 
-for name, layer in mlp.named_children():
-    print(name, layer)
-print("####################")
-for name, layer in split_model.named_children():
-    print(name, layer)
+import logging
+
+dist.init_process_group("gloo")
+if dist.get_rank() == 0:
+    logging.basicConfig(level=logging.NOTSET)
+mlp = MLP(num_hidden_layers=7,hidden_size=128)
+preconditioner = kfac.preconditioner.KFACPreconditioner(model=mlp)
+rpc_distributed.KFacRPCCommunicator(dist.get_world_size(),dist.get_rank(),preconditioner,mlp)
+dist.barrier()
+dist.destroy_process_group()

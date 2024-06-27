@@ -17,13 +17,13 @@ class LayerParameterStore:
         self.bias = None
 
 class ModelAvgRPCCommunicator:
-    def __init__(self, world_size, rank, model,rpc_communicator: 'KFacRPCCommunicator'):
-        self.world_size = world_size
+    def __init__(self,  rank, model,rpc_communicator: 'KFacRPCCommunicator'):
+        self.world_size = rpc_communicator.get_world_size
         self.rank = rank
         self.model = model
         self.io_layers = self.register_layer(model)
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
-        self.start_target = (self.rank + 1 ) % world_size
+        self.start_target = (self.rank + 1 ) % self.world_size()
         self.lock = threading.Lock()
 
         global model_avg_rpc_communicator
@@ -58,10 +58,10 @@ class ModelAvgRPCCommunicator:
         target = self.start_target
         for layer_name, layer in self.io_layers.items():
             if target == self.rank:
-                target = (target + 1) % self.world_size
+                target = (target + 1) % self.world_size()
             self.send_model_param(target, layer_name, layer.weight, layer.bias)
-            target = (target + 1) % self.world_size
-        self.start_target = (self.start_target + 1) % self.world_size
+            target = (target + 1) % self.world_size()
+        self.start_target = (self.start_target + 1) % self.world_size()
 
 
 model_avg_rpc_communicator: ModelAvgRPCCommunicator
@@ -69,6 +69,8 @@ model_avg_rpc_communicator: ModelAvgRPCCommunicator
 def receive_model_param(from_rank, from_rank_iter ,layer_name, weight, bias):
     global model_avg_rpc_communicator
     model_avg_rpc_communicator.rpc_communicator.update_other_rank_iter(from_rank,from_rank_iter)
+    if model_avg_rpc_communicator.rpc_communicator.current_t() - from_rank_iter > 20 : # magic number, 20 is too large
+        return # too old message
     with torch.no_grad():
         if not model_avg_rpc_communicator.lock.acquire(timeout= 5):
             raise Exception("lock acquire failed")

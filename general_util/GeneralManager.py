@@ -101,8 +101,6 @@ class GeneralManager:
                     if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
                         rpc_distributed.global_communicator.send_model_param()
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
-                #if self.rank == 2:
-                #    time.sleep(0.1)
                 t.update()
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
