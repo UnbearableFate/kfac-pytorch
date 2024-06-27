@@ -69,11 +69,14 @@ class GeneralManager:
 
         for i in range(0, self.epochs):
             self.train_with_rpc(epoch=i)
-            self.test_all(epoch=i)
+            self.test_by_rpc(epoch=i)
+
+        self.write_test_result_rpc()
         #dist.barrier()
         self.writer.close()
 
     def train_with_rpc(self, epoch):
+        start_time = time.time()
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
@@ -108,6 +111,7 @@ class GeneralManager:
             rpc_distributed.global_communicator.clear_count_dict()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
+                self.writer.add_scalar('Time/train', time.time() - start_time, epoch)
 
     def train(self, epoch):
         self.model.train()
@@ -176,18 +180,14 @@ class GeneralManager:
                 pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
                 correct += pred.eq(target.view_as(pred)).sum().item()
                 total += target.size(0)
+        rpc_distributed.global_communicator.send_rpc_test_result(correct, total, epoch)
 
-        # 把 correct 和 total 转换成tensor以便进行分布式计算
-        correct_total_tensor = torch.tensor([correct,total]).to(self.device)
-
-        # 使用dist.reduce把所有节点的correct和total累加到rank 0节点
-        dist.all_reduce(correct_total_tensor)
-
-        # 只在rank 0上计算最终的准确率并记录
-        if self.writer is not None and self.rank == 0:  # 假设self.rank存储了当前进程的rank
-            correct_sum, total_sum = correct_total_tensor.unbind()
-            accuracy = correct_sum.item() / total_sum.item()
-            self.writer.add_scalar('Accuracy/test', accuracy, epoch)
+    def write_test_result_rpc(self):
+        if self.rank != 0:
+            return
+        for e in range(self.epochs):
+            accuracy = rpc_distributed.global_communicator.wait_and_return_test_result(e)
+            self.writer.add_scalar('Accuracy/test', accuracy, e)
 
     def average_health_nodes_param_tensor_fusion_async(self):
         model = self.model

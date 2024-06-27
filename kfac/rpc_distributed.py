@@ -135,6 +135,7 @@ class KFacRPCCommunicator:
         self.io_layers = None
         self.skip_inverse_computation_flag : bool = False
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size)
+        self.origin_world_size = world_size
         self.rank = rank
         self.rpc_layers: Dict[str:KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
         self.computer_type = "" #eigen / inverse
@@ -165,6 +166,8 @@ class KFacRPCCommunicator:
         self.init_logger(rank)
         self.model_avg_rpc = model_param_avg_rpc.ModelAvgRPCCommunicator(rank, model ,self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment)
+
+        self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
 
         global global_communicator
         global_communicator = self
@@ -201,7 +204,10 @@ class KFacRPCCommunicator:
 
     def print_rpc_state(self, text = ""):
         global logger
-        logger.debug(f"current iter {self.health_node_states.values()} in rank {self.rank}, {text}")
+        log_txt = ""
+        for node_rank, state in self.health_node_states.items():
+            log_txt += f"{state}; "
+        logger.debug(f"{log_txt} in rank {self.rank}, {text}")
 
     def debug_print(self, text):
         pass
@@ -388,11 +394,17 @@ class KFacRPCCommunicator:
     def send_model_param(self):
         self.model_avg_rpc.send_all_model_param()
 
-    def rpc_test_all_send(self):
-        pass
+    def send_rpc_test_result(self, correct_ct, total_ct, epoch):
+        rpc.rpc_async(
+            to=rpc_work_name(0),
+            func=recv_rpc_test_result,
+            args=(self.rank, correct_ct, total_ct, epoch)
+        )
 
-    def rpc_test_all_recv(self):
-        pass
+    def wait_and_return_test_result(self, epoch):
+        while epoch not in self.model_accuracy_statistic or self.model_accuracy_statistic[epoch]['recv_ct'] < self.origin_world_size:
+            time.sleep(0.1)
+        return self.model_accuracy_statistic[epoch]['correct_ct'] / self.model_accuracy_statistic[epoch]['total_ct']
 
 global_communicator: KFacRPCCommunicator
 
@@ -428,3 +440,12 @@ def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, t):
         return
     global_communicator.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
     global_communicator.update_other_rank_iter(from_rank,t)
+
+def recv_rpc_test_result(from_rank, correct_ct, total_ct, epoch):
+    global global_communicator
+    if epoch not in global_communicator.model_accuracy_statistic:
+        global_communicator.model_accuracy_statistic[epoch] = {'recv_ct': 1, 'correct_ct': correct_ct, 'total_ct': total_ct}
+    else:
+        global_communicator.model_accuracy_statistic[epoch]['recv_ct'] +=1
+        global_communicator.model_accuracy_statistic[epoch]['correct_ct'] += correct_ct
+        global_communicator.model_accuracy_statistic[epoch]['total_ct'] += total_ct
