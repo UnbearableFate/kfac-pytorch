@@ -49,9 +49,10 @@ class RPCTaskManager:
                                                            self.world_size(), True)
         self.rpc_communicator.update_inverse_workers(new_assignment)
         self.assignment_generation += 1
-        for health_nodes_rank in self.rpc_communicator.health_node_states.keys():
+        #for health_nodes_rank in self.rpc_communicator.health_node_states.keys():
+        for rank in range(self.rpc_communicator.origin_world_size):
             rpc.rpc_async(
-                to=rpc_work_name(health_nodes_rank),
+                to=rpc_work_name(rank),
                 func=reassign_task,
                 args=(new_health_node_list ,new_assignment , self.assignment_generation ,self.rank ,self.currentTerm)
             )

@@ -70,9 +70,11 @@ class GeneralManager:
         for i in range(0, self.epochs):
             self.train_with_rpc(epoch=i)
             self.test_by_rpc(epoch=i)
+            #self.train(epoch=i)
+            #self.test_all(epoch=i)
 
         self.write_test_result_rpc()
-        #dist.barrier()
+        dist.barrier()
         self.writer.close()
 
     def train_with_rpc(self, epoch):
@@ -98,12 +100,12 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
-                #if self.rank == 2:
-                #    time.sleep(0.1)
                 if not self.is_ddp and self.model_avg_interval > 0:
                     if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
                         rpc_distributed.global_communicator.send_model_param()
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                if self.rank == 2:
+                    time.sleep(0.1)
                 t.update()
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
@@ -127,7 +129,6 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 mischief.update_iter()
-                rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = self.loss_func(output, target)
@@ -139,9 +140,7 @@ class GeneralManager:
                     if mischief.ITER >= mischief.LAST_AVG_ITER + self.model_avg_interval :
                         fut_list = mischief.average_health_nodes_param_async(self.model)
                         torch.futures.wait_all(fut_list)
-                rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 t.update()
-            rpc_distributed.global_communicator.clear_count_dict()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
 

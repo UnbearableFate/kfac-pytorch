@@ -158,7 +158,10 @@ class KFacRPCCommunicator:
         self.lock = threading.Lock()
 
         # hyperparameters
-        self.necessary_ct = 2
+        if self.rank == 2:
+            self.necessary_ct = 1
+        else:
+            self.necessary_ct = 2
         self.load_inverse_max_loop = 3
         if rpc.is_available():
             print(f"RPC Communicator initialized for rank {rank}")
@@ -322,7 +325,7 @@ class KFacRPCCommunicator:
                 args=(self.rank, layer_name, factor_tensor, t, factor_type)
             )
         except Exception as e:
-            print(f"Failed to send factor to {target}: {e}")
+            print(f"Failed to send factor to {target} from {self.rank}: {e}")
         return True
 
     def send_kfac_eigen_tensor(self, layer_name,q:torch.Tensor,d:torch.Tensor,dd :torch.Tensor, factor_type):
@@ -349,17 +352,23 @@ class KFacRPCCommunicator:
         for i in range(self.get_world_size()-1):
             target_rank = (self.rank + i + 1) % self.get_world_size()
             if factor_type == "A":
-                rpc.rpc_async(
-                    to=rpc_work_name(target_rank),
-                    func=receive_eigen_tensor_a,
-                    args=(self.rank, layer_name, q, d, t)
-                )
+                try :
+                    rpc.rpc_async(
+                        to=rpc_work_name(target_rank),
+                        func=receive_eigen_tensor_a,
+                        args=(self.rank, layer_name, q, d, t)
+                    )
+                except Exception as e:
+                    print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
             if factor_type == "G":
-                rpc.rpc_async(
-                    to=rpc_work_name(target_rank),
-                    func=receive_eigen_tensor_g,
-                    args=(self.rank, layer_name, q, d,dd, t)
-                )
+                try :
+                    rpc.rpc_async(
+                        to=rpc_work_name(target_rank),
+                        func=receive_eigen_tensor_g,
+                        args=(self.rank, layer_name, q, d,dd, t)
+                    )
+                except Exception as e:
+                    print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
 
     def is_factor_computation_skipped(self, layer_name):
         if self.skip_inverse_computation_flag or (layer_name not in self.participate_factor_computation_layers and layer_name not in self.assigned_layers):
@@ -395,18 +404,29 @@ class KFacRPCCommunicator:
         self.model_avg_rpc.send_all_model_param()
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
-        rpc.rpc_async(
-            to=rpc_work_name(0),
-            func=recv_rpc_test_result,
-            args=(self.rank, correct_ct, total_ct, epoch)
-        )
+        try:
+            rpc.rpc_async(
+                to=rpc_work_name(0),
+                func=recv_rpc_test_result,
+                args=(self.rank, correct_ct, total_ct, epoch)
+            )
+        except Exception as e:
+            print(f"Failed to send test result to 0: {e} from {self.rank}")
 
     def wait_and_return_test_result(self, epoch):
+        wait_time = 0
         while epoch not in self.model_accuracy_statistic or self.model_accuracy_statistic[epoch]['recv_ct'] < self.origin_world_size:
             time.sleep(0.1)
-        return self.model_accuracy_statistic[epoch]['correct_ct'] / self.model_accuracy_statistic[epoch]['total_ct']
+            wait_time += 1
+            if wait_time > 30:
+                break
+        
+        if epoch in self.model_accuracy_statistic:
+            return self.model_accuracy_statistic[epoch]['correct_ct'] / self.model_accuracy_statistic[epoch]['total_ct']
+        else:
+            return 0
 
-global_communicator: KFacRPCCommunicator
+global_communicator: KFacRPCCommunicator = None
 
 def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
     global global_communicator

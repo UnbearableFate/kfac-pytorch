@@ -6,10 +6,10 @@ from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
 gpu = torch.device("cuda:0")
 import os
-DATA_DIR = "/Users/unbearablefate/workspace/data"
-LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs0627"
-#DATA_DIR = "/home/yu/data"
-#LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs0620"
+#DATA_DIR = "/Users/unbearablefate/workspace/data"
+#LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs0627"
+DATA_DIR = "/home/yu/data"
+LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs0627"
 import logging
 
 if __name__ == '__main__':
@@ -18,11 +18,11 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    model = MLP(num_hidden_layers=3,hidden_size=16)
+    model = MLP(num_hidden_layers=3,hidden_size=64)
     #model = ModelSplitter(model, 32)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         is_ddp=False, interval=2, is_2nd_order=True, epochs=2,device='cpu')
+                         is_ddp=False, interval=2, is_2nd_order=True, epochs=40,device='cpu')
     #mgr.init_mischief(disconnect_ratio=0.2, max_sick_iter_ratio=0.2, max_disconnected_node_num=2)
     mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test01")
     dist.destroy_process_group()

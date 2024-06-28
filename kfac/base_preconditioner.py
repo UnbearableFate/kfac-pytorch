@@ -363,13 +363,25 @@ class BaseKFACPreconditioner:
             self._tdc.flush_allreduce_buckets()
 
         # Compute Preconditioned Gradients
-        ct = len(self._layers.values())
-        for i in range(rpc_dist.global_communicator.load_inverse_max_loop):
+        if rpc_dist.global_communicator is not None:
+            ct = len(self._layers.values())
+            for i in range(rpc_dist.global_communicator.load_inverse_max_loop):
+                for name, layer in reversed(list(self._layers.values())):
+                    if not rpc_dist.global_communicator.load_eigen_tensor(layer,i):
+                        continue
+                    else:
+                        ct -= 1
+                    if self._assignment.is_grad_worker(name):
+                        layer.preconditioned_grad(damping=self.damping)
+                    if self._assignment.broadcast_gradients():
+                        layer.broadcast_grad(
+                            src=self._assignment.src_grad_worker(name),
+                            group=self._assignment.grad_receiver_group(name),
+                        )
+                if ct == 0:
+                    break
+        else:
             for name, layer in reversed(list(self._layers.values())):
-                if not rpc_dist.global_communicator.load_eigen_tensor(layer,i):
-                    continue
-                else:
-                    ct -= 1
                 if self._assignment.is_grad_worker(name):
                     layer.preconditioned_grad(damping=self.damping)
                 if self._assignment.broadcast_gradients():
@@ -377,8 +389,6 @@ class BaseKFACPreconditioner:
                         src=self._assignment.src_grad_worker(name),
                         group=self._assignment.grad_receiver_group(name),
                     )
-            if ct == 0:
-                break
         self._tdc.flush_allreduce_buckets()
 
         scale = None if self.kl_clip is None else self._compute_grad_scale()

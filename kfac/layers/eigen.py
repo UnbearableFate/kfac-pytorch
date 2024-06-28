@@ -193,7 +193,7 @@ class KFACEigenLayer(KFACBaseLayer):
                 Defaults to None, the default process group.
         """
         ### RPC communication
-        if rpc_dist.global_communicator.skip_inverse_computation_flag:
+        if rpc_dist.global_communicator is not None and rpc_dist.global_communicator.skip_inverse_computation_flag:
             return
         if rpc_dist.global_communicator is not None :
             rpc_dist.global_communicator.send_kfac_eigen_tensor(layer_name=self.name, q=self.qa, d=self.da, dd=self.dgda, factor_type='A')
@@ -249,7 +249,7 @@ class KFACEigenLayer(KFACBaseLayer):
                 Defaults to None, the default process group.
         """
         ### RPC communication
-        if rpc_dist.global_communicator.skip_inverse_computation_flag:
+        if rpc_dist.global_communicator is not None and rpc_dist.global_communicator.skip_inverse_computation_flag:
             return
         if rpc_dist.global_communicator is not None :
             rpc_dist.global_communicator.send_kfac_eigen_tensor(layer_name=self.name, q=self.qg, d=self.dg, dd=self.dgda,
@@ -315,7 +315,7 @@ class KFACEigenLayer(KFACBaseLayer):
             damping (float, optional): damping value to condition inverse
                 (default: 0.001).
         """
-        if rpc_dist.global_communicator.skip_inverse_computation_flag:
+        if rpc_dist.global_communicator is not None and rpc_dist.global_communicator.skip_inverse_computation_flag:
             return
         if rpc_dist.global_communicator is not None :
             rpc_dist.global_communicator.load_factor(kfac_layer=self,factor_type='A')
@@ -343,7 +343,7 @@ class KFACEigenLayer(KFACBaseLayer):
         """See `compute_g_inv`."""
 
         # RPC part
-        if rpc_dist.global_communicator.skip_inverse_computation_flag:
+        if rpc_dist.global_communicator is not None and rpc_dist.global_communicator.skip_inverse_computation_flag:
             return
         if rpc_dist.global_communicator is not None :
             rpc_dist.global_communicator.load_factor(kfac_layer=self,factor_type='G')

@@ -48,11 +48,14 @@ class ModelAvgRPCCommunicator:
         with torch.no_grad():
             if target == self.rank:
                 return
-            rpc.rpc_async(
-                to=rpc_work_name(target),
-                func=receive_model_param,
-                args=(self.rank,self.rpc_communicator.current_t(), layer_name,weight, bias)
-            )
+            try:
+                rpc.rpc_async(
+                    to=rpc_work_name(target),
+                    func=receive_model_param,
+                    args=(self.rank,self.rpc_communicator.current_t(), layer_name,weight, bias)
+                )
+            except Exception as e:
+                print(f"send_model_param failed {e} from {self.rank} to {target}")
 
     def send_all_model_param(self):
         target = self.start_target

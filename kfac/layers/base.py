@@ -400,7 +400,7 @@ class KFACBaseLayer:
         """
         # slow down the computation
         # RPC part
-        if rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
+        if rpc_distributed.global_communicator is not None and rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
             return
         
         if self._a_batch is None:
@@ -420,7 +420,7 @@ class KFACBaseLayer:
             alpha (float): running average parameter (default: 0.95).
         """
         # RPC part
-        if rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
+        if rpc_distributed.global_communicator is not None and rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
             return
         
         if self._g_batch is None:
