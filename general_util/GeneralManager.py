@@ -13,7 +13,7 @@ import kfac
 from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 import kfac.rpc_distributed as rpc_distributed
 class GeneralManager:
-    def __init__(self,data_dir,dataset_name,model,sampler_func = None,is_ddp=False,interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0")):
+    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0")):
         self.writer = None
         batch_size=64
         rank = dist.get_rank()
@@ -25,7 +25,7 @@ class GeneralManager:
                                     sampler=sampler_func, batch_size=batch_size)
 
         model = model.to(device)
-        if is_ddp:
+        if train_com_method == 'ddp':
             model = torch.nn.parallel.DistributedDataParallel(model)
         
         self.loss_func = nn.CrossEntropyLoss() 
@@ -43,7 +43,7 @@ class GeneralManager:
         self.world_size = world_size
         self.rank = rank
         self.model_avg_interval = interval
-        self.is_ddp = is_ddp
+        self.train_com_method = train_com_method
         self.batch_size = batch_size
         self.is_fault = False
 
@@ -67,17 +67,21 @@ class GeneralManager:
         self.writer = SummaryWriter(
             log_dir=os.path.join(log_dir, writer_name)) 
 
+        
         for i in range(0, self.epochs):
-            self.train_with_rpc(epoch=i)
-            self.test_by_rpc(epoch=i)
-            #self.train(epoch=i)
-            #self.test_all(epoch=i)
+            self.train(epoch=i)
+            if self.train_com_method == "rpc":
+                self.test_by_rpc(epoch=i)
+            else:
+                self.test_all(epoch=i)
+        
+        if self.train_com_method == "rpc": 
+            self.write_test_result_rpc()
 
-        self.write_test_result_rpc()
         dist.barrier()
         self.writer.close()
 
-    def train_with_rpc(self, epoch):
+    def train(self, epoch):
         start_time = time.time()
         self.model.train()
         self.data_manager.set_epoch(epoch)
@@ -100,50 +104,31 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
-                if not self.is_ddp and self.model_avg_interval > 0:
-                    if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
-                        rpc_distributed.global_communicator.send_model_param()
-                rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
-                rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
-                #if self.rank == 2 and batch_idx > 20:
-                #    time.sleep(1)
+                
+                if self.train_com_method != 'ddp' and batch_idx % self.model_avg_interval == 0 :
+                    if self.train_com_method == "rpc":
+                        self.train_communication_avg_rpc()
+                    elif self.train_com_method == "allreduce":
+                        self.train_communication_allreduce_avg()
+                        if batch_idx % 50 == 0:
+                            rpc_distributed.global_communicator.print_rpc_state()
                 t.update()
-                if batch_idx % 50 == 0:
-                    rpc_distributed.global_communicator.print_rpc_state()
 
             rpc_distributed.global_communicator.clear_count_dict()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train', time.time() - start_time, epoch)
 
-    def train(self, epoch):
-        self.model.train()
-        self.data_manager.set_epoch(epoch)
-        train_loader = self.data_manager.train_loader
-        with tqdm(
-                total=math.ceil(len(train_loader)),
-                bar_format='{l_bar}{bar:6}{r_bar}',
-                desc=f'Epoch {epoch:3d}/{self.epochs:3d}',
-                disable=(self.rank != 0)
-        ) as t:
-            for batch_idx, (data, target) in enumerate(train_loader):
-                data = data.to(self.device)
-                target = target.to(self.device)
-                mischief.update_iter()
-                self.optimizer.zero_grad()
-                output = self.model(data)
-                loss = self.loss_func(output, target)
-                loss.backward()
-                if self.preconditioner is not None:
-                    self.preconditioner.step()
-                self.optimizer.step()
-                if not self.is_ddp and self.model_avg_interval > 0:
-                    if mischief.ITER >= mischief.LAST_AVG_ITER + self.model_avg_interval :
-                        fut_list = mischief.average_health_nodes_param_async(self.model)
-                        torch.futures.wait_all(fut_list)
-                t.update()
-            if self.writer is not None:
-                self.writer.add_scalar('Loss/train', loss.item(), epoch)
+    def train_communication_allreduce_avg(self):
+        if mischief.ITER >= mischief.LAST_AVG_ITER + self.model_avg_interval :
+            fut_list = mischief.average_health_nodes_param_async(self.model)
+            torch.futures.wait_all(fut_list)
+
+    def train_communication_avg_rpc(self):
+        if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
+            rpc_distributed.global_communicator.send_model_param()
+            rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+            #rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
 
     def test_all(self, epoch):
         self.model.eval()

@@ -69,8 +69,11 @@ class ModelAvgRPCCommunicator:
         self.start_target = (self.start_target + 1) % self.world_size()
 
     def send_all_model_param_alg02(self):
+        target_chioce_list = set([state.rank for state in self.rpc_communicator.get_health_node_list()])
+        target_chioce_list.remove(self.rank)
+        target_chioce_list = list(target_chioce_list) 
         for layer_name, layer in self.io_layers.items():
-            target = random.choice(self.rpc_communicator.get_health_node_list()).rank
+            target = random.choice(target_chioce_list)
             self.send_model_param(target, layer_name, layer.weight, layer.bias)
 
 model_avg_rpc_communicator: ModelAvgRPCCommunicator
