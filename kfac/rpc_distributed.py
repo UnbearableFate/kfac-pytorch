@@ -152,9 +152,9 @@ class KFacRPCCommunicator:
                 self.candidate_participate_factor_computation_layers.append(name)
                 self.participate_factor_computation_layers.append(name)
 
-        self.health_node_states = dict()
+        self.node_states = dict()
         for i in range(world_size):
-            self.health_node_states[i] = NodeState(i)
+            self.node_states[i] = NodeState(i)
         self.lock = threading.Lock()
 
         # hyperparameters
@@ -175,15 +175,21 @@ class KFacRPCCommunicator:
         global global_communicator
         global_communicator = self
 
+    def get_health_node_list(self) -> list[NodeState]:
+        return [state for rank, state in self.node_states.items() if state.health]
+
+    def get_sick_node_list(self) -> list[NodeState]:
+        return [state for rank, state in self.node_states.items() if not state.health]
+
     def max_iter_in_cluster(self):
         # return max iter in node_states
-        return max([state.iter for state in self.health_node_states.values()])
+        return max([state.iter for state in self.get_health_node_list()])
 
     def min_iter_in_cluster(self):
-        return min([state.iter for state in self.health_node_states.values()])
+        return min([state.iter for state in self.get_health_node_list()])
 
     def median_iter_in_cluster(self):
-        iters = [state.iter for state in self.health_node_states.values()]
+        iters = [state.iter for state in self.get_health_node_list()]
         return statistics.median(iters)
 
     def init_logger(self,rank):
@@ -208,7 +214,7 @@ class KFacRPCCommunicator:
     def print_rpc_state(self, text = ""):
         global logger
         log_txt = ""
-        for node_rank, state in self.health_node_states.items():
+        for node_rank, state in self.node_states.items():
             log_txt += f"{state}; "
         logger.debug(f"{log_txt} in rank {self.rank}, {text}")
 
@@ -262,24 +268,22 @@ class KFacRPCCommunicator:
     def shutdown(self):
         rpc.shutdown()
     def update_self_t(self):
-        self.health_node_states[self.rank].iter += 1
+        self.node_states[self.rank].iter += 1
 
     def current_t(self):
-        return self.health_node_states[self.rank].iter
+        return self.node_states[self.rank].iter
 
     def update_other_rank_iter(self, from_rank,t):
-        if from_rank not in self.health_node_states:
-            self.health_node_states[from_rank] = NodeState(from_rank)
-        self.health_node_states[from_rank].iter = max(self.health_node_states[from_rank].iter, t)
+        if from_rank not in self.node_states:
+            raise RuntimeError(f"Rank {from_rank} is not in the node_states")
+        self.node_states[from_rank].iter = max(self.node_states[from_rank].iter, t)
 
-    def update_node_state_list(self, new_node_list):
-        for node_rank in self.health_node_states.keys():
-            if node_rank not in new_node_list:
-                self.health_node_states.pop(node_rank)
-
-        for node_rank in new_node_list:
-            if node_rank not in self.health_node_states:
-                self.health_node_states[node_rank] = NodeState(node_rank)
+    def update_node_state_list(self, new_health_node_list):
+        for node_rank in self.node_states:
+            if node_rank in new_health_node_list:
+                self.node_states[node_rank].health = True
+            else:
+                self.node_states[node_rank].health = False
 
     def update_inverse_workers(self, new_assignment):
         self.task_reassign_rpc.assignment._inv_assignments = new_assignment
@@ -297,7 +301,10 @@ class KFacRPCCommunicator:
                 self.participate_factor_computation_layers.append(name)
 
     def get_world_size(self):
-        return len(self.health_node_states.keys())
+        return len(self.node_states.keys())
+
+    def get_health_world_size(self):
+        return len(self.get_health_node_list())
 
     def is_factor_ready(self, layer_name, factor_type):
         current_t = self.current_t()
@@ -377,8 +384,8 @@ class KFacRPCCommunicator:
 
     def facotr_comput_lazy_wl_rebal(self):
         current_t = self.current_t()
-        forward_than_local = sum(state.iter > current_t for state in self.health_node_states.values())
-        late_than_local = sum(state.iter < current_t for state in self.health_node_states.values())
+        forward_than_local = sum(state.iter > current_t for state in self.get_health_node_list())
+        late_than_local = sum(state.iter < current_t for state in self.get_health_node_list())
         iter_diff = self.max_iter_in_cluster() - current_t
 
         random.shuffle(self.candidate_participate_factor_computation_layers)
@@ -401,7 +408,7 @@ class KFacRPCCommunicator:
                         break
 
     def send_model_param(self):
-        self.model_avg_rpc.send_all_model_param()
+        self.model_avg_rpc.send_all_model_param_alg01()
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
         try:

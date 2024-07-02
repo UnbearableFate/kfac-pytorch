@@ -257,7 +257,12 @@ class KAISAAssignment(WorkAssignment):
             of the sub-dicts are the worker ranks that the corresponding factor
             should be computed on.
         """
-        worker_loads = [0.0] * world_size
+        #worker_loads = [0.0] * world_size
+        worker_loads = {}
+        for group in worker_groups:
+            for i in group:
+                worker_loads[i] = 0.0
+
         assignments = {
             layer: {factor: -1 for factor in factors}
             for layer, factors in work.items()

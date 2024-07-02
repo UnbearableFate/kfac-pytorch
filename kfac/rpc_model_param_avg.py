@@ -1,3 +1,4 @@
+import random
 import threading
 from typing import Dict
 from typing import Callable
@@ -25,6 +26,7 @@ class ModelAvgRPCCommunicator:
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
         self.start_target = (self.rank + 1 ) % self.world_size()
         self.lock = threading.Lock()
+        random.seed((rank+13)*17)
 
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
@@ -57,7 +59,7 @@ class ModelAvgRPCCommunicator:
             except Exception as e:
                 print(f"send_model_param failed {e} from {self.rank} to {target}")
 
-    def send_all_model_param(self):
+    def send_all_model_param_alg01(self):
         target = self.start_target
         for layer_name, layer in self.io_layers.items():
             if target == self.rank:
@@ -66,14 +68,20 @@ class ModelAvgRPCCommunicator:
             target = (target + 1) % self.world_size()
         self.start_target = (self.start_target + 1) % self.world_size()
 
+    def send_all_model_param_alg02(self):
+        for layer_name, layer in self.io_layers.items():
+            target = random.choice(self.rpc_communicator.get_health_node_list()).rank
+            self.send_model_param(target, layer_name, layer.weight, layer.bias)
 
 model_avg_rpc_communicator: ModelAvgRPCCommunicator
 
 def receive_model_param(from_rank, from_rank_iter ,layer_name, weight, bias):
     global model_avg_rpc_communicator
     model_avg_rpc_communicator.rpc_communicator.update_other_rank_iter(from_rank,from_rank_iter)
-    if model_avg_rpc_communicator.rpc_communicator.current_t() - from_rank_iter > 20 : # magic number, 20 is too large
-        return # too old message
+    #if model_avg_rpc_communicator.rpc_communicator.current_t() - from_rank_iter > 20 : # magic number, 20 is too large
+    #    return # too old message
+    diff = model_avg_rpc_communicator.rpc_communicator.current_t() - from_rank_iter
+
     with torch.no_grad():
         if not model_avg_rpc_communicator.lock.acquire(timeout= 5):
             raise Exception("lock acquire failed")
