@@ -54,7 +54,7 @@ class NodeState():
         self.health = True
 
     def __str__(self):
-        return f"rank {self.rank}'s iter:{self.iter}"
+        return f"R{self.rank} :t{self.iter}"
 
 class KfacRPCLayer:
     def __init__(self,a_handler,g_handler ,name , prediv_eigenvalues):
@@ -120,7 +120,7 @@ class KfacRPCLayer:
         assert self.name == kfac_layer.name
         while self.qa is None or self.qg is None:
             time.sleep(0.1)
-            #logger.debug(f"Waiting for eigen tensor of {self.name} to be ready in rank {global_communicator.rank}")
+            logger.debug(f"Waiting for eigen tensor of {self.name} to be ready in rank {global_communicator.rank}")
         kfac_layer.qa = self.qa.clone()
         kfac_layer.qg = self.qg.clone()
         if self.prediv_eigenvalues:
@@ -158,10 +158,7 @@ class KFacRPCCommunicator:
         self.lock = threading.Lock()
 
         # hyperparameters
-        if self.rank == 2:
-            self.necessary_ct = 1
-        else:
-            self.necessary_ct = 2
+        self.necessary_ct = 1
         self.load_inverse_max_loop = 3
         if rpc.is_available():
             print(f"RPC Communicator initialized for rank {rank}")
@@ -172,24 +169,30 @@ class KFacRPCCommunicator:
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
 
+        self.update_assignment_flag = False
+        self.update_assignment_callback = None
+
         global global_communicator
         global_communicator = self
 
-    def get_health_node_list(self) -> list[NodeState]:
+    def get_health_node_state_list(self) -> list[NodeState]:
         return [state for rank, state in self.node_states.items() if state.health]
+
+    def get_health_nodes_rank_list(self):
+        return [state.rank for state in self.node_states.values() if state.health]
 
     def get_sick_node_list(self) -> list[NodeState]:
         return [state for rank, state in self.node_states.items() if not state.health]
 
     def max_iter_in_cluster(self):
         # return max iter in node_states
-        return max([state.iter for state in self.get_health_node_list()])
+        return max([state.iter for state in self.get_health_node_state_list()])
 
     def min_iter_in_cluster(self):
-        return min([state.iter for state in self.get_health_node_list()])
+        return min([state.iter for state in self.get_health_node_state_list()])
 
     def median_iter_in_cluster(self):
-        iters = [state.iter for state in self.get_health_node_list()]
+        iters = [state.iter for state in self.get_health_node_state_list()]
         return statistics.median(iters)
 
     def init_logger(self,rank):
@@ -216,7 +219,7 @@ class KFacRPCCommunicator:
         log_txt = ""
         for node_rank, state in self.node_states.items():
             log_txt += f"{state}; "
-        logger.debug(f"{log_txt} in rank {self.rank}, {text}")
+        logger.debug(f"Rank {self.rank}: {log_txt} , {text}")
 
     def debug_print(self, text):
         pass
@@ -243,6 +246,7 @@ class KFacRPCCommunicator:
         if self.assigned_worker(kfac_layer.name, factor_type) == self.rank:
             while not self.is_factor_ready(kfac_layer.name, factor_type):
                 time.sleep(0.1)
+                self.print_rpc_state(f"Waiting for factor {factor_type} of {kfac_layer.name} to be ready")
             assert self.rpc_layers[kfac_layer.name].factor[factor_type] is not None
             kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
         return True
@@ -285,11 +289,13 @@ class KFacRPCCommunicator:
             else:
                 self.node_states[node_rank].health = False
 
-    def update_inverse_workers(self, new_assignment):
+    def update_inverse_workers(self, new_assignment, new_assignment_generation):
         self.task_reassign_rpc.assignment._inv_assignments = new_assignment
         self.assigned_layers.clear()
         self.candidate_participate_factor_computation_layers.clear()
         self.participate_factor_computation_layers.clear()
+        if new_assignment_generation is not None:
+            self.task_reassign_rpc.assignment_generation = new_assignment_generation
         for name, kfac_layer in self.rpc_layers.items():
             a_handler = new_assignment[name]['A']
             g_handler =  new_assignment[name]['G']
@@ -299,12 +305,16 @@ class KFacRPCCommunicator:
             else:
                 self.candidate_participate_factor_computation_layers.append(name)
                 self.participate_factor_computation_layers.append(name)
+        self.print_rpc_state(f"new assignment: {new_assignment}")
+        self.update_assignment_flag = False
+        self.update_assignment_callback = None
+        self.skip_inverse_computation_flag = False
 
     def get_world_size(self):
         return len(self.node_states.keys())
 
     def get_health_world_size(self):
-        return len(self.get_health_node_list())
+        return len(self.get_health_node_state_list())
 
     def is_factor_ready(self, layer_name, factor_type):
         current_t = self.current_t()
@@ -384,8 +394,8 @@ class KFacRPCCommunicator:
 
     def facotr_comput_lazy_wl_rebal(self):
         current_t = self.current_t()
-        forward_than_local = sum(state.iter > current_t for state in self.get_health_node_list())
-        late_than_local = sum(state.iter < current_t for state in self.get_health_node_list())
+        forward_than_local = sum(state.iter > current_t for state in self.get_health_node_state_list())
+        late_than_local = sum(state.iter < current_t for state in self.get_health_node_state_list())
         iter_diff = self.max_iter_in_cluster() - current_t
 
         random.shuffle(self.candidate_participate_factor_computation_layers)
@@ -440,7 +450,7 @@ def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
     self = global_communicator
 
     if self.rpc_layers[layer_name].assigned_worker[factor_type] != self.rank:
-        print(f"Received factor from {from_rank} for {layer_name} but this rank is not assigned to this layer")
+        print(f"Received factor from {from_rank} for {layer_name} but this rank{self.rank} is not assigned to this layer")
         '''
         if from_rank in self.health_node_states and from_iter >= self.current_t():
             # it is possible that this node don't receive new assignment yet

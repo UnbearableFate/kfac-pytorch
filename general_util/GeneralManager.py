@@ -32,7 +32,7 @@ class GeneralManager:
         self.optimizer = torch.optim.Adam(model.parameters())
         if is_2nd_order:
             self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
-            rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model)
+            self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model)
         else:
             self.preconditioner = None
 
@@ -93,6 +93,9 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t:
             for batch_idx, (data, target) in enumerate(train_loader):
+                if self.train_com_method == "rpc" and self.rpc_communicator.update_assignment_flag:
+                    self.rpc_communicator.update_assignment_callback()
+
                 data = data.to(self.device)
                 target = target.to(self.device)
                 mischief.update_iter()
@@ -107,11 +110,15 @@ class GeneralManager:
                 
                 if self.train_com_method != 'ddp' and batch_idx % self.model_avg_interval == 0 :
                     if self.train_com_method == "rpc":
+                        self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                         self.train_communication_avg_rpc()
+                        if batch_idx % 5 == 0:
+                            rpc_distributed.global_communicator.print_rpc_state()
                     elif self.train_com_method == "allreduce":
                         self.train_communication_allreduce_avg()
-                        if batch_idx % 50 == 0:
-                            rpc_distributed.global_communicator.print_rpc_state()
+
+                if self.rank == 2 and batch_idx > 10:
+                    time.sleep(4)
                 t.update()
 
             rpc_distributed.global_communicator.clear_count_dict()
@@ -129,6 +136,7 @@ class GeneralManager:
             rpc_distributed.global_communicator.send_model_param()
             rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
             #rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
+
 
     def test_all(self, epoch):
         self.model.eval()
