@@ -32,7 +32,8 @@ class GeneralManager:
         self.optimizer = torch.optim.Adam(model.parameters())
         if is_2nd_order:
             self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
-            self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model)
+            if train_com_method == "rpc":
+                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model)
         else:
             self.preconditioner = None
 
@@ -86,20 +87,19 @@ class GeneralManager:
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
-        with tqdm(
+        with (tqdm(
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
                 desc=f'Epoch {epoch:3d}/{self.epochs:3d}',
                 disable=(self.rank != 0)
-        ) as t:
+        ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                if self.train_com_method == "rpc" and self.rpc_communicator.update_assignment_flag:
-                    self.rpc_communicator.update_assignment_callback()
 
                 data = data.to(self.device)
                 target = target.to(self.device)
                 mischief.update_iter()
-                rpc_distributed.global_communicator.update_self_t()
+                if rpc_distributed.global_communicator is not None:
+                    rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = self.loss_func(output, target)
@@ -112,13 +112,28 @@ class GeneralManager:
                     if self.train_com_method == "rpc":
                         self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                         self.train_communication_avg_rpc()
-                        if batch_idx % 5 == 0:
+                        if batch_idx % 10 == 0:
                             rpc_distributed.global_communicator.print_rpc_state()
                     elif self.train_com_method == "allreduce":
                         self.train_communication_allreduce_avg()
 
-                if self.rank == 2 and batch_idx > 10:
-                    time.sleep(4)
+                if self.rank == 2 :
+                    if epoch == 0  and 10 < batch_idx <= 15:
+                        time.sleep(3)
+                    else:
+                        self.rpc_communicator.restart_sick_node()
+
+                if self.train_com_method == "rpc":
+                    rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                    rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
+
+                    if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
+                        self.rpc_communicator.task_reassign_rpc.reassign_task_callback()
+                    if self.rpc_communicator.update_assignment_callback is not None:
+                        self.rpc_communicator.update_assignment_callback()
+                    if self.rpc_communicator.send_model_param_callback is not None:
+                        self.rpc_communicator.send_model_param_callback()
+
                 t.update()
 
             rpc_distributed.global_communicator.clear_count_dict()
@@ -134,9 +149,6 @@ class GeneralManager:
     def train_communication_avg_rpc(self):
         if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
             rpc_distributed.global_communicator.send_model_param()
-            rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
-            #rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
-
 
     def test_all(self, epoch):
         self.model.eval()

@@ -1,3 +1,4 @@
+import threading
 from functools import reduce
 from functools import partial
 import torch.distributed.rpc as rpc
@@ -17,12 +18,19 @@ class RPCTaskManager:
         self.world_size = rpc_communicator.get_health_world_size
         self.assignment :'KAISAAssignment' = assignment
 
-        self.leader_rank = 3
+        self.leader_rank = 0
         self.currentTerm = 0
         self.votedFor = None
         self.voted_for_me_set = set()
         self.election_period = 0
         self.assignment_generation = 0
+
+        self.reassign_task_callback = None
+        self.reassign_task_reserve_health_nodes = set()
+        self.resurrection_nodes = set()
+
+        self.reassign_lock = threading.Lock()
+
         if self.rank == 0:
             self.identity = 0 # leader
         else:
@@ -30,48 +38,102 @@ class RPCTaskManager:
 
         global rpc_task_manager
         rpc_task_manager = self
+
     def check_and_reassign(self): # call by leader
         if self.leader_rank == self.rank:
-            median_iter = self.rpc_communicator.median_iter_in_cluster()
-            min_iter = self.rpc_communicator.min_iter_in_cluster()
+            median_iter = self.rpc_communicator.median_iter_in_health_nodes()
+            min_iter = self.rpc_communicator.min_iter_in_health_nodes()
             if median_iter - min_iter > RPCTaskManager.slow_tolerance_value:
-                self.reassign_task(min_iter)
+                health_nodes, sick_nodes = self.pick_health_and_sick_nodes(min_iter)
+                self.rpc_communicator.print_rpc_state(f"find slow nodes {sick_nodes} and health nodes {health_nodes}")
+                if self.rank in sick_nodes:
+                    self.rpc_communicator.print_rpc_state(f"leader itself is slow ,wait for next election")
+                    return # leader itself is slow ,wait for next election
+                with self.reassign_lock:
+                    self.reassign_task_reserve_health_nodes = set(health_nodes)
+                    if self.reassign_task_callback is None:
+                        self.reassign_task_callback = partial(self.reassign_task)
+                self.rpc_communicator.print_rpc_state(
+                    f"update reassign_task_reserve_health_nodes {self.reassign_task_reserve_health_nodes}")
 
-    def reassign_task(self,min_iter): # call by leader
+    def pick_health_and_sick_nodes(self, min_iter): # call by leader
+        health_nodes = []
+        sick_nodes = []
         for state in self.rpc_communicator.get_health_node_state_list():
             rank = state.rank
-            if self.rpc_communicator.node_states[rank].iter - min_iter <= 1:
-                if rank == self.rank:
-                    return # leader itself is slow ,wait for next election
-                self.rpc_communicator.node_states[rank].health = False
+            if self.rpc_communicator.node_states[rank].iter - min_iter <= 2:
+                sick_nodes.append(rank)
+            else:
+                health_nodes.append(rank)
+        return health_nodes, sick_nodes
 
-        workgroup = [state.rank for state in self.rpc_communicator.get_health_node_state_list()]
+    def reassign_task(self): # call by leader
+        self.reassign_lock.acquire()
+        if len(self.reassign_task_reserve_health_nodes) == 0:
+            self.reassign_task_reserve_health_nodes = set(self.rpc_communicator.get_health_nodes_rank_list())
+        workgroup = list(self.reassign_task_reserve_health_nodes | self.resurrection_nodes)
         new_assignment = self.assignment.greedy_assignment(self.assignment.work, [workgroup],
                                                            self.world_size(), True)
-        self.rpc_communicator.update_inverse_workers(new_assignment,None)
-        self.assignment_generation += 1
-        #for health_nodes_rank in self.rpc_communicator.health_node_states.keys():
-        self.rpc_communicator.print_rpc_state(f"reassign task in workgroup {workgroup}, new assignment: {new_assignment}")
+        self.rpc_communicator.update_node_state_and_inverse_assignment(workgroup, new_assignment, self.assignment_generation+1)
+
+        send_task = dict()
+        if len(self.resurrection_nodes) > 0:
+            send_task = self.rpc_communicator.arrange_to_send_the_latest_model()
+            self.rpc_communicator.print_rpc_state(
+                f"send new model to resurrection nodes {self.resurrection_nodes} with send_task {send_task}")
+
         for rank in self.rpc_communicator.get_health_nodes_rank_list():
-            try:
-                rpc.rpc_async(
-                    to=rpc_work_name(rank),
-                    func=reassign_task,
-                    args=(workgroup ,new_assignment , self.assignment_generation ,self.rank ,self.currentTerm)
-                )
-            except Exception as e:
-                print(f"reassign task failed {e} from {self.rank} to {rank}")
-        self.rpc_communicator.print_rpc_state(f"reassign task to health nodes {self.rpc_communicator.get_health_nodes_rank_list()} done")
+            if rank == self.rank:
+                if rank in send_task:
+                    self.rpc_communicator.send_model_param_callback = partial(
+                        self.rpc_communicator.send_new_model_to_resurrection_node, send_task[rank],
+                        list(self.resurrection_nodes))
+                continue
+            if rank in send_task:
+                self.rpc_communicator.print_rpc_state(
+                    f"reassign task {new_assignment} to {rank} with send_task {send_task[rank]}")
+                try:
+                    rpc.rpc_async(
+                        to=rpc_work_name(rank),
+                        func=recv_reassign_task,
+                        args=(workgroup, new_assignment, self.assignment_generation, self.rank, self.currentTerm, send_task[rank], list(self.resurrection_nodes))
+                    )
+                except Exception as e:
+                    print(f"reassign task failed {e} from {self.rank} to {rank}")
+            else:
+                self.rpc_communicator.print_rpc_state(
+                    f"reassign task {new_assignment} to {rank}")
+                try:
+                    rpc.rpc_async(
+                        to=rpc_work_name(rank),
+                        func=recv_reassign_task,
+                        args=(workgroup ,new_assignment , self.assignment_generation ,self.rank ,self.currentTerm , None, None)
+                    )
+                except Exception as e:
+                    print(f"reassign task failed {e} from {self.rank} to {rank}")
         for rank in [state.rank for state in self.rpc_communicator.get_sick_node_list()]:
+            self.rpc_communicator.print_rpc_state(
+                f"reassign task {new_assignment} to sick {rank}")
             try:
                 rpc.rpc_async(
                     to=rpc_work_name(rank),
-                    func=reassign_task,
-                    args=(workgroup,new_assignment , self.assignment_generation ,self.rank ,self.currentTerm)
+                    func=recv_reassign_task,
+                    args=(workgroup,new_assignment , self.assignment_generation ,self.rank ,self.currentTerm, None, None)
                 )
             except Exception as e:
                 print(f"reassign task failed {e} from {self.rank} to {rank}")
-        self.rpc_communicator.print_rpc_state(f"reassign task to sick nodes done")
+        self.reassign_task_reserve_health_nodes.clear()
+        self.resurrection_nodes.clear()
+        self.reassign_task_callback = None
+        self.reassign_lock.release()
+
+    def update_follwer_state(self,from_rank,from_term):
+        self.currentTerm = from_term
+        self.election_period = -1
+        self.identity = 1
+        self.votedFor = None
+        self.voted_for_me_set.clear()
+        self.leader_rank = from_rank
 
     def electing_new_leader(self): # call in loop
         #leader_iter = self.rpc_communicator.health_node_states[self.leader_rank].iter
@@ -106,6 +168,19 @@ class RPCTaskManager:
         elif self.identity == 2 and self.election_period < RPCTaskManager.max_election_period:
             self.election_period += 1
 
+    def resurrection_declaration(self):  # call by sick node
+        for rank in self.rpc_communicator.node_states.keys():
+            if rank == self.rank:
+                continue
+            try:
+                rpc.rpc_async(
+                    to=rpc_work_name(rank),
+                    func=accept_regression_request,
+                    args=(self.rank, self.currentTerm)
+                )
+            except Exception as e:
+                print(f"resurrection declaration failed {e} from {self.rank} to {rank}")
+
 rpc_task_manager:RPCTaskManager
 
 def request_vote(candidateTerm, candidateId): # recv by follower
@@ -135,22 +210,27 @@ def grant_vote(voterTerm, voterId, candidateTerm): # recv by candidate
             rpc_task_manager.election_period = -1
             rpc_task_manager.check_and_reassign()
 
-def reassign_task(new_health_node_list, new_assignment , assignment_generation, from_rank , from_term): # recv by health follower
+def recv_reassign_task(new_health_node_list, new_assignment, assignment_generation, from_rank, from_term , send_need_layer_names = None, send_to = None): # recv by health follower
     global rpc_task_manager
     if from_term < rpc_task_manager.currentTerm:
         return
-    print(f"get new task {rpc_task_manager.rank}: new nodes {new_health_node_list}")
-    rpc_task_manager.currentTerm = from_term
-    rpc_task_manager.election_period = -1
-    rpc_task_manager.identity = 1
-    rpc_task_manager.votedFor = None
-    rpc_task_manager.voted_for_me_set.clear()
-    rpc_task_manager.leader_rank = from_rank
+    rpc_task_manager.update_follwer_state(from_rank, from_term)
     rpc_task_manager.rpc_communicator.update_node_state_list(new_health_node_list)
-    print(f"update nodes list at {rpc_task_manager.rank} to {new_health_node_list}")
+    rpc_task_manager.rpc_communicator.print_rpc_state(f"get new assignment{assignment_generation}: {new_assignment} from leader {from_rank} update health_nodes {new_health_node_list} ")
     rpc_task_manager.rpc_communicator.update_assignment_callback = partial(rpc_task_manager.rpc_communicator.update_inverse_workers, new_assignment, assignment_generation)
     rpc_task_manager.rpc_communicator.update_assignment_flag = True
+    if send_need_layer_names is not None and send_to is not None:
+        rpc_task_manager.rpc_communicator.send_model_param_callback = partial(rpc_task_manager.rpc_communicator.send_new_model_to_resurrection_node,send_need_layer_names,send_to)
 
+def accept_regression_request(from_rank, from_term):
+    if rpc_task_manager.rank != rpc_task_manager.leader_rank:
+        return
+    #if rpc_task_manager.rpc_communicator.min_iter_in_health_nodes() - from_term < RPCTaskManager.slow_tolerance_value / 3:
+    with rpc_task_manager.reassign_lock:
+        rpc_task_manager.rpc_communicator.print_rpc_state(f"resurrection declaration from {from_rank} accepted")
+        rpc_task_manager.resurrection_nodes.add(from_rank)
+        if rpc_task_manager.reassign_task_callback is None:
+            rpc_task_manager.reassign_task_callback = partial(rpc_task_manager.reassign_task)
 """
 @deprecated
 def statistics_slow_nodes(from_rank, slow_nodes, vote_index):

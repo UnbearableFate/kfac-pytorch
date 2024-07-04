@@ -18,8 +18,8 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    model = MLP(num_hidden_layers=3,hidden_size=64)
-    #model = ModelSplitter(model, 32)
+    model = MLP(num_hidden_layers=3,hidden_size=128)
+    model = ModelSplitter(model, 128)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=1, is_2nd_order=True, epochs=40,device='cpu')
