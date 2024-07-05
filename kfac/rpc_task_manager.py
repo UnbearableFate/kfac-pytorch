@@ -1,6 +1,9 @@
 import threading
+import time
 from functools import reduce
 from functools import partial
+import random
+
 import torch.distributed.rpc as rpc
 
 from typing import TYPE_CHECKING
@@ -18,11 +21,11 @@ class RPCTaskManager:
         self.world_size = rpc_communicator.get_health_world_size
         self.assignment :'KAISAAssignment' = assignment
 
-        self.leader_rank = 0
+        self.leader_rank = 2
         self.currentTerm = 0
         self.votedFor = None
         self.voted_for_me_set = set()
-        self.election_period = 0
+        self.election_period = -1
         self.assignment_generation = 0
 
         self.reassign_task_callback = None
@@ -31,7 +34,7 @@ class RPCTaskManager:
 
         self.reassign_lock = threading.Lock()
 
-        if self.rank == 0:
+        if self.rank == 2:
             self.identity = 0 # leader
         else:
             self.identity = 1 # 1:follower 2:candidate
@@ -135,37 +138,48 @@ class RPCTaskManager:
         self.voted_for_me_set.clear()
         self.leader_rank = from_rank
 
-    def electing_new_leader(self): # call in loop
+    def start_election(self): # call by no leader
+        self.identity = 2
+        self.currentTerm += 1
+        self.votedFor = self.rank
+        self.voted_for_me_set.clear()
+        self.voted_for_me_set.add(self.rank)
+        self.election_period = 0
+        for state in self.rpc_communicator.get_health_node_state_list():
+            rank = state.rank
+            if rank == self.rank: # or rank == self.leader_rank ??
+                continue
+            try:
+                rpc.rpc_async(
+                    to=rpc_work_name(rank),
+                    func=request_vote,
+                    args=(self.currentTerm, self.rank)
+                )
+            except Exception as e:
+                print(f"request vote failed {e} from {self.rank} to {rank}")
+
+    def electing_new_leader_loop(self): # call in loop
         #leader_iter = self.rpc_communicator.health_node_states[self.leader_rank].iter
         #forward_than_leader = sum(state.iter > leader_iter for state in self.rpc_communicator.health_node_states.values())
-
-        if ((self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slow_tolerance_value
+        if (self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slow_tolerance_value
              and self.identity == 1
              and self.votedFor is None
-             and self.election_period < 0 ) or (
-            self.identity == 2 and
-            self.election_period > RPCTaskManager.max_election_period)):
-            print("start election at rank ", self.rank)
-            self.identity = 2
-            self.currentTerm += 1
-            self.votedFor = self.rank
-            self.voted_for_me_set.clear()
-            self.voted_for_me_set.add(self.rank)
-            self.election_period = 0
-            for state in self.rpc_communicator.get_health_node_state_list():
-                rank = state.rank
-                if rank == self.leader_rank:
-                    continue
-                try:
-                    if rank != self.rank:
-                        rpc.rpc_async(
-                            to=rpc_work_name(rank),
-                            func=request_vote,
-                            args=(self.currentTerm, self.rank)
-                        )
-                except Exception as e:
-                    print(f"request vote failed {e} from {self.rank} to {rank}")
-        elif self.identity == 2 and self.election_period < RPCTaskManager.max_election_period:
+             and self.election_period < 0 ):
+            self.rpc_communicator.print_rpc_state(f"start new election")
+            self.start_election()
+        elif self.election_period > RPCTaskManager.max_election_period:
+            if self.identity == 2:
+                time.sleep(random.random() * self.rank * 0.1)
+                if self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slow_tolerance_value :
+                    self.rpc_communicator.print_rpc_state(f"start election again")
+                    self.start_election()
+                else:
+                    self.rpc_communicator.print_rpc_state(f"give up election")
+                    self.update_follwer_state(self.leader_rank,self.currentTerm)
+            elif (self.identity == 1 and
+                  (self.votedFor is not None and  self.rpc_communicator.node_states[self.votedFor].iter - self.rpc_communicator.node_states[self.leader_rank].iter < RPCTaskManager.slow_tolerance_value)):
+                self.update_follwer_state(self.leader_rank,self.currentTerm)
+        elif self.election_period >= 0 and self.votedFor is not None:
             self.election_period += 1
 
     def resurrection_declaration(self):  # call by sick node
@@ -185,12 +199,15 @@ rpc_task_manager:RPCTaskManager
 
 def request_vote(candidateTerm, candidateId): # recv by follower
     global rpc_task_manager
-    if candidateTerm < rpc_task_manager.currentTerm:
+    if (candidateTerm < rpc_task_manager.currentTerm or
+    rpc_task_manager.rpc_communicator.node_states[candidateId].iter - rpc_task_manager.rpc_communicator.node_states[rpc_task_manager.leader_rank].iter < RPCTaskManager.slow_tolerance_value /2
+        ):
         return
     if rpc_task_manager.votedFor is None or rpc_task_manager.votedFor == candidateId:
         rpc_task_manager.votedFor = candidateId
-        rpc_task_manager.vote_timeout = 0
+        rpc_task_manager.election_period = 0
         rpc_task_manager.identity = 1
+        rpc_task_manager.rpc_communicator.print_rpc_state(f"grant vote from {rpc_task_manager.rank} to {candidateId}")
         try:
             rpc.rpc_async(
                 to=rpc_work_name(candidateId),
@@ -208,6 +225,8 @@ def grant_vote(voterTerm, voterId, candidateTerm): # recv by candidate
             rpc_task_manager.identity = 0
             rpc_task_manager.leader_rank = rpc_task_manager.rank
             rpc_task_manager.election_period = -1
+            rpc_task_manager.votedFor = None
+            rpc_task_manager.voted_for_me_set.clear()
             rpc_task_manager.check_and_reassign()
 
 def recv_reassign_task(new_health_node_list, new_assignment, assignment_generation, from_rank, from_term , send_need_layer_names = None, send_to = None): # recv by health follower

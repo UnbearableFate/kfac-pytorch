@@ -136,13 +136,13 @@ class GeneralManager:
                     elif self.train_com_method == "allreduce":
                         self.train_communication_allreduce_avg()
 
-                '''
+
                 if self.rank == 2 :
-                    if (epoch == 0  and 10 < batch_idx <= 12) or (epoch == 10  and 10 < batch_idx <= 12) :
-                        time.sleep(8)
-                    else:
+                    if epoch == 0  and 10 < batch_idx <= 12:
+                        time.sleep(10)
+                    if epoch == 0 and batch_idx == 16:
                         self.rpc_communicator.restart_sick_node()
-                '''
+
                 
                 if self.train_com_method == "rpc":
                     rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
@@ -153,6 +153,12 @@ class GeneralManager:
                         self.rpc_communicator.update_assignment_callback()
                     if self.rpc_communicator.send_model_param_callback is not None:
                         self.rpc_communicator.send_model_param_callback()
+
+                    self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
+
+                    #if (self.rpc_communicator.node_states[self.rank].health == False
+                    #        and self.rpc_communicator.median_iter_in_health_nodes() - self.rpc_communicator.node_states[self.rank].iter < self.rpc_communicator.slow_tolerance_value / 3):
+                    #    self.rpc_communicator.restart_sick_node()
                     
                 t.update()
 
