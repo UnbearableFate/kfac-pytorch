@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 class RPCTaskManager:
-    slow_tolerance_value = 50
+    slow_tolerance_value = 100
     max_election_period = 10
     def __init__(self,rpc_communicator: 'KFacRPCCommunicator' , assignment : 'KAISAAssignment'):
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator

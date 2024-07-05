@@ -133,7 +133,7 @@ class KFacRPCCommunicator:
         self.node_state_lock = threading.Lock()
 
         self.skip_inverse_computation_ct = 0
-        self.slow_tolerance_value = 40
+        self.slow_tolerance_value = 100
         self.max_election_period = 10
 
         self.request_regression_record = set()
@@ -476,6 +476,7 @@ class KFacRPCCommunicator:
             time.sleep(0.1)
             wait_time += 1
             if wait_time > 30:
+                self.print_rpc_state(f"wait for test result in epoch {epoch} in rank {self.rank}")
                 break
         
         if epoch in self.model_accuracy_statistic:

@@ -54,7 +54,36 @@ class ModelAvgRPCCommunicator:
                     if name.endswith("bias"):
                         io_layers[layer_name].bias = param
         return io_layers
+    """
+    def store_model_param(self,model):
+        if not self.lock.acquire(timeout= 1):
+            raise Exception("lock acquire failed at store_model_param") 
+        with torch.no_grad():
+            for layer_name, module in model.named_modules():
+                if len(list(module.children())) != 0 or len(list(module.named_parameters())) == 0:
+                    continue
+                for name, param in module.named_parameters():
+                    if name.endswith("weight"):
+                        self.io_layers[layer_name].weight = param
+                    if name.endswith("bias"):
+                        self.io_layers[layer_name].bias = param
+        self.lock.release()
 
+    
+    def load_model_param(self,model):
+        if not self.lock.acquire(timeout= 1):
+            raise Exception("lock acquire failed at load_model_param") 
+        with torch.no_grad():
+            for layer_name, module in model.named_modules():
+                if len(list(module.children())) != 0 or len(list(module.named_parameters())) == 0:
+                    continue
+                for name, param in module.named_parameters():
+                    if name.endswith("weight"):
+                        param.copy_(self.io_layers[layer_name].weight)
+                    if name.endswith("bias"):
+                        param.copy_(self.io_layers[layer_name].bias)
+        self.lock.release()
+    """
     def send_model_param(self, target, layer_name ,resurrection_flag = False):
         with torch.no_grad():
             if target == self.rank:
@@ -128,7 +157,7 @@ def receive_model_param(from_rank, from_rank_iter, from_loss, layer_name, model_
     recv_weight = expit(sigmoid_param)
 
     with torch.no_grad():
-        if not model_avg_rpc_communicator.lock.acquire(timeout= 1):
+        if not model_avg_rpc_communicator.lock.acquire(timeout= 3):
             raise Exception("lock acquire failed")
         model_avg_rpc_communicator.io_layers[layer_name].weight = model_avg_rpc_communicator.io_layers[layer_name].weight * (1-recv_weight) + model_weight * recv_weight
         model_avg_rpc_communicator.io_layers[layer_name].bias = model_avg_rpc_communicator.io_layers[layer_name].bias * (1-recv_weight) + model_bias * recv_weight
