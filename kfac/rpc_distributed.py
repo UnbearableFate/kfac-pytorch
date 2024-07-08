@@ -261,7 +261,10 @@ class KFacRPCCommunicator:
                     self.print_rpc_state(f"load old factor {factor_type} of {kfac_layer.name} in rank {self.rank}")
                     break
             assert self.rpc_layers[kfac_layer.name].factor[factor_type] is not None
-            kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
+            if factor_type == "A":
+                kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
+            if factor_type == "G":
+                kfac_layer.g_factor = self.rpc_layers[kfac_layer.name].factor["G"].clone().detach()
         return True
 
     def load_eigen_tensor(self,kfac_layer, loop):

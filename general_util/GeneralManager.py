@@ -136,17 +136,17 @@ class GeneralManager:
                     elif self.train_com_method == "allreduce":
                         self.train_communication_allreduce_avg()
 
-
+                """
                 if self.rank == 2 :
                     if epoch == 0  and 10 < batch_idx <= 12:
                         time.sleep(10)
                     if epoch == 0 and batch_idx == 16:
                         self.rpc_communicator.restart_sick_node()
-
+                """
                 
                 if self.train_com_method == "rpc":
                     rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
-                    rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
+                    #rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                     if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
                         self.rpc_communicator.task_reassign_rpc.reassign_task_callback()
                     if self.rpc_communicator.update_assignment_callback is not None:
