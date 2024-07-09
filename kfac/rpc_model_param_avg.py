@@ -12,6 +12,18 @@ if TYPE_CHECKING:
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
+def compute_skip(world_size):
+    p = world_size
+    q = 0
+    while p > 1:
+        q = q+1
+        p -= int(p/2)
+    skips = [0 for _ in range(0,q+1)]
+    skips[q] = world_size
+    for i in range(q-1, -1, -1):
+        skips[i] = skips[i+1]-int(skips[i+1]/2)
+    return skips
+
 class LayerParameterStore:
     def __init__(self):
         self.layer_name = ""
@@ -33,6 +45,8 @@ class ModelAvgRPCCommunicator:
         self.loss_value = 0
         self.lock = threading.Lock()
         random.seed((rank+13)*17)
+        self.skips = compute_skip(self.world_size())[:-1]
+        self.skip_index = 0
 
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
@@ -129,6 +143,20 @@ class ModelAvgRPCCommunicator:
             target = random.choice(target_chioce_list)
             self.send_model_param(target, layer_name)
         #self.send_to_sick_nodes_sometimes()
+    
+    def send_all_model_param_alg03(self):
+        target_chioce_list = [state.rank for state in self.rpc_communicator.get_health_node_state_list()]
+        for rank in target_chioce_list:
+            if rank == self.rank:
+                continue
+            for layer_name, layer in self.io_layers.items():
+                self.send_model_param(rank, layer_name)
+    
+    def send_all_model_param_alg04(self):
+        target =  (self.rank + self.skips[self.skip_index]) % self.world_size()
+        for layer_name, layer in self.io_layers.items():
+            self.send_model_param(target, layer_name) 
+        self.skip_index = (self.skip_index + 1) % len(self.skips)
 
     def Send_to_Easter_Point_Task_Assignment(self,health_node_list):
         result = dict()
