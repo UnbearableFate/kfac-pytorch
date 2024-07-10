@@ -1,5 +1,6 @@
 import random
 import threading
+import time
 from typing import Dict
 from typing import Callable
 import torch
@@ -30,13 +31,15 @@ class LayerParameterStore:
         self.term = 0
         self.weight = None
         self.bias = None
+        self.loss_value = 0
 
 class ModelAvgRPCCommunicator:
-    loss_weight = 1.5
+    loss_weight = 1.8
     iter_weight = 0.7
 
     def __init__(self,  rank, model,rpc_communicator: 'KFacRPCCommunicator'):
         self.world_size = rpc_communicator.get_world_size
+        self.origin_world_size = rpc_communicator.get_world_size()
         self.rank = rank
         self.model = model
         self.io_layers = self.register_layer(model)
@@ -48,13 +51,16 @@ class ModelAvgRPCCommunicator:
         self.skips = compute_skip(self.world_size())[:-1]
         self.skip_index = 0
 
+        self.neighbor_model_store :Dict[int,Dict[str, LayerParameterStore]] = dict()
+        self.init_neighbor_model_store()
+
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
 
     def set_loss(self, loss_value):
         self.loss_value = loss_value
 
-    def register_layer(self, model):
+    def register_layer(self, model) -> Dict[str,LayerParameterStore]:
         io_layers : Dict[str:LayerParameterStore] = {}
         with torch.no_grad():
             for layer_name, module in model.named_modules():
@@ -68,6 +74,18 @@ class ModelAvgRPCCommunicator:
                     if name.endswith("bias"):
                         io_layers[layer_name].bias = param
         return io_layers
+    
+    def init_neighbor_model_store(self):
+        for node in self.rpc_communicator.get_health_nodes_rank_list():
+            if node == self.rank:
+                continue
+            self.neighbor_model_store[node] = dict()
+            for layer_name in self.io_layers.keys():
+                self.neighbor_model_store[node][layer_name] = LayerParameterStore()
+                self.neighbor_model_store[node][layer_name].weight = torch.zeros_like(self.io_layers[layer_name].weight)
+                if self.io_layers[layer_name].bias is not None:
+                    self.neighbor_model_store[node][layer_name].bias = torch.zeros_like(self.io_layers[layer_name].bias)
+
     """
     def store_model_param(self,model):
         if not self.lock.acquire(timeout= 1):
@@ -112,7 +130,41 @@ class ModelAvgRPCCommunicator:
                 )
             except Exception as e:
                 print(f"send_model_param failed {e} from {self.rank} to {target}")
+    
+    def send_model_param_to_store(self, target, layer_name):
+        with torch.no_grad():
+            if target == self.rank:
+                return
+            weight = self.io_layers[layer_name].weight
+            bias = self.io_layers[layer_name].bias
+            try:
+                rpc.rpc_async(
+                    to=rpc_work_name(target),
+                    func=receive_model_param_to_store,
+                    args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, layer_name,weight, bias )
+                )
+            except Exception as e:
+                print(f"send_model_param failed {e} from {self.rank} to {target}")
+    
+    def send_model_param_dict_to_store(self, target, layer_names = None):
+        if layer_names is None:
+            layer_names = self.io_layers.keys()
 
+        data = []
+        for layer_name in layer_names:
+            weight = self.io_layers[layer_name].weight
+            bias = self.io_layers[layer_name].bias
+            data.append((layer_name, weight, bias))
+
+        try:
+            rpc.rpc_async(
+                to=rpc_work_name(target),
+                func=receive_model_param_dict_to_store,
+                args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data )
+            )
+        except Exception as e:
+            print(f"send_model_param failed {e} from {self.rank} to {target}")
+        
     def send_to_sick_nodes_sometimes(self):
         if random.random() < 0.2:
             target_chioce_list = set([state.rank for state in self.rpc_communicator.get_sick_node_list()])
@@ -149,8 +201,9 @@ class ModelAvgRPCCommunicator:
         for rank in target_chioce_list:
             if rank == self.rank:
                 continue
-            for layer_name, layer in self.io_layers.items():
-                self.send_model_param(rank, layer_name)
+            self.send_model_param_dict_to_store(rank)
+        
+        self.average_model_param_from_store()
     
     def send_all_model_param_alg04(self):
         target =  (self.rank + self.skips[self.skip_index]) % self.world_size()
@@ -158,6 +211,40 @@ class ModelAvgRPCCommunicator:
             self.send_model_param(target, layer_name) 
         self.skip_index = (self.skip_index + 1) % len(self.skips)
 
+    def send_all_model_param_alg05(self):
+        target_chioce_list = [state.rank for state in self.rpc_communicator.get_health_node_state_list()]
+        for rank in target_chioce_list:
+            if rank == self.rank:
+                continue
+            for layer_name, layer in self.io_layers.items():
+                self.send_model_param_to_store(rank, layer_name)
+        self.average_model_param_from_store()
+    
+    def average_model_param_from_store(self):
+        with torch.no_grad():
+            if not model_avg_rpc_communicator.lock.acquire(timeout= 3):
+                raise Exception("lock acquire failed at average_model_param_from_store")
+            for layer_name, layer in self.io_layers.items():
+                weight = torch.zeros_like(layer.weight)
+                bias = torch.zeros_like(layer.bias)
+                local_w = self.origin_world_size
+                for node, layer_dict in self.neighbor_model_store.items():
+                    sigmoid_param = 0
+                    if model_avg_rpc_communicator.loss_value != 0:
+                        sigmoid_param = ModelAvgRPCCommunicator.loss_weight * (
+                    self.loss_value - layer_dict[layer_name].loss_value) / self.loss_value
+                    recv_w = expit(sigmoid_param)
+                    local_w -= recv_w
+                    weight += layer_dict[layer_name].weight * recv_w
+                    bias += layer_dict[layer_name].bias * recv_w
+                weight += layer.weight * local_w
+                bias += layer.bias * local_w
+                weight /= self.origin_world_size
+                bias /= self.origin_world_size
+                layer.weight = weight
+                layer.bias = bias
+            model_avg_rpc_communicator.lock.release()
+        
     def Send_to_Easter_Point_Task_Assignment(self,health_node_list):
         result = dict()
         for layer_name, layer in self.io_layers.items():
@@ -195,3 +282,21 @@ def receive_model_param(from_rank, from_rank_iter, from_loss, layer_name, model_
         model_avg_rpc_communicator.rpc_communicator.update_node_iter(model_avg_rpc_communicator.rank,
                                                                      from_rank_iter)
 
+def receive_model_param_to_store(from_rank, from_rank_iter, from_loss, layer_name, model_weight, model_bias):
+    global model_avg_rpc_communicator
+    if from_rank == model_avg_rpc_communicator.rank or from_rank < model_avg_rpc_communicator.rpc_communicator.node_states[from_rank].rank:
+        return
+    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter)
+    model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].weight = model_weight
+    model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].bias = model_bias
+    model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].term = from_rank_iter
+    model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].loss_value = from_loss
+
+def receive_model_param_dict_to_store(from_rank, from_rank_iter, from_loss, data):
+    global model_avg_rpc_communicator
+    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter)
+    for layer_name, model_weight, model_bias in data:
+        model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].weight = model_weight
+        model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].bias = model_bias
+        model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].term = from_rank_iter
+        model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].loss_value = from_loss
