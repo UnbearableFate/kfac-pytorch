@@ -47,14 +47,15 @@ def rpc_work_name(rank:int) -> str:
 class NodeState():
     def __init__(self,rank):
         self.rank = rank
-        self.iter = -1
+        self.iter = 0
         self.factor_computation_iter = -1
         self.inverse_computation_iter = -1
         self.model_param_avg_iter = -1
         self.health = True
+        self.speed = 0
 
     def __str__(self):
-        return f"R{self.rank} :t{self.iter}"
+        return f"R{self.rank} :t{self.iter}, s{self.speed}, h{self.health}"
 
 class KfacRPCLayer:
     def __init__(self,a_handler,g_handler ,name , prediv_eigenvalues):
@@ -179,6 +180,11 @@ class KFacRPCCommunicator:
         self.update_assignment_callback = None
         self.send_model_param_callback = None
 
+        self.layers_workload = preconditioner._assignment.work
+        self.computation_volume_accumulation = 0
+        self.time_cost_accumulation = 0
+        self.loop_start_time = 0
+
         global global_communicator
         global_communicator = self
 
@@ -288,6 +294,7 @@ class KFacRPCCommunicator:
     def shutdown(self):
         rpc.shutdown()
     def update_self_t(self):
+        self.loop_start_time = time.time()
         if not self.node_state_lock.acquire(timeout=0.5):
             raise RuntimeError("Failed to acquire lock in update_self_t")
         self.node_states[self.rank].iter += 1
@@ -296,17 +303,40 @@ class KFacRPCCommunicator:
     def current_t(self):
         return self.node_states[self.rank].iter
 
-    def update_node_iter(self, from_rank, t):
+    def update_node_iter(self, from_rank, t , speed = None):
         if not self.node_state_lock.acquire(timeout=0.5):
             raise RuntimeError("Failed to acquire lock in update_self_t")
         if from_rank not in self.node_states:
             raise RuntimeError(f"Rank {from_rank} is not in the node_states")
         self.node_states[from_rank].iter = max(self.node_states[from_rank].iter, t)
+        if speed is not None:
+            self.node_states[from_rank].speed = speed
         self.node_state_lock.release()
 
-    def update_node_state_and_inverse_assignment(self, new_health_node_list, new_assignment, new_assignment_generation):
-        self.update_node_state_list(new_health_node_list)
-        self.update_inverse_workers(new_assignment, new_assignment_generation)
+    def get_computation_speed_dict(self):
+        computational_efficiency = dict()
+        summ = 0
+        ct = 0
+        if self.time_cost_accumulation > 0:
+            computational_efficiency[self.rank] = self.computation_volume_accumulation / self.time_cost_accumulation
+            summ = computational_efficiency[self.rank]
+            ct = 1
+
+        for state in self.get_health_node_state_list():
+            if state.rank == self.rank:
+                continue
+            if state.speed is not None and state.speed > 0:
+                summ += state.speed
+                ct += 1
+                computational_efficiency[state.rank] = state.speed
+
+        avg = summ / ct
+
+        for state in self.get_health_node_state_list():
+            if state.rank not in computational_efficiency:
+                computational_efficiency[state.rank] = avg
+        self.print_rpc_state(f"computation efficiency: {computational_efficiency}")
+        return computational_efficiency
 
     def update_node_state_list(self, new_health_node_list):
         for node_rank in self.node_states:
@@ -335,6 +365,7 @@ class KFacRPCCommunicator:
         self.update_assignment_flag = False
         self.update_assignment_callback = None
         self.skip_inverse_computation_flag = False
+        self.task_reassign_rpc.running_time = 0
 
     def get_world_size(self):
         return len(self.node_states.keys())
@@ -427,7 +458,25 @@ class KFacRPCCommunicator:
             return True
         return False
 
+    def computation_volume_statistic(self):
+        current_t = self.current_t()
+        if current_t % 100 == 0:
+            self.computation_volume_accumulation = 0
+            self.time_cost_accumulation = 0
+
+        loop_time_cost = time.time() - self.loop_start_time
+        self.time_cost_accumulation += loop_time_cost
+        if not self.skip_inverse_computation_flag :
+            for layer_name in self.assigned_layers:
+                self.computation_volume_accumulation += 1.05* (self.layers_workload[layer_name]["A"] +self.layers_workload[layer_name]["G"])
+            for layer_name in self.participate_factor_computation_layers:
+                self.computation_volume_accumulation += 0.1* (self.layers_workload[layer_name]["A"] +self.layers_workload[layer_name]["G"])
+
+        #with self.node_state_lock:
+        #    self.node_states[self.rank].speed = self.computation_volume_accumulation / self.time_cost_accumulation
+
     def facotr_comput_lazy_wl_rebal(self):
+        self.computation_volume_statistic()
         current_t = self.current_t()
         forward_than_local = sum(state.iter > current_t for state in self.get_health_node_state_list())
         late_than_local = sum(state.iter < current_t for state in self.get_health_node_state_list())
@@ -515,13 +564,7 @@ def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
     self = global_communicator
 
     if self.rpc_layers[layer_name].assigned_worker[factor_type] != self.rank:
-        print(f"Received factor from {from_rank} for {layer_name} but this rank{self.rank} is not assigned to this layer")
-        '''
-        if from_rank in self.health_node_states and from_iter >= self.current_t():
-            # it is possible that this node don't receive new assignment yet
-            self.rpc_layers[layer_name].reassign_inverse_workers(from_rank, factor_type)
-            self.task_reassign_rpc.assignment._inv_assignments[layer_name][factor_type] = self.rank
-        '''''
+        pass
 
     #with self.lock:
     current_t = self.current_t()

@@ -116,7 +116,7 @@ class ModelAvgRPCCommunicator:
                         param.copy_(self.io_layers[layer_name].bias)
         self.lock.release()
     """
-    def send_model_param(self, target, layer_name ,resurrection_flag = False):
+    def send_model_param(self, target, layer_name ,resurrection_flag = False ,speed = None):
         with torch.no_grad():
             if target == self.rank:
                 return
@@ -126,12 +126,12 @@ class ModelAvgRPCCommunicator:
                 rpc.rpc_async(
                     to=rpc_work_name(target),
                     func=receive_model_param,
-                    args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, layer_name,weight, bias ,resurrection_flag)
+                    args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, layer_name,weight, bias ,resurrection_flag ,speed)
                 )
             except Exception as e:
                 print(f"send_model_param failed {e} from {self.rank} to {target}")
     
-    def send_model_param_to_store(self, target, layer_name):
+    def send_model_param_to_store(self, target, layer_name,speed= None):
         with torch.no_grad():
             if target == self.rank:
                 return
@@ -146,7 +146,7 @@ class ModelAvgRPCCommunicator:
             except Exception as e:
                 print(f"send_model_param failed {e} from {self.rank} to {target}")
     
-    def send_model_param_dict_to_store(self, target, layer_names = None):
+    def send_model_param_dict_to_store(self, target, layer_names = None ,speed = None):
         if layer_names is None:
             layer_names = self.io_layers.keys()
 
@@ -164,7 +164,14 @@ class ModelAvgRPCCommunicator:
             )
         except Exception as e:
             print(f"send_model_param failed {e} from {self.rank} to {target}")
-        
+
+    def get_local_node_speed(self):
+        if self.rpc_communicator.time_cost_accumulation != 0:
+            speed = self.rpc_communicator.computation_volume_accumulation / self.rpc_communicator.time_cost_accumulation
+            self.rpc_communicator.node_states[self.rank].speed = speed
+            return speed
+        return None
+
     def send_to_sick_nodes_sometimes(self):
         if random.random() < 0.2:
             target_chioce_list = set([state.rank for state in self.rpc_communicator.get_sick_node_list()])
@@ -175,14 +182,14 @@ class ModelAvgRPCCommunicator:
             target_chioce_list = list(target_chioce_list)
             for layer_name, layer in self.io_layers.items():
                 target = random.choice(target_chioce_list)
-                self.send_model_param(target, layer_name)
+                self.send_model_param(target, layer_name,False,self.get_local_node_speed())
 
     def send_all_model_param_alg01(self):
         target = self.start_target
         for layer_name, layer in self.io_layers.items():
             if target == self.rank:
                 target = (target + 1) % self.world_size()
-            self.send_model_param(target, layer_name)
+            self.send_model_param(target, layer_name, False, self.get_local_node_speed())
             target = (target + 1) % self.world_size()
         self.start_target = (self.start_target + 1) % self.world_size()
 
@@ -193,7 +200,7 @@ class ModelAvgRPCCommunicator:
         target_chioce_list = list(target_chioce_list)
         for layer_name, layer in self.io_layers.items():
             target = random.choice(target_chioce_list)
-            self.send_model_param(target, layer_name)
+            self.send_model_param(target, layer_name,False,self.get_local_node_speed())
         #self.send_to_sick_nodes_sometimes()
     
     def send_all_model_param_alg03(self):
@@ -201,15 +208,9 @@ class ModelAvgRPCCommunicator:
         for rank in target_chioce_list:
             if rank == self.rank:
                 continue
-            self.send_model_param_dict_to_store(rank)
+            self.send_model_param_dict_to_store(rank ,layer_names=None,speed = self.get_local_node_speed())
         
         self.average_model_param_from_store()
-    
-    def send_all_model_param_alg04(self):
-        target =  (self.rank + self.skips[self.skip_index]) % self.world_size()
-        for layer_name, layer in self.io_layers.items():
-            self.send_model_param(target, layer_name) 
-        self.skip_index = (self.skip_index + 1) % len(self.skips)
 
     def send_all_model_param_alg05(self):
         target_chioce_list = [state.rank for state in self.rpc_communicator.get_health_node_state_list()]
@@ -217,7 +218,7 @@ class ModelAvgRPCCommunicator:
             if rank == self.rank:
                 continue
             for layer_name, layer in self.io_layers.items():
-                self.send_model_param_to_store(rank, layer_name)
+                self.send_model_param_to_store(rank, layer_name ,speed= self.get_local_node_speed())
         self.average_model_param_from_store()
     
     def average_model_param_from_store(self):
@@ -256,9 +257,9 @@ class ModelAvgRPCCommunicator:
 
 model_avg_rpc_communicator: ModelAvgRPCCommunicator
 
-def receive_model_param(from_rank, from_rank_iter, from_loss, layer_name, model_weight, model_bias ,resurrection_flag = False):
+def receive_model_param(from_rank, from_rank_iter, from_loss, layer_name, model_weight, model_bias ,resurrection_flag = False ,speed = None):
     global model_avg_rpc_communicator
-    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter)
+    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter,speed= speed)
     slow_tolerance_value = model_avg_rpc_communicator.rpc_communicator.slow_tolerance_value
     local_iter = model_avg_rpc_communicator.rpc_communicator.current_t()
     sigmoid_param = 0
@@ -282,19 +283,19 @@ def receive_model_param(from_rank, from_rank_iter, from_loss, layer_name, model_
         model_avg_rpc_communicator.rpc_communicator.update_node_iter(model_avg_rpc_communicator.rank,
                                                                      from_rank_iter)
 
-def receive_model_param_to_store(from_rank, from_rank_iter, from_loss, layer_name, model_weight, model_bias):
+def receive_model_param_to_store(from_rank, from_rank_iter, from_loss, layer_name, model_weight, model_bias ,speed = None):
     global model_avg_rpc_communicator
     if from_rank == model_avg_rpc_communicator.rank or from_rank < model_avg_rpc_communicator.rpc_communicator.node_states[from_rank].rank:
         return
-    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter)
+    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter ,speed= speed)
     model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].weight = model_weight
     model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].bias = model_bias
     model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].term = from_rank_iter
     model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].loss_value = from_loss
 
-def receive_model_param_dict_to_store(from_rank, from_rank_iter, from_loss, data):
+def receive_model_param_dict_to_store(from_rank, from_rank_iter, from_loss, data ,speed = 0):
     global model_avg_rpc_communicator
-    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter)
+    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter ,speed= speed)
     for layer_name, model_weight, model_bias in data:
         model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].weight = model_weight
         model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].bias = model_bias

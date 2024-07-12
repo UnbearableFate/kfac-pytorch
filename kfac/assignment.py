@@ -6,7 +6,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any
 from typing import Callable
-
+import numpy as np
 import torch.distributed as dist
 
 
@@ -203,7 +203,7 @@ class KAISAAssignment(WorkAssignment):
         self._inv_assignments = self.greedy_assignment(
             work,
             [list(ranks) for ranks in grad_worker_ranks],
-            self.world_size,
+            #self.world_size,
             self.colocate_factors,
         )
 
@@ -228,7 +228,6 @@ class KAISAAssignment(WorkAssignment):
     def greedy_assignment(
         work: dict[str, dict[str, float]],
         worker_groups: list[list[int]],
-        world_size: int,
         colocate_factors: bool,
     ) -> dict[str, dict[str, int]]:
         """Greedy constrained layer work assignments.
@@ -317,6 +316,85 @@ class KAISAAssignment(WorkAssignment):
                     worker_loads[min_worker] += cost
                     assignments[layer][factor] = min_worker
 
+        for layer in assignments:
+            for factor in assignments[layer]:
+                assert assignments[layer][factor] >= 0
+
+        return assignments
+    @staticmethod
+    def greedy_assignment_efficiency(
+            work: dict[str, dict[str, float]],
+            worker_groups: list[list[int]],
+            colocate_factors: bool,
+            computational_efficiency: dict[int, float],
+    ) -> dict[str, dict[str, int]]:
+        """Greedy constrained layer work assignments considering computational efficiency.
+
+        Assigns work units to ranks in a lowest-current load greedy approach considering
+        computational efficiency.
+
+        Args:
+            work: dict mapping layer names to a sub-dict that maps work for
+                the layer (e.g., factors) to the approximate cost of that
+                work object.
+            worker_groups: list of list of ranks where each sub-list of ranks
+                represents a worker group. All work (e.g., factor computations)
+                for a given layer will be constrained to be workers within
+                a worker group. For example, if the worker groups are
+                [[0, 1], [2, 3]], there will never be a case where the two
+                factors for a given layer are performed on worker in separate
+                groups.
+            world_size (int): world_size
+            colocate_factors (bool): if true, factors for a single layer will
+                be assigned to the same worker. Otherwise, factors for a single
+                layer can be computed on separate workers given those workers
+                are in the same group.
+            computational_efficiency: dict mapping worker ranks to their
+                computational efficiency (computation per second).
+
+        Returns:
+            dict matching the structure of the work inputs except the values
+            of the sub-dicts are the worker ranks that the corresponding factor
+            should be computed on.
+        """
+        # Initialize worker loads as time (load / efficiency)
+        worker_loads = {i: 0.0 for group in worker_groups for i in group}
+
+        # Initialize assignments dictionary
+        assignments = {layer: {factor: -1 for factor in factors} for layer, factors in work.items()}
+
+        # Calculate summed work for each layer
+        summed_work = {layer: sum(factors.values()) for layer, factors in work.items()}
+
+        # Sort layers by their total work in descending order
+        sorted_groups = sorted(summed_work, key=summed_work.get, reverse=True)
+
+        for layer in sorted_groups:
+            # Calculate total time load for each worker group
+            worker_group_loads = [
+                sum(worker_loads[i] for i in group) for group in worker_groups
+            ]
+
+            # Select the worker group with the lowest current load
+            worker_group = worker_groups[worker_group_loads.index(min(worker_group_loads))]
+
+            if colocate_factors:
+                # Assign all tasks of the layer to the least loaded worker in the selected group
+                min_worker = min(worker_group, key=lambda i: worker_loads[i])
+                # Add time load based on efficiency
+                worker_loads[min_worker] += summed_work[layer] / computational_efficiency[min_worker]
+                for factor in work[layer]:
+                    assignments[layer][factor] = min_worker
+            else:
+                # Assign tasks within the layer to workers in the group based on time load and efficiency
+                factors = sorted(work[layer].items(), key=lambda x: x[1], reverse=True)
+                for factor, cost in factors:
+                    min_worker = min(worker_group, key=lambda i: worker_loads[i])
+                    # Add time load based on efficiency
+                    worker_loads[min_worker] += cost / computational_efficiency[min_worker]
+                    assignments[layer][factor] = min_worker
+
+        # Ensure all tasks are assigned
         for layer in assignments:
             for factor in assignments[layer]:
                 assert assignments[layer][factor] >= 0

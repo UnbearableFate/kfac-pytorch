@@ -99,72 +99,30 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 mischief.update_iter()
-                if rpc_distributed.global_communicator is not None:
-                    rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
                 
-                
-                if self.train_com_method == "rpc":
-                    lock = rpc_distributed.global_communicator.model_avg_rpc.lock
-                    if not lock.acquire(timeout=1):
-                        raise Exception("lock acquire failed at train")
-                    output = self.model(data)
-                    lock.release()
-                else:
-                    output = self.model(data)
+
+                output = self.model(data)
 
                 loss = self.loss_func(output, target)
                 loss.backward()
                 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
-                
-                if self.train_com_method == "rpc":
-                    lock = rpc_distributed.global_communicator.model_avg_rpc.lock
-                    if not lock.acquire(timeout=1):
-                        raise Exception("lock acquire failed at train2") 
-                    self.optimizer.step()
-                    lock.release()
-                else:
-                    self.optimizer.step()
-                
-                if self.train_com_method != 'ddp' and batch_idx % self.model_avg_interval == 0 :
-                    if self.train_com_method == "rpc":
-                        self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
-                        self.train_communication_avg_rpc()
-                        if batch_idx % 50 == 0:
-                            rpc_distributed.global_communicator.print_rpc_state()
-                    elif self.train_com_method == "allreduce":
-                        self.train_communication_allreduce_avg()
 
-                """
-                if self.rank == 2 :
-                    if epoch == 0  and 10 < batch_idx <= 12:
-                        time.sleep(10)
-                    if epoch == 0 and batch_idx == 16:
-                        self.rpc_communicator.restart_sick_node()
-                """
+                self.optimizer.step()
                 
-                if self.train_com_method == "rpc":
-                    rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
-                    #rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
-                    if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
-                        self.rpc_communicator.task_reassign_rpc.reassign_task_callback()
-                    if self.rpc_communicator.update_assignment_callback is not None:
-                        self.rpc_communicator.update_assignment_callback()
-                    if self.rpc_communicator.send_model_param_callback is not None:
-                        self.rpc_communicator.send_model_param_callback()
-
-                    self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
-
-                    #if (self.rpc_communicator.node_states[self.rank].health == False
-                    #        and self.rpc_communicator.median_iter_in_health_nodes() - self.rpc_communicator.node_states[self.rank].iter < self.rpc_communicator.slow_tolerance_value / 3):
-                    #    self.rpc_communicator.restart_sick_node()
+                if self.train_com_method != 'ddp':
+                    self.train_communication_allreduce_avg()
                     
                 t.update()
 
+            if self.writer is not None:
+                self.writer.add_scalar('Loss/train', loss.item(), epoch)
+                self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
+
     def rpc_train(self, epoch):
-        time_ct = 0 
+        start_time = time.time()
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
@@ -175,13 +133,12 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                start_time = time.time()
+                rpc_distributed.global_communicator.update_self_t()
+                mischief.update_iter()
                 data = data.to(self.device)
                 target = target.to(self.device)
-                mischief.update_iter()
-                rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
-                
+
                 lock = rpc_distributed.global_communicator.model_avg_rpc.lock
                 
                 if not lock.acquire(timeout=1):
@@ -203,38 +160,35 @@ class GeneralManager:
                 if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
                     self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                     rpc_distributed.global_communicator.send_model_param()
-                
-                current_time_cost = time.time() - start_time
-                time_ct += current_time_cost
+
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
-                """
+
                 if self.rank == 2 :
                     if epoch == 0  and 10 < batch_idx <= 12:
                         time.sleep(10)
                     if epoch == 0 and batch_idx == 16:
                         self.rpc_communicator.restart_sick_node()
-                """
-                
+
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
-                #rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
+                rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
+                self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
+
+                #if (self.rpc_communicator.node_states[self.rank].health == False
+                #        and self.rpc_communicator.median_iter_in_health_nodes() - self.rpc_communicator.node_states[self.rank].iter < self.rpc_communicator.slow_tolerance_value / 3):
+                #    self.rpc_communicator.restart_sick_node()
+
                 if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
                     self.rpc_communicator.task_reassign_rpc.reassign_task_callback()
                 if self.rpc_communicator.update_assignment_callback is not None:
                     self.rpc_communicator.update_assignment_callback()
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
-
-                #self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
-
-                #if (self.rpc_communicator.node_states[self.rank].health == False
-                #        and self.rpc_communicator.median_iter_in_health_nodes() - self.rpc_communicator.node_states[self.rank].iter < self.rpc_communicator.slow_tolerance_value / 3):
-                #    self.rpc_communicator.restart_sick_node()
                 t.update()
             rpc_distributed.global_communicator.clear_count_dict()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
-                self.writer.add_scalar('Time/train', time_ct, epoch)
+                self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
 
     def train_communication_allreduce_avg(self):
         if mischief.ITER >= mischief.LAST_AVG_ITER + self.model_avg_interval :

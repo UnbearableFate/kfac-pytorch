@@ -21,7 +21,7 @@ class RPCTaskManager:
         self.world_size = rpc_communicator.get_health_world_size
         self.assignment :'KAISAAssignment' = assignment
 
-        self.leader_rank = 2
+        self.leader_rank = 0
         self.currentTerm = 0
         self.votedFor = None
         self.voted_for_me_set = set()
@@ -34,7 +34,7 @@ class RPCTaskManager:
 
         self.reassign_lock = threading.Lock()
 
-        if self.rank == 2:
+        if self.rank == 0:
             self.identity = 0 # leader
         else:
             self.identity = 1 # 1:follower 2:candidate
@@ -75,9 +75,9 @@ class RPCTaskManager:
         if len(self.reassign_task_reserve_health_nodes) == 0:
             self.reassign_task_reserve_health_nodes = set(self.rpc_communicator.get_health_nodes_rank_list())
         workgroup = list(self.reassign_task_reserve_health_nodes | self.resurrection_nodes)
-        new_assignment = self.assignment.greedy_assignment(self.assignment.work, [workgroup],
-                                                           self.world_size(), True)
-        self.rpc_communicator.update_node_state_and_inverse_assignment(workgroup, new_assignment, self.assignment_generation+1)
+        self.rpc_communicator.update_node_state_list(workgroup)
+        new_assignment = self.assignment.greedy_assignment_efficiency(self.assignment.work, [workgroup], True,self.rpc_communicator.get_computation_speed_dict())
+        self.rpc_communicator.update_inverse_workers(new_assignment, self.assignment_generation+1)
 
         send_task = dict()
         if len(self.resurrection_nodes) > 0:
@@ -114,6 +114,7 @@ class RPCTaskManager:
                     )
                 except Exception as e:
                     print(f"reassign task failed {e} from {self.rank} to {rank}")
+
         for rank in [state.rank for state in self.rpc_communicator.get_sick_node_list()]:
             self.rpc_communicator.print_rpc_state(
                 f"reassign task {new_assignment} to sick {rank}")
@@ -158,7 +159,7 @@ class RPCTaskManager:
             except Exception as e:
                 print(f"request vote failed {e} from {self.rank} to {rank}")
 
-    def electing_new_leader_loop(self): # call in loop
+    def electing_new_leader_loop(self): # call by in loop
         #leader_iter = self.rpc_communicator.health_node_states[self.leader_rank].iter
         #forward_than_leader = sum(state.iter > leader_iter for state in self.rpc_communicator.health_node_states.values())
         if (self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slow_tolerance_value
