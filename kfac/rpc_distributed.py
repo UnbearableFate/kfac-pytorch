@@ -130,7 +130,7 @@ class KfacRPCLayer:
         self.last_load_handled_tensor_version = t
 
 class KFacRPCCommunicator:
-    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model):
+    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path =""):
         self.node_state_lock = threading.Lock()
 
         self.skip_inverse_computation_ct = 0
@@ -141,7 +141,12 @@ class KFacRPCCommunicator:
 
         self.io_layers = None
         self.skip_inverse_computation_flag : bool = False
-        rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size)
+        options = rpc.TensorPipeRpcBackendOptions(
+            num_worker_threads=16,
+            init_method=f"file://{share_file_path}",
+            rpc_timeout=30,
+        )
+        rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)
         self.origin_world_size = world_size
         self.rank = rank
         self.rpc_layers: Dict[str:KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}

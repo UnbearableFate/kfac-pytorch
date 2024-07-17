@@ -1,20 +1,33 @@
 import datetime
+import os
+
 import torch
 import torch.distributed as dist
 from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
+ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', 0))
+ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', 0))
+
 gpu = torch.device("cuda:0")
-import os
-DATA_DIR = "/Users/unbearablefate/workspace/data"
-LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs0627"
-#DATA_DIR = "/home/yu/data"
-#LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs0708"
-import logging
+today = datetime.date.today().strftime('%m%d')
+pg_share_file = "pg_share"
+rpc_share_fie = "rpc_share"
+
+if os.path.exists("/home/yu"):
+    DATA_DIR = "/home/yu/data"
+    LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs"+today
+else:
+    DATA_DIR = "/Users/unbearablefate/workspace/data"
+    LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs"+today
 
 if __name__ == '__main__':
     #timeout = datetime.timedelta(seconds=30)
-    dist.init_process_group("gloo")
+    if ompi_world_size <= 0:
+        raise RuntimeError("Unable to initialize process group.")
+
+    dist.init_process_group("gloo", init_method=f"file://{DATA_DIR}/{pg_share_file}",
+                            rank=ompi_world_rank, world_size=ompi_world_size)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')

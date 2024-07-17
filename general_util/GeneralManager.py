@@ -33,7 +33,7 @@ class GeneralManager:
         if is_2nd_order:
             self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
             if train_com_method == "rpc":
-                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model)
+                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model , share_file_path=data_dir+"/rpc_share")
         else:
             self.preconditioner = None
 

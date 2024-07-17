@@ -52,6 +52,7 @@ class ModelAvgRPCCommunicator:
         self.skip_index = 0
 
         self.neighbor_model_store :Dict[int,Dict[str, LayerParameterStore]] = dict()
+        self.neighbor_weight_store : Dict[int, float] = dict()
         self.init_neighbor_model_store()
 
         global model_avg_rpc_communicator
@@ -220,6 +221,15 @@ class ModelAvgRPCCommunicator:
             for layer_name, layer in self.io_layers.items():
                 self.send_model_param_to_store(rank, layer_name ,speed= self.get_local_node_speed())
         self.average_model_param_from_store()
+
+    def send_all_model_param_alg06(self):
+        target_chioce_list = [state.rank for state in self.rpc_communicator.get_health_node_state_list()]
+        for rank in target_chioce_list:
+            if rank == self.rank:
+                continue
+            self.send_model_param_dict_to_store(rank, layer_names=None, speed=self.get_local_node_speed())
+
+        self.average_model_param_from_store()
     
     def average_model_param_from_store(self):
         with torch.no_grad():
@@ -242,6 +252,37 @@ class ModelAvgRPCCommunicator:
                 bias += layer.bias * local_w
                 weight /= self.origin_world_size
                 bias /= self.origin_world_size
+                layer.weight = weight
+                layer.bias = bias
+            model_avg_rpc_communicator.lock.release()
+
+    def average_model_param_from_store2(self):
+        with torch.no_grad():
+            if not model_avg_rpc_communicator.lock.acquire(timeout= 3):
+                raise Exception("lock acquire failed at average_model_param_from_store")
+            loss_sum = 0
+            for node, layer_dict in self.neighbor_model_store.items():
+                temp = 0
+                n = 0
+                for layer_name, layer in layer_dict.items():
+                    temp += layer.loss_value
+                    n+=1
+                self.neighbor_weight_store[node] = n/temp
+                loss_sum += n/temp
+
+            self.neighbor_weight_store[self.rank] = 1 / self.loss_value
+            loss_sum += 1 / self.loss_value
+
+            for rank, weight in self.neighbor_weight_store.items():
+                self.neighbor_weight_store[rank] = weight / loss_sum
+
+            for layer_name, layer in self.io_layers.items():
+                weight = torch.clone(layer.weight).mul_(self.neighbor_weight_store[self.rank])
+                bias = torch.zeros_like(layer.bias).mul_(self.neighbor_weight_store[self.rank])
+
+                for node, layer_dict in self.neighbor_model_store.items():
+                    weight += layer_dict[layer_name].weight * self.neighbor_weight_store[node]
+                    bias += layer_dict[layer_name].bias * self.neighbor_weight_store[node]
                 layer.weight = weight
                 layer.bias = bias
             model_avg_rpc_communicator.lock.release()
