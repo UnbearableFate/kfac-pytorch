@@ -12,8 +12,15 @@ import os
 import kfac
 from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 import kfac.rpc_distributed as rpc_distributed
+
+ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
+ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 class GeneralManager:
-    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0")):
+    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp=""):
+        if share_file_path is not None:
+            if ompi_world_size <= 0:
+                raise RuntimeError("Unable to initialize process group.")
+            dist.init_process_group("gloo", init_method=f"file://{share_file_path}/pg_share{timestamp}",rank=ompi_world_rank, world_size=ompi_world_size)
         self.writer = None
         batch_size=64
         rank = dist.get_rank()
@@ -33,7 +40,7 @@ class GeneralManager:
         if is_2nd_order:
             self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
             if train_com_method == "rpc":
-                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model , share_file_path=data_dir+"/rpc_share")
+                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model , share_file_path=share_file_path, timestamp=timestamp)
         else:
             self.preconditioner = None
 
@@ -82,6 +89,11 @@ class GeneralManager:
 
         dist.barrier()
         self.writer.close()
+
+    def close_all(self):
+        self.rpc_communicator.close_rpc()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
     def train(self, epoch):
         start_time = time.time()

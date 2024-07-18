@@ -146,3 +146,4 @@ runs*
 .idea
 *.sh.e*
 *.sh.o*
+share_files/

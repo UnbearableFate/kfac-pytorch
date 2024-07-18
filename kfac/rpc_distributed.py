@@ -130,7 +130,7 @@ class KfacRPCLayer:
         self.last_load_handled_tensor_version = t
 
 class KFacRPCCommunicator:
-    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path =""):
+    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp=""):
         self.node_state_lock = threading.Lock()
 
         self.skip_inverse_computation_ct = 0
@@ -143,7 +143,7 @@ class KFacRPCCommunicator:
         self.skip_inverse_computation_flag : bool = False
         options = rpc.TensorPipeRpcBackendOptions(
             num_worker_threads=16,
-            init_method=f"file://{share_file_path}",
+            init_method=f"file://{share_file_path}/rpc_share{timestamp}",
             rpc_timeout=30,
         )
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)
@@ -192,6 +192,9 @@ class KFacRPCCommunicator:
 
         global global_communicator
         global_communicator = self
+
+    def close_rpc(self):
+        rpc.shutdown()
 
     def get_health_node_state_list(self) -> list[NodeState]:
         return [state for rank, state in self.node_states.items() if state.health]
@@ -477,8 +480,7 @@ class KFacRPCCommunicator:
             for layer_name in self.participate_factor_computation_layers:
                 self.computation_volume_accumulation += 0.1* (self.layers_workload[layer_name]["A"] +self.layers_workload[layer_name]["G"])
 
-        #with self.node_state_lock:
-        #    self.node_states[self.rank].speed = self.computation_volume_accumulation / self.time_cost_accumulation
+        self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
 
     def facotr_comput_lazy_wl_rebal(self):
         self.computation_volume_statistic()

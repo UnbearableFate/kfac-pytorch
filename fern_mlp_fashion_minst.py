@@ -6,37 +6,60 @@ import torch.distributed as dist
 from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
-ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', 0))
-ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', 0))
+import shutil
+
+def delete_all_files_in_directory(directory_path):
+    # 检查路径是否存在
+    if not os.path.exists(directory_path):
+        print(f"The directory {directory_path} does not exist.")
+        return
+
+    # 遍历目录下的所有文件和文件夹
+    for filename in os.listdir(directory_path):
+        file_path = os.path.join(directory_path, filename)
+
+        # 如果是文件则删除
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+            print(f"Deleted file: {file_path}")
+        # 如果是目录，则可以选择递归删除或者跳过
+        elif os.path.isdir(file_path):
+            shutil.rmtree(file_path)
+            print(f"Deleted directory: {file_path}")
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
 pg_share_file = "pg_share"
 rpc_share_fie = "rpc_share"
 
+DATA_DIR = ""
+LOG_DIR = ""
+Share_DIR = ""
 if os.path.exists("/home/yu"):
     DATA_DIR = "/home/yu/data"
     LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs"+today
-else:
+    Share_DIR = "/home/yu/workspace/kfac-pytorch/share_files"
+elif os.path.exists("/Users/unbearablefate"):
     DATA_DIR = "/Users/unbearablefate/workspace/data"
     LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs"+today
+    Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
+
+if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
+    raise RuntimeError("Unknown environment.")
+
+ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
+if ompi_world_rank == 0:
+    delete_all_files_in_directory(Share_DIR)
 
 if __name__ == '__main__':
-    #timeout = datetime.timedelta(seconds=30)
-    if ompi_world_size <= 0:
-        raise RuntimeError("Unable to initialize process group.")
-
-    dist.init_process_group("gloo", init_method=f"file://{DATA_DIR}/{pg_share_file}",
-                            rank=ompi_world_rank, world_size=ompi_world_size)
-    if not dist.is_initialized():
-        raise RuntimeError("Unable to initialize process group.")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     model = MLP(num_hidden_layers=3,hidden_size=64)
     model = ModelSplitter(model, 64)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device='cpu')
-    #mgr.init_mischief(disconnect_ratio=0.2, max_sick_iter_ratio=0.2, max_disconnected_node_num=2)
+                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device='cpu',
+                         share_file_path=Share_DIR)
+
     mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test01")
-    dist.destroy_process_group()
+    mgr.close_all()
     print("Done!")

@@ -117,7 +117,8 @@ class ModelAvgRPCCommunicator:
                         param.copy_(self.io_layers[layer_name].bias)
         self.lock.release()
     """
-    def send_model_param(self, target, layer_name ,resurrection_flag = False ,speed = None):
+    def send_model_param(self, target, layer_name ,resurrection_flag = False):
+        speed = self.get_local_node_speed()
         with torch.no_grad():
             if target == self.rank:
                 return
@@ -132,7 +133,8 @@ class ModelAvgRPCCommunicator:
             except Exception as e:
                 print(f"send_model_param failed {e} from {self.rank} to {target}")
     
-    def send_model_param_to_store(self, target, layer_name,speed= None):
+    def send_model_param_to_store(self, target, layer_name):
+        speed = self.get_local_node_speed()
         with torch.no_grad():
             if target == self.rank:
                 return
@@ -147,7 +149,8 @@ class ModelAvgRPCCommunicator:
             except Exception as e:
                 print(f"send_model_param failed {e} from {self.rank} to {target}")
     
-    def send_model_param_dict_to_store(self, target, layer_names = None ,speed = None):
+    def send_model_param_dict_to_store(self, target, layer_names = None):
+        speed = self.get_local_node_speed()
         if layer_names is None:
             layer_names = self.io_layers.keys()
 
@@ -161,16 +164,17 @@ class ModelAvgRPCCommunicator:
             rpc.rpc_async(
                 to=rpc_work_name(target),
                 func=receive_model_param_dict_to_store,
-                args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data )
+                args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data ,speed)
             )
         except Exception as e:
             print(f"send_model_param failed {e} from {self.rank} to {target}")
 
     def get_local_node_speed(self):
-        if self.rpc_communicator.time_cost_accumulation != 0:
-            speed = self.rpc_communicator.computation_volume_accumulation / self.rpc_communicator.time_cost_accumulation
-            self.rpc_communicator.node_states[self.rank].speed = speed
-            return speed
+        if self.rpc_communicator.node_states[self.rank].speed is not None and self.rpc_communicator.node_states[self.rank].speed != 0:
+            return self.rpc_communicator.node_states[self.rank].speed
+        elif self.rpc_communicator.time_cost_accumulation != 0:
+            self.rpc_communicator.node_states[self.rank].speed = int(self.rpc_communicator.computation_volume_accumulation / self.rpc_communicator.time_cost_accumulation)
+            return self.rpc_communicator.node_states[self.rank].speed
         return None
 
     def send_to_sick_nodes_sometimes(self):
@@ -183,14 +187,14 @@ class ModelAvgRPCCommunicator:
             target_chioce_list = list(target_chioce_list)
             for layer_name, layer in self.io_layers.items():
                 target = random.choice(target_chioce_list)
-                self.send_model_param(target, layer_name,False,self.get_local_node_speed())
+                self.send_model_param(target, layer_name,False)
 
     def send_all_model_param_alg01(self):
         target = self.start_target
         for layer_name, layer in self.io_layers.items():
             if target == self.rank:
                 target = (target + 1) % self.world_size()
-            self.send_model_param(target, layer_name, False, self.get_local_node_speed())
+            self.send_model_param(target, layer_name, False)
             target = (target + 1) % self.world_size()
         self.start_target = (self.start_target + 1) % self.world_size()
 
@@ -201,7 +205,7 @@ class ModelAvgRPCCommunicator:
         target_chioce_list = list(target_chioce_list)
         for layer_name, layer in self.io_layers.items():
             target = random.choice(target_chioce_list)
-            self.send_model_param(target, layer_name,False,self.get_local_node_speed())
+            self.send_model_param(target, layer_name,False)
         #self.send_to_sick_nodes_sometimes()
     
     def send_all_model_param_alg03(self):
@@ -209,7 +213,7 @@ class ModelAvgRPCCommunicator:
         for rank in target_chioce_list:
             if rank == self.rank:
                 continue
-            self.send_model_param_dict_to_store(rank ,layer_names=None,speed = self.get_local_node_speed())
+            self.send_model_param_dict_to_store(rank ,layer_names=None)
         
         self.average_model_param_from_store()
 
@@ -219,7 +223,7 @@ class ModelAvgRPCCommunicator:
             if rank == self.rank:
                 continue
             for layer_name, layer in self.io_layers.items():
-                self.send_model_param_to_store(rank, layer_name ,speed= self.get_local_node_speed())
+                self.send_model_param_to_store(rank, layer_name)
         self.average_model_param_from_store()
 
     def send_all_model_param_alg06(self):
@@ -227,9 +231,9 @@ class ModelAvgRPCCommunicator:
         for rank in target_chioce_list:
             if rank == self.rank:
                 continue
-            self.send_model_param_dict_to_store(rank, layer_names=None, speed=self.get_local_node_speed())
+            self.send_model_param_dict_to_store(rank, layer_names=None)
 
-        self.average_model_param_from_store()
+        self.average_model_param_from_store2()
     
     def average_model_param_from_store(self):
         with torch.no_grad():
@@ -322,7 +326,7 @@ def receive_model_param(from_rank, from_rank_iter, from_loss, layer_name, model_
         model_avg_rpc_communicator.lock.release()
     if resurrection_flag:
         model_avg_rpc_communicator.rpc_communicator.update_node_iter(model_avg_rpc_communicator.rank,
-                                                                     from_rank_iter)
+                                                                     from_rank_iter ,speed)
 
 def receive_model_param_to_store(from_rank, from_rank_iter, from_loss, layer_name, model_weight, model_bias ,speed = None):
     global model_avg_rpc_communicator
