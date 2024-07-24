@@ -339,47 +339,35 @@ class BaseKFACPreconditioner:
 
         # Compute Inverses
         if self.steps % self.inv_update_steps == 0:
-            for name, layer in reversed(list(self._layers.values())):
-                if get_rank() == self._assignment.inv_worker(name, 'A'):
-                    layer.compute_a_inv(damping=self.damping)
-                if (
-                    self._assignment.broadcast_inverses()
-                    and self._assignment.is_grad_worker(name)
-                ):
-                    layer.broadcast_a_inv(
-                        src=self._assignment.inv_worker(name, 'A'),
-                        group=self._assignment.grad_worker_group(name),
-                    )
-                if get_rank() == self._assignment.inv_worker(name, 'G'):
-                    layer.compute_g_inv(damping=self.damping)
-                if (
-                    self._assignment.broadcast_inverses()
-                    and self._assignment.is_grad_worker(name)
-                ):
-                    layer.broadcast_g_inv(
-                        src=self._assignment.inv_worker(name, 'G'),
-                        group=self._assignment.grad_worker_group(name),
-                    )
-            self._tdc.flush_allreduce_buckets()
+            if rpc_dist.global_communicator is not None:
+                rpc_dist.global_communicator.compute_and_broadcast_inverse(preconditioner=self)
+            else:
+                for name, layer in reversed(list(self._layers.values())):
+                    if get_rank() == self._assignment.inv_worker(name, 'A'):
+                        layer.compute_a_inv(damping=self.damping)
+                    if (
+                        self._assignment.broadcast_inverses()
+                        and self._assignment.is_grad_worker(name)
+                    ):
+                        layer.broadcast_a_inv(
+                            src=self._assignment.inv_worker(name, 'A'),
+                            group=self._assignment.grad_worker_group(name),
+                        )
+                    if get_rank() == self._assignment.inv_worker(name, 'G'):
+                        layer.compute_g_inv(damping=self.damping)
+                    if (
+                        self._assignment.broadcast_inverses()
+                        and self._assignment.is_grad_worker(name)
+                    ):
+                        layer.broadcast_g_inv(
+                            src=self._assignment.inv_worker(name, 'G'),
+                            group=self._assignment.grad_worker_group(name),
+                        )
+                self._tdc.flush_allreduce_buckets()
 
         # Compute Preconditioned Gradients
         if rpc_dist.global_communicator is not None:
-            ct = len(self._layers.values())
-            for i in range(rpc_dist.global_communicator.load_inverse_max_loop):
-                for name, layer in reversed(list(self._layers.values())):
-                    if not rpc_dist.global_communicator.load_eigen_tensor(layer,i):
-                        continue
-                    else:
-                        ct -= 1
-                    if self._assignment.is_grad_worker(name):
-                        layer.preconditioned_grad(damping=self.damping)
-                    if self._assignment.broadcast_gradients():
-                        layer.broadcast_grad(
-                            src=self._assignment.src_grad_worker(name),
-                            group=self._assignment.grad_receiver_group(name),
-                        )
-                if ct == 0:
-                    break
+            rpc_dist.global_communicator.compute_preconditioned_gradients(self.damping)
         else:
             for name, layer in reversed(list(self._layers.values())):
                 if self._assignment.is_grad_worker(name):

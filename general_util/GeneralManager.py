@@ -87,7 +87,6 @@ class GeneralManager:
         if self.train_com_method == "rpc": 
             self.write_test_result_rpc()
 
-        dist.barrier()
         self.writer.close()
 
     def close_all(self):
@@ -145,6 +144,11 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
+                if self.train_com_method =="rpc" and self.rpc_communicator.shutdown_flag:
+                    if dist.is_initialized():
+                        dist.destroy_process_group()
+                    rpc_distributed.rpc.shutdown()
+                    break
                 rpc_distributed.global_communicator.update_self_t()
                 mischief.update_iter()
                 data = data.to(self.device)
@@ -250,6 +254,7 @@ class GeneralManager:
         for e in range(self.epochs):
             accuracy = rpc_distributed.global_communicator.wait_and_return_test_result(e)
             self.writer.add_scalar('Accuracy/test', accuracy, e)
+        self.rpc_communicator.broadcast_shutdown()
 
     def average_health_nodes_param_tensor_fusion_async(self):
         model = self.model
