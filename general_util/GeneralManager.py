@@ -16,7 +16,7 @@ import kfac.rpc_distributed as rpc_distributed
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 class GeneralManager:
-    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp=""):
+    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp="" ,log_dir =''):
         if share_file_path is not None:
             if ompi_world_size <= 0:
                 raise RuntimeError("Unable to initialize process group.")
@@ -40,7 +40,7 @@ class GeneralManager:
         if is_2nd_order:
             self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
             if train_com_method == "rpc":
-                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model , share_file_path=share_file_path, timestamp=timestamp)
+                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model , share_file_path=share_file_path, timestamp=timestamp ,log_dir = log_dir)
         else:
             self.preconditioner = None
 
@@ -185,9 +185,9 @@ class GeneralManager:
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
 
-                #if (self.rpc_communicator.node_states[self.rank].health == False
-                #        and self.rpc_communicator.median_iter_in_health_nodes() - self.rpc_communicator.node_states[self.rank].iter < self.rpc_communicator.slow_tolerance_value / 3):
-                #    self.rpc_communicator.restart_sick_node()
+                if (self.rpc_communicator.node_states[self.rank].health == False
+                        and self.rpc_communicator.median_iter_in_health_nodes() - self.rpc_communicator.node_states[self.rank].iter < self.rpc_communicator.slow_tolerance_value / 3):
+                    self.rpc_communicator.restart_sick_node()
 
                 if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
                     self.rpc_communicator.task_reassign_rpc.reassign_task_callback()

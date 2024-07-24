@@ -139,7 +139,7 @@ class KfacRPCLayer:
             self.kfac_layer.da = self.da.clone()
 
 class KFacRPCCommunicator:
-    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp=""):
+    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = ""):
 
         self.node_state_lock = threading.Lock()
 
@@ -186,7 +186,7 @@ class KFacRPCCommunicator:
         if rpc.is_available():
             print(f"RPC Communicator initialized for rank {rank}")
 
-        self.init_logger(rank)
+        self.init_logger(rank,log_dir)
         self.model_avg_rpc = model_param_avg_rpc.ModelAvgRPCCommunicator(rank, model ,self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment)
 
@@ -228,12 +228,10 @@ class KFacRPCCommunicator:
         iters = [state.iter for state in self.get_health_node_state_list()]
         return statistics.median(iters)
 
-    def init_logger(self,rank):
-        if os.path.exists('/work/NBB/yu_mingzhe'):
-            return
+    def init_logger(self,rank,log_dir):
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
         # 创建一个 FileHandler，并设置级别为 DEBUG
-        file_handler = logging.FileHandler(f'log_{rank}_{timestamp}.log')
+        file_handler = logging.FileHandler(f'{log_dir}/log_{rank}_{timestamp}.log')
         file_handler.setLevel(logging.DEBUG)
 
         # 创建一个日志格式器，并将其添加到 FileHandler

@@ -69,7 +69,7 @@ if __name__ == '__main__':
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device='cpu',
-                         share_file_path=Share_DIR,timestamp=timestamp)
+                         share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR)
 
     mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test01")
     mgr.close_all()
