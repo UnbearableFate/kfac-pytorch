@@ -52,10 +52,6 @@ elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
 if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
     raise RuntimeError("Unknown environment.")
 
-ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
-if ompi_world_rank == 0:
-    delete_all_files_in_directory(Share_DIR)
-
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')

@@ -76,7 +76,7 @@ class KfacTaskState:
 class KfacRPCLayer:
     def __init__(self,a_handler,g_handler ,name , prediv_eigenvalues ,kfac_layer):
         self.factor : Dict[str:Optional['torch.Tensor']] = {"A" : None, "G": None }
-        self.factor_recv_ct : Dict[str:Dict[int, int]] = {"A" : {}, "G": {} } # {t: count}
+        self.factor_recv_ct : Dict[str : int ]= {"A" : 0, "G": 0 }
         self.assigned_worker :Dict[str : int]= {'A': a_handler, 'G': g_handler}
         self.qa = None
         self.da = None
@@ -95,16 +95,13 @@ class KfacRPCLayer:
         self.assigned_worker['A'] = a_handler
         self.assigned_worker['G'] = g_handler
 
-    def update_local_factor(self, recv_factor, local_t, recv_t, factor_type):
-        self.factor_recv_ct[factor_type][recv_t] = self.factor_recv_ct[factor_type].get(recv_t, 0) + 1
+    def update_local_factor(self, recv_factor, local_t, recv_t, factor_type, world_size = 8):
+        self.factor_recv_ct[factor_type] += 1
         if self.factor[factor_type] is None:
             self.factor[factor_type] = recv_factor
             return
-        recv_world_weight = 1.0 / self.factor_recv_ct[factor_type][recv_t]
-        if local_t > recv_t:
-            recv_world_weight *= self.outdated_weight_param
-        if local_t < recv_t:
-            recv_world_weight *= self.ahead_weight_param
+        sigmoid_param = (recv_t - local_t) / (local_t + 1)
+        recv_world_weight = 2 / ((1 + math.exp(-sigmoid_param)) * world_size)
         self.factor[factor_type] = (1 - recv_world_weight) * self.factor[factor_type] + recv_world_weight * recv_factor
 
     def update_local_eigen_a(self, qa, da, t):
@@ -185,6 +182,8 @@ class KFacRPCCommunicator:
         self.load_inverse_max_loop = 3
         if rpc.is_available():
             print(f"RPC Communicator initialized for rank {rank}")
+        else:
+            raise RuntimeError(f"RPC initialization failed for rank {rank}")
 
         self.init_logger(rank,log_dir)
         self.model_avg_rpc = model_param_avg_rpc.ModelAvgRPCCommunicator(rank, model ,self)
@@ -266,7 +265,7 @@ class KFacRPCCommunicator:
             log += f"Layer {name}:\n"
             for factor_type, factor in layer.factor.items():
                 log += f"\t{factor_type} factor: {factor}\n"
-                log += f"\t{factor_type} factor recv ct: {layer.factor_recv_ct[factor_type]}\n"
+                log += f"\t{factor_type} factor recv ct : {layer.factor_recv_ct[factor_type]}\n"
             log += f"\tA eigen: {layer.qa}, {layer.da}\n"
             log += f"\tG eigen: {layer.qg}, {layer.dg}, {layer.dgda}\n"
             log += f"\thandled A recv iter: {layer.recv_handled_a_version}\n"
@@ -277,25 +276,12 @@ class KFacRPCCommunicator:
 
     def load_factor(self,kfac_layer: 'KFACBaseLayer', factor_type):
         if self.assigned_worker(kfac_layer.name, factor_type) == self.rank:
-            sleep_ct = 0
-            while not self.is_factor_ready(kfac_layer.name, factor_type):
-                time.sleep(0.1)
-                sleep_ct += 1
-                self.print_rpc_state(f"Waiting for factor {factor_type} of {kfac_layer.name} to be ready")
-                if sleep_ct > 5:
-                    self.print_rpc_state(f"recv {self.rpc_layers[kfac_layer.name].factor_recv_ct} at {self.current_t()} in rank {self.rank}")
-                    self.print_rpc_state(f"load old factor {factor_type} of {kfac_layer.name} in rank {self.rank}")
-                    break
             assert self.rpc_layers[kfac_layer.name].factor[factor_type] is not None
             if factor_type == "A":
                 kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
             if factor_type == "G":
                 kfac_layer.g_factor = self.rpc_layers[kfac_layer.name].factor["G"].clone().detach()
         return True
-
-    def clear_count_dict(self):
-        for layer in self.rpc_layers.values():
-            layer.clear_count_dict(self.current_t())
 
     def shutdown(self):
         rpc.shutdown()
@@ -434,18 +420,9 @@ class KFacRPCCommunicator:
         return len(self.get_health_node_state_list())
 
     def is_factor_ready(self, layer_name, factor_type):
-        current_t = self.current_t()
-
-        ct = 0
-        t_list = reversed(list(self.rpc_layers[layer_name].factor_recv_ct[factor_type].keys()))
-        for t in t_list:
-            if t >= current_t:
-                ct += self.rpc_layers[layer_name].factor_recv_ct[factor_type].get(t)
-            else:
-                break
-        return ct >= self.necessary_ct
-
-        #return self.rpc_layers[layer_name].factor_recv_ct[factor_type].get(current_t,0) >= self.necessary_ct
+        if self.rpc_layers[layer_name].factor_recv_ct[factor_type] >= self.current_t() * (self.origin_world_size-1):
+            return True
+        return
 
     def is_eigen_tensor_ready(self, layer_name,staleness_tolerance = 0):
         current_t = self.current_t()
@@ -470,7 +447,7 @@ class KFacRPCCommunicator:
         t = self.current_t()
         if target == self.rank:
             #self.print_rpc_state(f"update local factor {factor_type} of {layer_name} in rank {self.rank}")
-            self.rpc_layers[layer_name].update_local_factor(factor_tensor.clone(), t, t, factor_type)
+            self.rpc_layers[layer_name].update_local_factor(factor_tensor.clone(), t, t, factor_type, world_size=self.origin_world_size)
             return
         try:
             rpc.rpc_async(
@@ -646,7 +623,7 @@ def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
 
     #with self.lock:
     current_t = self.current_t()
-    self.rpc_layers[layer_name].update_local_factor(factor, current_t, from_iter, factor_type)
+    self.rpc_layers[layer_name].update_local_factor(factor, current_t, from_iter, factor_type ,world_size=self.origin_world_size)
     self.update_node_iter(from_rank, from_iter)
 
 def receive_eigen_tensor_a(from_rank, layer_name, qa, da, t):

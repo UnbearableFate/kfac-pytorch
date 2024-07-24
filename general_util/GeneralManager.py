@@ -1,5 +1,7 @@
 import math
 import time
+import datetime
+
 import torch
 from tqdm import tqdm
 import kfac.mischief as mischief
@@ -20,13 +22,18 @@ class GeneralManager:
         if share_file_path is not None:
             if ompi_world_size <= 0:
                 raise RuntimeError("Unable to initialize process group.")
-            dist.init_process_group("gloo", init_method=f"file://{share_file_path}/pg_share{timestamp}",rank=ompi_world_rank, world_size=ompi_world_size)
+            timeout = datetime.timedelta(seconds=100)
+            dist.init_process_group("gloo", init_method=f"file://{share_file_path}/pg_share{timestamp}",rank=ompi_world_rank, world_size=ompi_world_size ,timeout= timeout)
+            if not dist.is_initialized():
+                raise RuntimeError("Unable to initialize process group.")
         self.writer = None
         batch_size=64
         rank = dist.get_rank()
         world_size = dist.get_world_size()
         if rank == 0:
             logging.basicConfig(level=logging.NOTSET)
+        else:
+            logging.basicConfig(level=logging.DEBUG)
 
         self.data_manager = DataPreparer(data_path_root=data_dir, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                     sampler=sampler_func, batch_size=batch_size)
@@ -196,7 +203,6 @@ class GeneralManager:
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
                 t.update()
-            rpc_distributed.global_communicator.clear_count_dict()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
