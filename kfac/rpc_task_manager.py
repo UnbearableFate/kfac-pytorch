@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 class RPCTaskManager:
-    slow_tolerance_value = 100
-    max_election_period = 10
-    def __init__(self,rpc_communicator: 'KFacRPCCommunicator' , assignment : 'KAISAAssignment'):
+    slow_tolerance_value = 150
+    max_election_period = 20
+    def __init__(self,rpc_communicator: 'KFacRPCCommunicator' , assignment : 'KAISAAssignment' ,slow_tolerance_value = 150,max_election_period=20):
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
         self.rank = rpc_communicator.rank
         self.world_size = rpc_communicator.get_health_world_size
@@ -39,9 +39,21 @@ class RPCTaskManager:
         else:
             self.identity = 1 # 1:follower 2:candidate
 
+        RPCTaskManager.slow_tolerance_value = slow_tolerance_value
+        RPCTaskManager.max_election_period = max_election_period
+
         global rpc_task_manager
         rpc_task_manager = self
 
+    def print_state(self):
+        result = ""
+        result += f"identity : {self.identity} "
+        result += f"currentTerm : {self.currentTerm} "
+        result += f"votedFor : {self.votedFor} "
+        result += f"leader_rank : {self.leader_rank} "
+        result += f"election_period : {self.election_period} "
+
+        return result
     def check_and_reassign(self): # call by leader
         if self.leader_rank == self.rank:
             median_iter = self.rpc_communicator.median_iter_in_health_nodes()
@@ -228,6 +240,7 @@ def grant_vote(voterTerm, voterId, candidateTerm): # recv by candidate
             rpc_task_manager.election_period = -1
             rpc_task_manager.votedFor = None
             rpc_task_manager.voted_for_me_set.clear()
+            rpc_task_manager.rpc_communicator.print_rpc_state(f"become new leader {rpc_task_manager.rank} with term {rpc_task_manager.currentTerm}")
             rpc_task_manager.check_and_reassign()
 
 def recv_reassign_task(new_health_node_list, new_assignment, assignment_generation, from_rank, from_term , send_need_layer_names = None, send_to = None): # recv by health follower

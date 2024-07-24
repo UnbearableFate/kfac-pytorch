@@ -56,7 +56,7 @@ class NodeState():
         self.speed = 0
 
     def __str__(self):
-        return f"R{self.rank} :t{self.iter}, s{self.speed}, h{self.health}"
+        return f"R{self.rank} :t{self.iter}, h{self.health}"
 
 class KfacTaskState:
     def __init__(self, layer_name, layer):
@@ -141,8 +141,8 @@ class KFacRPCCommunicator:
         self.node_state_lock = threading.Lock()
 
         self.skip_inverse_computation_ct = 0
-        self.slow_tolerance_value = 100
-        self.max_election_period = 10
+        self.slow_tolerance_value = 150
+        self.max_election_period = 20
 
         self.request_regression_record = set()
 
@@ -187,7 +187,7 @@ class KFacRPCCommunicator:
 
         self.init_logger(rank,log_dir)
         self.model_avg_rpc = model_param_avg_rpc.ModelAvgRPCCommunicator(rank, model ,self)
-        self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment)
+        self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment ,slow_tolerance_value=self.slow_tolerance_value, max_election_period=self.max_election_period)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
 
@@ -251,6 +251,7 @@ class KFacRPCCommunicator:
         log_txt = ""
         for node_rank, state in self.node_states.items():
             log_txt += f"{state}; "
+        log_txt += self.task_reassign_rpc.print_state()
         logger.debug(f"Rank {self.rank}: {log_txt} , {text}")
 
     def debug_print(self, text):
