@@ -515,9 +515,9 @@ class KFacRPCCommunicator:
         loop_time_cost = time.time() - self.loop_start_time
         self.time_cost_accumulation += loop_time_cost
         for layer_name in self.current_inverse_computation_layers:
-            self.computation_volume_accumulation += self.layers_workload[layer_name]["A"]*2  +self.layers_workload[layer_name]["G"]
+            self.computation_volume_accumulation += self.layers_workload[layer_name]["A"]*1.1  +self.layers_workload[layer_name]["G"]
         for layer_name in self.participate_factor_computation_layers:
-            self.computation_volume_accumulation += self.layers_workload[layer_name]["A"]
+            self.computation_volume_accumulation += self.layers_workload[layer_name]["A"]*0.1
 
         self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
 

@@ -1,32 +1,10 @@
 import datetime
 import os
 import argparse
-
 import torch
-import torch.distributed as dist
 from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
-import shutil
-
-def delete_all_files_in_directory(directory_path):
-    # 检查路径是否存在
-    if not os.path.exists(directory_path):
-        print(f"The directory {directory_path} does not exist.")
-        return
-
-    # 遍历目录下的所有文件和文件夹
-    for filename in os.listdir(directory_path):
-        file_path = os.path.join(directory_path, filename)
-
-        # 如果是文件则删除
-        if os.path.isfile(file_path):
-            os.remove(file_path)
-            print(f"Deleted file: {file_path}")
-        # 如果是目录，则可以选择递归删除或者跳过
-        elif os.path.isdir(file_path):
-            shutil.rmtree(file_path)
-            print(f"Deleted directory: {file_path}")
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
