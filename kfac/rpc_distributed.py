@@ -1,5 +1,6 @@
 import datetime
 import math
+import os
 import random
 import statistics
 import time
@@ -191,7 +192,6 @@ class KFacRPCCommunicator:
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
 
-        self.update_assignment_flag = False
         self.update_assignment_callback = None
         self.send_model_param_callback = None
 
@@ -229,6 +229,8 @@ class KFacRPCCommunicator:
         return statistics.median(iters)
 
     def init_logger(self,rank):
+        if os.path.exists('/work/NBB/yu_mingzhe'):
+            return
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
         # 创建一个 FileHandler，并设置级别为 DEBUG
         file_handler = logging.FileHandler(f'log_{rank}_{timestamp}.log')
@@ -424,7 +426,6 @@ class KFacRPCCommunicator:
         self.print_rpc_state(f"update new assignment {new_assignment_generation}: {new_assignment}")
         self.current_inverse_computation_layers = self.assigned_layers.copy()
         self.participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
-        self.update_assignment_flag = False
         self.update_assignment_callback = None
         self.task_reassign_rpc.running_time = 0
 
@@ -438,9 +439,12 @@ class KFacRPCCommunicator:
         current_t = self.current_t()
 
         ct = 0
-        for t in reversed(self.rpc_layers[layer_name].factor_recv_ct[factor_type].keys()):
+        t_list = reversed(list(self.rpc_layers[layer_name].factor_recv_ct[factor_type].keys()))
+        for t in t_list:
             if t >= current_t:
                 ct += self.rpc_layers[layer_name].factor_recv_ct[factor_type].get(t)
+            else:
+                break
         return ct >= self.necessary_ct
 
         #return self.rpc_layers[layer_name].factor_recv_ct[factor_type].get(current_t,0) >= self.necessary_ct
@@ -575,14 +579,14 @@ class KFacRPCCommunicator:
                         break
 
     def send_model_param(self):
-        self.model_avg_rpc.send_all_model_param_alg01()
+        self.model_avg_rpc.send_all_model_param_alg06()
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
         try:
             rpc.rpc_async(
                 to=rpc_work_name(0),
                 func=recv_rpc_test_result,
-                args=(self.rank, correct_ct, total_ct, epoch)
+                args=(correct_ct, total_ct, epoch)
             )
         except Exception as e:
             print(f"Failed to send test result to 0: {e} from {self.rank}")

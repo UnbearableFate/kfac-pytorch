@@ -106,26 +106,18 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-
                 data = data.to(self.device)
                 target = target.to(self.device)
                 mischief.update_iter()
                 self.optimizer.zero_grad()
-                
-
                 output = self.model(data)
-
                 loss = self.loss_func(output, target)
                 loss.backward()
-                
                 if self.preconditioner is not None:
                     self.preconditioner.step()
-
                 self.optimizer.step()
-                
                 if self.train_com_method != 'ddp':
                     self.train_communication_allreduce_avg()
-                    
                 t.update()
 
             if self.writer is not None:
@@ -144,11 +136,12 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                if self.train_com_method =="rpc" and self.rpc_communicator.shutdown_flag:
+                if self.rpc_communicator.shutdown_flag:
                     if dist.is_initialized():
                         dist.destroy_process_group()
                     rpc_distributed.rpc.shutdown()
                     break
+                self.rpc_communicator.model_avg_rpc.average_model_param_from_store2()
                 rpc_distributed.global_communicator.update_self_t()
                 mischief.update_iter()
                 data = data.to(self.device)
@@ -180,11 +173,13 @@ class GeneralManager:
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
+                '''
                 if self.rank == 2 :
                     if epoch == 0  and 10 < batch_idx <= 12:
                         time.sleep(10)
                     if epoch == 0 and batch_idx == 16:
                         self.rpc_communicator.restart_sick_node()
+                '''
 
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()

@@ -1,5 +1,6 @@
 import datetime
 import os
+import argparse
 
 import torch
 import torch.distributed as dist
@@ -43,6 +44,10 @@ elif os.path.exists("/Users/unbearablefate"):
     DATA_DIR = "/Users/unbearablefate/workspace/data"
     LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs"+today
     Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
+elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
+    DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
+    LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs"+today
+    Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data/share_files"
 
 if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
     raise RuntimeError("Unknown environment.")
@@ -52,13 +57,19 @@ if ompi_world_rank == 0:
     delete_all_files_in_directory(Share_DIR)
 
 if __name__ == '__main__':
+    print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    parser = argparse.ArgumentParser(description="experiment script")
+    parser.add_argument('--timestamp', type=str, default=timestamp)
+    args = parser.parse_args()
+    timestamp = args.timestamp
+    print(f"timestamp: {timestamp}")
     model = MLP(num_hidden_layers=3,hidden_size=64)
     model = ModelSplitter(model, 64)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device='cpu',
-                         share_file_path=Share_DIR)
+                         share_file_path=Share_DIR,timestamp=timestamp)
 
     mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test01")
     mgr.close_all()

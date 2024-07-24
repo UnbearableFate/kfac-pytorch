@@ -238,7 +238,6 @@ def recv_reassign_task(new_health_node_list, new_assignment, assignment_generati
     rpc_task_manager.rpc_communicator.update_node_state_list(new_health_node_list)
     rpc_task_manager.rpc_communicator.print_rpc_state(f"get new assignment{assignment_generation}: {new_assignment} from leader {from_rank} update health_nodes {new_health_node_list} ")
     rpc_task_manager.rpc_communicator.update_assignment_callback = partial(rpc_task_manager.rpc_communicator.update_inverse_workers, new_assignment, assignment_generation)
-    rpc_task_manager.rpc_communicator.update_assignment_flag = True
     if send_need_layer_names is not None and send_to is not None:
         rpc_task_manager.rpc_communicator.send_model_param_callback = partial(rpc_task_manager.rpc_communicator.send_new_model_to_resurrection_node,send_need_layer_names,send_to)
 
