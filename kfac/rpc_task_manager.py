@@ -259,6 +259,12 @@ def accept_regression_request(from_rank, from_term):
         return
     #if rpc_task_manager.rpc_communicator.min_iter_in_health_nodes() - from_term < RPCTaskManager.slow_tolerance_value / 3:
     with rpc_task_manager.reassign_lock:
+        if (from_rank in rpc_task_manager.resurrection_nodes
+                or from_rank in rpc_task_manager.reassign_task_reserve_health_nodes
+                or rpc_task_manager.rpc_communicator.node_states[from_rank].health == True):
+            rpc_task_manager.rpc_communicator.print_rpc_state(
+                f"resurrection declaration from {from_rank} accepted ,but already in health nodes")
+            return
         rpc_task_manager.rpc_communicator.print_rpc_state(f"resurrection declaration from {from_rank} accepted")
         rpc_task_manager.resurrection_nodes.add(from_rank)
         if rpc_task_manager.reassign_task_callback is None:

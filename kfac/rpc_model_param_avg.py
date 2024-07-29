@@ -70,7 +70,7 @@ class ModelAvgRPCCommunicator:
     loss_weight = 1.8
     iter_weight = 0.7
 
-    def __init__(self,  rank, model,rpc_communicator: 'KFacRPCCommunicator'):
+    def __init__(self,  rank, model,rpc_communicator: 'KFacRPCCommunicator', style = 'buffer'):
         self.world_size = rpc_communicator.get_world_size
         self.origin_world_size = rpc_communicator.origin_world_size
         self.rank = rank
@@ -92,9 +92,9 @@ class ModelAvgRPCCommunicator:
 
         self.buffer_size = 2
         self.model_recv_buffer :List[ModelStore]= self.creat_model_recv_buffer(self.buffer_size)
-        self.buffer_lock = [threading.Lock() for _ in range(2)]
-        self.buffer_pos = 0
 
+        if style == 'buffer':
+            self.send_func = self.send_model_param_to_buffer
 
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
@@ -164,7 +164,7 @@ class ModelAvgRPCCommunicator:
                     args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, layer_name,weight, bias )
                 )
             except Exception as e:
-                print(f"send_model_param failed {e} from {self.rank} to {target}")
+                print(f"send_model_param_to_store failed {e} from {self.rank} to {target}")
 
     def send_model_param_dict_to_store(self, target, layer_names = None):
         speed = self.get_local_node_speed()
@@ -184,7 +184,7 @@ class ModelAvgRPCCommunicator:
                 args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data ,speed)
             )
         except Exception as e:
-            print(f"send_model_param failed {e} from {self.rank} to {target}")
+            print(f"send_model_param_dict_to_store failed {e} from {self.rank} to {target}")
 
     def send_model_param_to_buffer(self, target, layer_names = None):
         speed = self.get_local_node_speed()
@@ -204,7 +204,7 @@ class ModelAvgRPCCommunicator:
                 args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data ,speed)
             )
         except Exception as e:
-            print(f"send_model_param failed {e} from {self.rank} to {target}")
+            print(f"send_model_param_to_buffer failed {e} from {self.rank} to {target}")
 
     def get_local_node_speed(self):
         if self.rpc_communicator.node_states[self.rank].speed is not None and self.rpc_communicator.node_states[self.rank].speed != 0:
@@ -264,7 +264,7 @@ class ModelAvgRPCCommunicator:
         #self.average_model_param_from_store2()
 
     def send_all_model_param_alg07(self):
-        target = self.rank + self.current_t() % self.origin_world_size
+        target = (self.rank + self.current_t()) % self.origin_world_size
         if target == self.rank:
             target = (target + 1) % self.origin_world_size
         self.send_model_param_to_buffer(target, layer_names=None)
@@ -339,17 +339,21 @@ class ModelAvgRPCCommunicator:
         p = 1/ (self.buffer_size+1)
         temp = ModelStore(self.io_layers)
         for buf_model in self.model_recv_buffer:
-            with buf_model.lock:
-                for layer_name, layer in buf_model.layer_store.items():
-                    temp.layer_store[layer_name].weight += layer.weight * p
-                    if layer.bias is not None:
-                        temp.layer_store[layer_name].bias += layer.bias * p
-
-        with self.lock:
-            for layer_name, layer in self.io_layers.items():
-                layer.weight = layer.weight*p + temp.layer_store[layer_name].weight
+            if not buf_model.lock.acquire(timeout= 3):
+                raise Exception("lock acquire failed at aggregate_model_from_buff")
+            for layer_name, layer in buf_model.layer_store.items():
+                temp.layer_store[layer_name].weight += layer.weight * p
                 if layer.bias is not None:
-                    layer.bias = layer.bias*p + temp.layer_store[layer_name].bias
+                    temp.layer_store[layer_name].bias += layer.bias * p
+            buf_model.lock.release()
+
+        if not self.lock.acquire(timeout= 3):
+            raise Exception("lock acquire failed at aggregate_model_from_buff")
+        for layer_name, layer in self.io_layers.items():
+            layer.weight = layer.weight*p + temp.layer_store[layer_name].weight
+            if layer.bias is not None:
+                layer.bias = layer.bias*p + temp.layer_store[layer_name].bias
+        self.lock.release()
         
     def Send_to_Easter_Point_Task_Assignment(self,health_node_list):
         result = dict()

@@ -174,7 +174,7 @@ class KFacRPCCommunicator:
                 self.candidate_participate_factor_computation_layers.append(name)
                 self.participate_factor_computation_layers.append(name)
 
-        self.node_states = dict()
+        self.node_states: Dict[int, NodeState] = {}
         for i in range(world_size):
             self.node_states[i] = NodeState(i)
         self.lock = threading.Lock()
@@ -418,6 +418,11 @@ class KFacRPCCommunicator:
         self.print_rpc_state(f"update new assignment {new_assignment_generation}: {new_assignment}")
         self.current_inverse_computation_layers = self.assigned_layers.copy()
         self.participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
+        for _ ,rpc_layer in self.rpc_layers.items():
+            if rpc_layer.assigned_worker['A'] != self.rank:
+                rpc_layer.factor['A'] = None
+            if rpc_layer.assigned_worker['G'] != self.rank:
+                rpc_layer.factor['G'] = None
         self.update_assignment_callback = None
         self.task_reassign_rpc.running_time = 0
 
@@ -614,9 +619,8 @@ class KFacRPCCommunicator:
         return send_task
 
     def send_new_model_to_resurrection_node(self,layer_name_list,resurrection_node_list):
-        for layer_name in layer_name_list:
-            for node_rank in resurrection_node_list:
-                self.model_avg_rpc.send_model_param(node_rank, layer_name ,resurrection_flag = True)
+        for node_rank in resurrection_node_list:
+            self.model_avg_rpc.send_model_param_to_buffer(node_rank, layer_name_list)
 
         self.send_model_param_callback = None
 
