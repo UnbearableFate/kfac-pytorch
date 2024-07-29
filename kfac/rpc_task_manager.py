@@ -55,11 +55,10 @@ class RPCTaskManager:
 
         return result
     def check_and_reassign(self): # call by leader
-        if self.leader_rank == self.rank:
+        if self.leader_rank == self.rank and self.reassign_task_callback is None:
             median_iter = self.rpc_communicator.median_iter_in_health_nodes()
-            min_iter = self.rpc_communicator.min_iter_in_health_nodes()
-            if median_iter - min_iter > RPCTaskManager.slow_tolerance_value:
-                health_nodes, sick_nodes = self.pick_health_and_sick_nodes(min_iter)
+            health_nodes, sick_nodes = self.pick_health_and_sick_nodes(median_iter)
+            if set(health_nodes) != set(self.rpc_communicator.get_health_nodes_rank_list()):
                 self.rpc_communicator.print_rpc_state(f"find slow nodes {sick_nodes} and health nodes {health_nodes}")
                 if self.rank in sick_nodes:
                     self.rpc_communicator.print_rpc_state(f"leader itself is slow ,wait for next election")
@@ -71,12 +70,11 @@ class RPCTaskManager:
                 self.rpc_communicator.print_rpc_state(
                     f"update reassign_task_reserve_health_nodes {self.reassign_task_reserve_health_nodes}")
 
-    def pick_health_and_sick_nodes(self, min_iter): # call by leader
+    def pick_health_and_sick_nodes(self, median_iter): # call by leader
         health_nodes = []
         sick_nodes = []
-        for state in self.rpc_communicator.get_health_node_state_list():
-            rank = state.rank
-            if self.rpc_communicator.node_states[rank].iter - min_iter <= 2:
+        for rank, state in self.rpc_communicator.node_states.items():
+            if median_iter - self.rpc_communicator.node_states[rank].iter > self.rpc_communicator.slow_tolerance_value:
                 sick_nodes.append(rank)
             else:
                 health_nodes.append(rank)
@@ -86,13 +84,16 @@ class RPCTaskManager:
         self.reassign_lock.acquire()
         if len(self.reassign_task_reserve_health_nodes) == 0:
             self.reassign_task_reserve_health_nodes = set(self.rpc_communicator.get_health_nodes_rank_list())
+        # reassign task in local
         workgroup = list(self.reassign_task_reserve_health_nodes | self.resurrection_nodes)
         self.rpc_communicator.update_node_state_list(workgroup)
         new_assignment = self.assignment.greedy_assignment_efficiency(self.assignment.work, [workgroup], True,self.rpc_communicator.get_computation_speed_dict())
         self.rpc_communicator.update_inverse_workers(new_assignment, self.assignment_generation+1)
 
+        # reassign task in remote
         send_task = dict()
-        if len(self.resurrection_nodes) > 0:
+        new_resurrection_nodes = set(workgroup)- set(self.rpc_communicator.get_health_nodes_rank_list())
+        if len(new_resurrection_nodes) > 0:
             send_task = self.rpc_communicator.arrange_to_send_the_latest_model()
             self.rpc_communicator.print_rpc_state(
                 f"send new model to resurrection nodes {self.resurrection_nodes} with send_task {send_task}")
@@ -102,7 +103,7 @@ class RPCTaskManager:
                 if rank in send_task:
                     self.rpc_communicator.send_model_param_callback = partial(
                         self.rpc_communicator.send_new_model_to_resurrection_node, send_task[rank],
-                        list(self.resurrection_nodes))
+                        list(new_resurrection_nodes))
                 continue
             if rank in send_task:
                 self.rpc_communicator.print_rpc_state(
@@ -111,7 +112,7 @@ class RPCTaskManager:
                     rpc.rpc_async(
                         to=rpc_work_name(rank),
                         func=recv_reassign_task,
-                        args=(workgroup, new_assignment, self.assignment_generation, self.rank, self.currentTerm, send_task[rank], list(self.resurrection_nodes))
+                        args=(workgroup, new_assignment, self.assignment_generation, self.rank, self.currentTerm, send_task[rank], list(new_resurrection_nodes))
                     )
                 except Exception as e:
                     print(f"reassign task failed {e} from {self.rank} to {rank}")
@@ -269,36 +270,3 @@ def accept_regression_request(from_rank, from_term):
         rpc_task_manager.resurrection_nodes.add(from_rank)
         if rpc_task_manager.reassign_task_callback is None:
             rpc_task_manager.reassign_task_callback = partial(rpc_task_manager.reassign_task)
-"""
-@deprecated
-def statistics_slow_nodes(from_rank, slow_nodes, vote_index):
-    
-    global rpc_task_manager
-    if vote_index not in rpc_task_manager.vote_store:
-        rpc_task_manager.vote_store[vote_index] = [slow_nodes]
-    else:
-        rpc_task_manager.vote_store[vote_index].append(slow_nodes)
-
-    if len(rpc_task_manager.vote_store[rpc_task_manager.vote_index])  > rpc_task_manager.world_size() // 2:
-        # 有一半以上的节点都投票了，开始重新分配任务
-        # 求出所有被投票慢节点的并集
-        widely_accepted_slow = reduce(set.intersection, map(set, rpc_task_manager.vote_store[vote_index]))
-        # 重新分配任务
-        for slow_node in widely_accepted_slow:
-            if slow_node in rpc_task_manager.rpc_communicator.health_node_states:
-                rpc_task_manager.rpc_communicator.health_node_states.pop(slow_node)
-
-        new_health_node_list = [rank for rank in rpc_task_manager.rpc_communicator.health_node_states.keys()]
-        workgroup = [[rank for rank in rpc_task_manager.rpc_communicator.health_node_states.keys()]]
-        new_assignment = rpc_task_manager.assignment.greedy_assignment(rpc_task_manager.assignment.work, workgroup,
-                                                                       rpc_task_manager.world_size(), True)
-
-        rpc_task_manager.rpc_communicator.update_inverse_workers(new_assignment)
-
-        for health_nodes_rank in rpc_task_manager.rpc_communicator.health_node_states.keys():
-            rpc.rpc_async(
-                to=rpc_work_name(health_nodes_rank),
-                func=reassign_task,
-                args=(new_health_node_list ,vote_index ,rpc_task_manager.assignment)
-            )
-"""

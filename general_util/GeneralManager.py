@@ -22,7 +22,7 @@ class GeneralManager:
         if share_file_path is not None:
             if ompi_world_size <= 0:
                 raise RuntimeError("Unable to initialize process group.")
-            timeout = datetime.timedelta(seconds=100)
+            timeout = datetime.timedelta(seconds=120)
             dist.init_process_group("gloo", init_method=f"file://{share_file_path}/pg_share{timestamp}",rank=ompi_world_rank, world_size=ompi_world_size ,timeout= timeout)
             if not dist.is_initialized():
                 raise RuntimeError("Unable to initialize process group.")
@@ -54,7 +54,10 @@ class GeneralManager:
         if is_2nd_order:
             self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
             if train_com_method == "rpc":
-                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank, preconditioner=self.preconditioner,model=model , share_file_path=share_file_path, timestamp=timestamp ,log_dir = log_dir)
+                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
+                                                                            preconditioner=self.preconditioner,model=model ,
+                                                                            share_file_path=share_file_path, timestamp=timestamp ,
+                                                                            log_dir = log_dir)
         else:
             self.preconditioner = None
 
@@ -89,6 +92,8 @@ class GeneralManager:
         self.writer = SummaryWriter(
             log_dir=os.path.join(log_dir, writer_name))
 
+        self.rpc_communicator.writer = self.writer
+
 
         for i in range(0, self.epochs):
             if self.train_com_method == "rpc":
@@ -102,9 +107,31 @@ class GeneralManager:
             self.write_test_result_rpc()
 
         self.writer.close()
+        self.rpc_communicator.broadcast_shutdown()
+
+    def rpc_train_and_test(self,log_dir,experiment_name,timestamp):
+        model = self.model
+        model_name = type(model).__name__
+        if hasattr(model, "model_name"):
+            model_name = model.model_name
+        if hasattr(self, "experiment_name_detail"):
+            experiment_name = f"{experiment_name}_{self.experiment_name_detail}"
+        writer_name = f"{self.dataset_name}/{model_name}/{experiment_name}/{timestamp}/{dist.get_rank()}"
+        self.writer = SummaryWriter(
+            log_dir=os.path.join(log_dir, writer_name))
+
+        for i in range(0, self.epochs):
+            self.rpc_train(epoch=i)
+            self.test_by_rpc(epoch=i)
+
+        self.write_test_result_rpc()
+        #self.rpc_communicator.broadcast_shutdown()
+        self.writer.close()
+        dist.barrier()
 
     def close_all(self):
-        self.rpc_communicator.close_rpc()
+        if rpc_distributed.rpc.is_available():
+            self.rpc_communicator.close_rpc()
         if dist.is_initialized():
             dist.destroy_process_group()
 
@@ -187,13 +214,10 @@ class GeneralManager:
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
-                '''
+
                 if self.rank == 2 :
                     if epoch == 0  and 10 < batch_idx <= 12:
-                        time.sleep(10)
-                    if epoch == 0 and batch_idx == 16:
-                        self.rpc_communicator.restart_sick_node()
-                '''
+                        time.sleep(0.1)
 
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
@@ -257,12 +281,11 @@ class GeneralManager:
         rpc_distributed.global_communicator.send_rpc_test_result(correct, total, epoch)
 
     def write_test_result_rpc(self):
-        if self.rank != 0:
+        if self.rank != self.rpc_communicator.task_reassign_rpc.leader_rank:
             return
         for e in range(self.epochs):
             accuracy = rpc_distributed.global_communicator.wait_and_return_test_result(e)
             self.writer.add_scalar('Accuracy/test', accuracy, e)
-        self.rpc_communicator.broadcast_shutdown()
 
     def average_health_nodes_param_tensor_fusion_async(self):
         model = self.model

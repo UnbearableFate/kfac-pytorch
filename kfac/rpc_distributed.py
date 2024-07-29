@@ -3,6 +3,7 @@ import math
 import os
 import random
 import statistics
+import sys
 import time
 
 import torch
@@ -139,7 +140,7 @@ class KfacRPCLayer:
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = ""):
-
+        self.writer = None
         self.node_state_lock = threading.Lock()
 
         self.skip_inverse_computation_ct = 0
@@ -581,14 +582,15 @@ class KFacRPCCommunicator:
         self.model_avg_rpc.send_all_model_param_alg07()
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
-        try:
-            rpc.rpc_async(
-                to=rpc_work_name(0),
-                func=recv_rpc_test_result,
-                args=(correct_ct, total_ct, epoch)
-            )
-        except Exception as e:
-            print(f"Failed to send test result to 0: {e} from {self.rank}")
+        for i in range(self.origin_world_size):
+            try:
+                rpc.rpc_async(
+                    to=rpc_work_name(i),
+                    func=recv_rpc_test_result,
+                    args=(correct_ct, total_ct, epoch)
+                )
+            except Exception as e:
+                print(f"Failed to send test result to 0: {e} from {self.rank}")
 
     def wait_and_return_test_result(self, epoch):
         wait_time = 0
@@ -596,7 +598,6 @@ class KFacRPCCommunicator:
             time.sleep(0.1)
             wait_time += 1
             if wait_time > 30:
-                self.print_rpc_state(f"wait for test result in epoch {epoch} in rank {self.rank}")
                 break
         
         if epoch in self.model_accuracy_statistic:
@@ -625,12 +626,16 @@ class KFacRPCCommunicator:
         self.send_model_param_callback = None
 
     def broadcast_shutdown(self):
+        if self.rank != self.task_reassign_rpc.leader_rank:
+            return
         for i in range(self.origin_world_size):
+            if i == self.rank:
+                continue
             try :
                 rpc.rpc_async(
                     to=rpc_work_name(i),
-                    func=shutdown_notifition,
-                    args=()
+                    func=shutdown_notification,
+                    args=(self.rank,)
                 )
             except Exception as e:
                 print(f"Failed to send shutdown to {i} from {self.rank}: {e}")
@@ -673,6 +678,21 @@ def recv_rpc_test_result(correct_ct, total_ct, epoch):
         global_communicator.model_accuracy_statistic[epoch]['correct_ct'] += correct_ct
         global_communicator.model_accuracy_statistic[epoch]['total_ct'] += total_ct
 
-def shutdown_notifition():
+def shutdown_notification(from_rank):
     global global_communicator
-    global_communicator.shutdown_flag = True
+    time.sleep(2)
+    if from_rank == global_communicator.task_reassign_rpc.leader_rank:
+        global_communicator.writer.close()
+        if rpc.is_available():
+            rpc.shutdown()
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+        sys.exit(1)
+    else:
+        time.sleep(5)
+        global_communicator.writer.close()
+        if rpc.is_available():
+            rpc.shutdown()
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+        sys.exit(2)

@@ -45,6 +45,6 @@ if __name__ == '__main__':
                          train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device='cpu',
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR)
 
-    mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test01")
+    mgr.rpc_train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test03")
     mgr.close_all()
     print("Done!")
