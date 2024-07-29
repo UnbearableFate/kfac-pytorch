@@ -18,7 +18,7 @@ import kfac.rpc_distributed as rpc_distributed
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 class GeneralManager:
-    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp="" ,log_dir =''):
+    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp="" ,log_dir ='', trainsform_train=None,transform_test=None):
         if share_file_path is not None:
             if ompi_world_size <= 0:
                 raise RuntimeError("Unable to initialize process group.")
@@ -35,8 +35,15 @@ class GeneralManager:
         else:
             logging.basicConfig(level=logging.DEBUG)
 
+        try :
+            os.makedirs(log_dir)
+        except FileExistsError:
+            pass
+        except Exception as e:
+            raise RuntimeError(f"Unable to create log directory: {log_dir}")
+
         self.data_manager = DataPreparer(data_path_root=data_dir, dataset_name=dataset_name, world_size=world_size, rank=rank,
-                                    sampler=sampler_func, batch_size=batch_size)
+                                    sampler=sampler_func, batch_size=batch_size ,train_transform=trainsform_train,test_transform=transform_test)
 
         model = model.to(device)
         if train_com_method == 'ddp':
@@ -80,9 +87,9 @@ class GeneralManager:
             experiment_name = f"{experiment_name}_{self.experiment_name_detail}"
         writer_name = f"{self.dataset_name}/{model_name}/{experiment_name}/{timestamp}/{dist.get_rank()}"
         self.writer = SummaryWriter(
-            log_dir=os.path.join(log_dir, writer_name)) 
+            log_dir=os.path.join(log_dir, writer_name))
 
-        
+
         for i in range(0, self.epochs):
             if self.train_com_method == "rpc":
                 self.rpc_train(epoch=i)
@@ -148,9 +155,9 @@ class GeneralManager:
                         dist.destroy_process_group()
                     rpc_distributed.rpc.shutdown()
                     break
-                self.rpc_communicator.model_avg_rpc.average_model_param_from_store2()
+
                 rpc_distributed.global_communicator.update_self_t()
-                mischief.update_iter()
+                #mischief.update_iter()
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()

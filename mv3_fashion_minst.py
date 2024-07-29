@@ -4,7 +4,7 @@ import argparse
 import torch
 from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
-from my_module.model_split import ModelSplitter
+from my_module.mobile_net import CustomMobileNetV3Small
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -38,12 +38,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
-    model = MLP(num_hidden_layers=3,hidden_size=32)
-    model = ModelSplitter(model, 32)
-    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
+    model = CustomMobileNetV3Small()
+    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device='cpu',
-                         share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR)
+                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50, device='cpu',
+                         share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR,
+                         trainsform_train=CustomMobileNetV3Small.cifar10_transform_train, transform_test=CustomMobileNetV3Small.cifar10_transform_test)
 
     mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test01")
     mgr.close_all()

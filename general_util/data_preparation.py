@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader, BatchSampler
 
 from torch.utils.data import Sampler
 import numpy as np
+from enum import Enum
+
 
 
 class SimpleNonIIDSampler(Sampler):
@@ -71,6 +73,11 @@ cifar10_transform_test = transforms.Compose(
 )
 
 class DataPreparer:
+    class DatasetName(Enum):
+        MNIST = "MNIST"
+        FashionMNIST = "FashionMNIST"
+        CIFAR10 = "CIFAR10"
+
     train_transform_dict = {
         "MNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]),
         "FashionMNIST": transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]),

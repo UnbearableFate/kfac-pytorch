@@ -367,7 +367,11 @@ class BaseKFACPreconditioner:
 
         # Compute Preconditioned Gradients
         if rpc_dist.global_communicator is not None:
-            rpc_dist.global_communicator.compute_preconditioned_gradients(self.damping)
+            ok = rpc_dist.global_communicator.compute_preconditioned_gradients(self.damping)
+            if not ok:
+                self._steps += 1
+                self._mini_steps = defaultdict(int)
+                return
         else:
             for name, layer in reversed(list(self._layers.values())):
                 if self._assignment.is_grad_worker(name):

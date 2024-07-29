@@ -81,12 +81,14 @@ class KfacRPCLayer:
         self.qa = None
         self.da = None
         self.recv_handled_a_version = -2
+        self.last_load_handled_a_version = -2
         self.qg = None
         self.dg = None
         self.dgda = None
         self.prediv_eigenvalues = prediv_eigenvalues # False：da, dg must be provided; True: dgda must be provided
         self.kfac_layer :"KFACEigenLayer"=  kfac_layer
         self.recv_handled_g_version = -2
+        self.last_load_handled_g_version = -2
         self.outdated_weight_param = 1
         self.ahead_weight_param = 1
         self.name = name
@@ -124,16 +126,16 @@ class KfacRPCLayer:
 
     def load_eigen_tensor(self):
         assert self.name == self.kfac_layer.name
-        while self.qa is None or self.qg is None:
-            time.sleep(0.1)
-            logger.debug(f"Waiting for eigen tensor of {self.name} to be ready in rank {global_communicator.rank}")
-        self.kfac_layer.qa = self.qa.clone()
-        self.kfac_layer.qg = self.qg.clone()
-        if self.prediv_eigenvalues:
-            self.kfac_layer.dgda = self.dgda.clone()
-        else:
-            self.kfac_layer.dg = self.dg.clone()
-            self.kfac_layer.da = self.da.clone()
+        assert self.recv_handled_a_version >=0 and self.recv_handled_g_version >= 0
+        if self.last_load_handled_a_version < self.recv_handled_a_version:
+            self.kfac_layer.qa = self.qa.clone()
+            self.kfac_layer.qg = self.qg.clone()
+        if self.last_load_handled_g_version < self.recv_handled_g_version:
+            if self.prediv_eigenvalues:
+                self.kfac_layer.dgda = self.dgda.clone()
+            else:
+                self.kfac_layer.dg = self.dg.clone()
+                self.kfac_layer.da = self.da.clone()
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = ""):
@@ -203,6 +205,8 @@ class KFacRPCCommunicator:
 
         global global_communicator
         global_communicator = self
+
+        self.gradient_computation_start = False
 
     def close_rpc(self):
         rpc.shutdown()
@@ -327,12 +331,11 @@ class KFacRPCCommunicator:
                 self.load_factor(kfac_layer=kfac_layer, factor_type=factor_type)
                 if factor_type == "A":
                     kfac_layer.compute_a_inv(damping=preconditioner.damping)
-                    self.send_kfac_eigen_tensor(layer_name=layer_name, q=kfac_layer.qa, d=kfac_layer.da,
-                                                dd=None, factor_type=factor_type)
+                    self.broadcast_kfac_eigen_tensor_a(layer_name=layer_name, qa=kfac_layer.qa, da=kfac_layer.da)
                 elif factor_type == "G":
                     kfac_layer.compute_g_inv(damping=preconditioner.damping)
-                    self.send_kfac_eigen_tensor(layer_name=layer_name, q=kfac_layer.qg, d=kfac_layer.dg,
-                                                dd=kfac_layer.dgda, factor_type=factor_type)
+                    self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name, qg=kfac_layer.qg, dg=kfac_layer.dg,
+                                                dadg=kfac_layer.dgda)
 
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
@@ -341,8 +344,12 @@ class KFacRPCCommunicator:
     def compute_preconditioned_gradients(self,damping):
         current_t = self.current_t()
         all_layer = set(self.rpc_layers.keys())
+        if not self.gradient_computation_start:
+            for layer_name ,layer in self.rpc_layers.items():
+                if layer.recv_handled_a_version < 0 or layer.recv_handled_g_version < 0:
+                    return False # start next forwarding because not all of the eigen tensor is ready
+            self.gradient_computation_start = True
         for layer_name in self.current_inverse_computation_layers:
-            kfac_layer = self.rpc_layers[layer_name].kfac_layer
             self.rpc_layers[layer_name].load_eigen_tensor()
             self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
             all_layer.remove(layer_name)
@@ -427,7 +434,8 @@ class KFacRPCCommunicator:
 
     def is_eigen_tensor_ready(self, layer_name,staleness_tolerance = 0):
         current_t = self.current_t()
-        if self.rpc_layers[layer_name].qa is None or self.rpc_layers[layer_name].qg is None:
+        if (self.rpc_layers[layer_name].recv_handled_a_version < 0 or
+                self.rpc_layers[layer_name].recv_handled_g_version < 0):
             return False
         if (self.rpc_layers[layer_name].recv_handled_a_version < current_t - staleness_tolerance
                 or self.rpc_layers[layer_name].recv_handled_g_version < current_t - staleness_tolerance):
@@ -460,47 +468,57 @@ class KFacRPCCommunicator:
             print(f"Failed to send factor to {target} from {self.rank}: {e}")
         return True
 
-    def send_kfac_eigen_tensor(self, layer_name,q:torch.Tensor,d:torch.Tensor,dd :torch.Tensor, factor_type):
-        if self.assigned_worker(layer_name, factor_type) != self.rank:
-            return True
-        if q is None:
+    def broadcast_kfac_eigen_tensor_a(self, layer_name,qa:torch.Tensor,da:torch.Tensor):
+        if self.assigned_worker(layer_name, 'A') != self.rank:
+            return
+        if qa is None:
             raise RuntimeError(
-                f'Attempt to broadcast {factor_type} inv from src={self.rank} but this rank '
+                f'Attempt to broadcast A inv from src={self.rank} but this rank '
+                'has not computed inv yet.',
+            )
+        t= self.current_t()
+        self.rpc_layers[layer_name].update_local_eigen_a(qa.clone(), da.clone,t)
+
+        for i in range(self.origin_world_size-1):
+            target_rank = (self.rank + i + 1) % self.origin_world_size
+            try :
+                rpc.rpc_async(
+                    to=rpc_work_name(target_rank),
+                    func=receive_eigen_tensor_a,
+                    args=(self.rank, layer_name, qa, da, t)
+                )
+            except Exception as e:
+                print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
+
+    def broadcast_kfac_eigen_tensor_g(self, layer_name,qg:torch.Tensor,dg:torch.Tensor,dadg: None|torch.Tensor):
+        t = self.current_t()
+        if self.rpc_layers[layer_name].prediv_eigenvalues:
+            if dadg is None:
+                raise RuntimeError(
+                    f'Attempt to broadcast g inv from src={self.rank} but this rank '
+                    'has not computed inv yet.',
+                )
+        elif qg is None:
+            raise RuntimeError(
+                f'Attempt to broadcast g inv from src={self.rank} but this rank '
                 'has not computed inv yet.',
             )
 
-        #with self.lock:
-        t = self.current_t()
-        d_clone,dd_clone = None, None
-        if d is not None and isinstance(d, torch.Tensor):
-            d_clone = d.clone()
-        if dd is not None and isinstance(dd, torch.Tensor):
-            dd_clone = dd.clone()
-        if factor_type == "A":
-            self.rpc_layers[layer_name].update_local_eigen_a(q.clone(), d_clone, t)
-        if factor_type == "G":
-            self.rpc_layers[layer_name].update_local_eigen_g(q.clone(), d_clone, dd_clone, t)
+        if self.rpc_layers[layer_name].prediv_eigenvalues:
+            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg.clone(), t)
+        else:
+            self.rpc_layers[layer_name].update_local_eigen_g(qg.clone(), dg.clone(), dadg, t)
 
-        for i in range(self.get_world_size()-1):
-            target_rank = (self.rank + i + 1) % self.get_world_size()
-            if factor_type == "A":
-                try :
-                    rpc.rpc_async(
-                        to=rpc_work_name(target_rank),
-                        func=receive_eigen_tensor_a,
-                        args=(self.rank, layer_name, q, d, t)
-                    )
-                except Exception as e:
-                    print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
-            if factor_type == "G":
-                try :
-                    rpc.rpc_async(
-                        to=rpc_work_name(target_rank),
-                        func=receive_eigen_tensor_g,
-                        args=(self.rank, layer_name, q, d,dd, t)
-                    )
-                except Exception as e:
-                    print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
+        for i in range(self.origin_world_size-1):
+            target_rank = (self.rank + i + 1) % self.origin_world_size
+            try:
+                rpc.rpc_async(
+                    to=rpc_work_name(target_rank),
+                    func=receive_eigen_tensor_g,
+                    args=(self.rank, layer_name, qg, dg, dadg, t)
+                )
+            except Exception as e:
+                print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
 
     def is_factor_computation_skipped(self, layer_name):
         if layer_name not in self.participate_factor_computation_layers and layer_name not in self.current_inverse_computation_layers:
@@ -555,7 +573,7 @@ class KFacRPCCommunicator:
                         break
 
     def send_model_param(self):
-        self.model_avg_rpc.send_all_model_param_alg06()
+        self.model_avg_rpc.send_all_model_param_alg07()
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
         try:

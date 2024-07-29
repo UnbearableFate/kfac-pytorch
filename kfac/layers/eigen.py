@@ -319,12 +319,6 @@ class KFACEigenLayer(KFACBaseLayer):
             damping (float, optional): damping value to condition inverse
                 (default: 0.001).
         """
-        """
-        if rpc_dist.global_communicator is not None and self.name not in rpc_dist.global_communicator.current_inverse_computation_layers:
-            return
-        if rpc_dist.global_communicator is not None :
-            rpc_dist.global_communicator.load_factor(kfac_layer=self,factor_type='A')
-        """
 
         if not isinstance(self.a_factor, torch.Tensor):
             raise RuntimeError(
@@ -348,14 +342,6 @@ class KFACEigenLayer(KFACBaseLayer):
     def compute_g_inv(self, damping: float = 0.001) -> None:
         """See `compute_g_inv`."""
 
-        # RPC part
-        '''
-        if rpc_dist.global_communicator is not None and self.name not in rpc_dist.global_communicator.current_inverse_computation_layers:
-            return
-        if rpc_dist.global_communicator is not None :
-            rpc_dist.global_communicator.load_factor(kfac_layer=self,factor_type='G')
-        '''
-
         if not isinstance(self.g_factor, torch.Tensor):
             raise RuntimeError(
                 'Cannot eigendecompose G before G has been computed',
@@ -372,11 +358,12 @@ class KFACEigenLayer(KFACBaseLayer):
             self.dg = dg.real
             self.qg = qg.real
         assert self.dg is not None
-        assert self.da is not None
+        #assert self.da is not None
         self.qg = cast(torch.Tensor, self.qg).to(self.inv_dtype)
         self.dg = self.dg.to(self.inv_dtype)
         self.dg = torch.clamp(self.dg, min=0.0)
         if self.prediv_eigenvalues:
+            assert self.da is not None
             self.dgda = 1 / (torch.outer(self.dg, self.da) + damping)
             self.dg = None
             self.da = None
