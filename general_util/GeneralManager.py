@@ -188,10 +188,9 @@ class GeneralManager:
                 if not lock.acquire(timeout=1):
                     raise Exception("lock acquire failed at train")
                 output = self.model(data)
-                lock.release()
-                
                 loss = self.loss_func(output, target)
                 loss.backward()
+                lock.release()
                 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
