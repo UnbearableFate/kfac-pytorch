@@ -42,7 +42,7 @@ class LayerParameterStore:
         self.bias = bias
         self.loss_value = loss_value
 
-    def aggregate_model_content_by_loss(self,weight, bias, loss_value):
+    def aggregate_model_content_by_loss(self,weight, bias, loss_value, iter = None):
         if self.loss_value == 0 or self.weight is None:
             self.set_model_content(weight,bias,loss_value)
             return
@@ -51,6 +51,8 @@ class LayerParameterStore:
         if self.bias is not None:
             self.bias = self.bias * (1-recv_weight) + bias * recv_weight
         self.loss_value = loss_value * (1-recv_weight) * loss_value * recv_weight
+        if iter is not None:
+            self.term = max(self.term, iter)
 
 class ModelStore:
     def __init__(self ,io_layers:Dict[str,LayerParameterStore] = None):
@@ -58,6 +60,7 @@ class ModelStore:
         self.term = 0
         self.loss_value = 0
         self.lock = threading.Lock()
+        self.resurrection_flag = False
         if io_layers is not None:
             for layer_name in io_layers.keys():
                 self.layer_store[layer_name] = LayerParameterStore()
@@ -186,7 +189,7 @@ class ModelAvgRPCCommunicator:
         except Exception as e:
             print(f"send_model_param_dict_to_store failed {e} from {self.rank} to {target}")
 
-    def send_model_param_to_buffer(self, target, layer_names = None):
+    def send_model_param_to_buffer(self, target, layer_names = None, resurrection_flag = False):
         speed = self.get_local_node_speed()
         if layer_names is None:
             layer_names = self.io_layers.keys()
@@ -201,7 +204,7 @@ class ModelAvgRPCCommunicator:
             rpc.rpc_async(
                 to=rpc_work_name(target),
                 func=receive_model_param_dict_to_buffer,
-                args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data ,speed)
+                args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data ,speed, resurrection_flag)
             )
         except Exception as e:
             print(f"send_model_param_to_buffer failed {e} from {self.rank} to {target}")
@@ -345,15 +348,24 @@ class ModelAvgRPCCommunicator:
                 temp.layer_store[layer_name].weight += layer.weight * p
                 if layer.bias is not None:
                     temp.layer_store[layer_name].bias += layer.bias * p
+            temp.term += buf_model.term
+            if buf_model.resurrection_flag:
+                temp.resurrection_flag = True
+            buf_model.resurrection_flag = False
             buf_model.lock.release()
+        temp.term = int(temp.term / self.buffer_size)
 
         if not self.lock.acquire(timeout= 3):
             raise Exception("lock acquire failed at aggregate_model_from_buff")
-        for layer_name, layer in self.io_layers.items():
-            layer.weight = layer.weight*p + temp.layer_store[layer_name].weight
-            if layer.bias is not None:
-                layer.bias = layer.bias*p + temp.layer_store[layer_name].bias
+        with torch.no_grad(): 
+            for layer_name, layer in self.io_layers.items():
+                layer.weight = layer.weight*p + temp.layer_store[layer_name].weight
+                if layer.bias is not None:
+                    layer.bias = layer.bias*p + temp.layer_store[layer_name].bias
         self.lock.release()
+        if temp.resurrection_flag:
+            self.rpc_communicator.update_node_iter(self.rank, temp.term)
+            self.rpc_communicator.print_rpc_state(f"resurrection in {self.rank} to {temp.term}") 
         
     def Send_to_Easter_Point_Task_Assignment(self,health_node_list):
         result = dict()
@@ -411,7 +423,7 @@ def receive_model_param_dict_to_neighbor_store(from_rank, from_rank_iter, from_l
         model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].term = from_rank_iter
         model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].loss_value = from_loss
 
-def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, data, speed = 0):
+def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, data, speed = 0, resurrection_flag = False):
     global model_avg_rpc_communicator
     model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter, speed=speed)
     indices = list(range(model_avg_rpc_communicator.buffer_size))  # 创建包含范围内所有数值的列表
@@ -421,6 +433,9 @@ def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, dat
             try:
                 for layer_name, model_weight, model_bias in data:
                     model_avg_rpc_communicator.model_recv_buffer[i].layer_store[layer_name].aggregate_model_content_by_loss(model_weight, model_bias,from_loss)
+                    model_avg_rpc_communicator.model_recv_buffer[i].term = max(model_avg_rpc_communicator.model_recv_buffer[i].term, from_rank_iter)
+                    if resurrection_flag:
+                        model_avg_rpc_communicator.model_recv_buffer[i].resurrection_flag = True
             finally:
                 # 释放锁
                 model_avg_rpc_communicator.model_recv_buffer[i].lock.release()

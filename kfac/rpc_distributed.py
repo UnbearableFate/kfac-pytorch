@@ -294,17 +294,17 @@ class KFacRPCCommunicator:
 
     def update_self_t(self):
         self.loop_start_time = time.time()
-        #if not self.node_state_lock.acquire(timeout=0.5):
-        #    raise RuntimeError("Failed to acquire lock in update_self_t")
+        if not self.node_state_lock.acquire(timeout=1):
+            raise RuntimeError("Failed to acquire lock in update_self_t")
         self.node_states[self.rank].iter += 1
-        #self.node_state_lock.release()
+        self.node_state_lock.release()
 
     def current_t(self):
         return self.node_states[self.rank].iter
 
     def update_node_iter(self, from_rank, t , speed = None):
-        if not self.node_state_lock.acquire(timeout=0.5):
-            raise RuntimeError("Failed to acquire lock in update_self_t")
+        if not self.node_state_lock.acquire(timeout=1):
+            raise RuntimeError("Failed to acquire lock in node_state")
         if from_rank not in self.node_states:
             raise RuntimeError(f"Rank {from_rank} is not in the node_states")
         self.node_states[from_rank].iter = max(self.node_states[from_rank].iter, t)
@@ -611,12 +611,12 @@ class KFacRPCCommunicator:
             self.print_rpc_state(f"request regression from sick node {self.rank}")
             self.request_regression_record.add(self.task_reassign_rpc.assignment_generation)
 
-    def arrange_to_send_the_latest_model(self):
+    def arrange_to_send_the_latest_model(self, survived_nodes):
         """
            params: set of resurrection_node
            return: dict of {health node rank : layer_name}
         """
-        send_task = self.model_avg_rpc.Send_to_Easter_Point_Task_Assignment(self.get_health_nodes_rank_list())
+        send_task = self.model_avg_rpc.Send_to_Easter_Point_Task_Assignment(survived_nodes)
         return send_task
 
     def send_new_model_to_resurrection_node(self,layer_name_list,resurrection_node_list):

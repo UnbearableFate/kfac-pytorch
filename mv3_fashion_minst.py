@@ -45,6 +45,6 @@ if __name__ == '__main__':
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR,
                          trainsform_train=CustomMobileNetV3Small.cifar10_transform_train, transform_test=CustomMobileNetV3Small.cifar10_transform_test)
 
-    mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test01")
+    mgr.train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="mvtest01")
     mgr.close_all()
     print("Done!")

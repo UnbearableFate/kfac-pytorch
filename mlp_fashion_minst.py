@@ -38,8 +38,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
-    model = MLP(num_hidden_layers=3,hidden_size=32)
-    model = ModelSplitter(model, 32)
+    model = MLP(num_hidden_layers=7,hidden_size=64)
+    model = ModelSplitter(model, 64)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device='cpu',

@@ -177,12 +177,6 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                if self.rpc_communicator.shutdown_flag:
-                    if dist.is_initialized():
-                        dist.destroy_process_group()
-                    rpc_distributed.rpc.shutdown()
-                    break
-
                 rpc_distributed.global_communicator.update_self_t()
                 #mischief.update_iter()
                 data = data.to(self.device)
@@ -214,18 +208,9 @@ class GeneralManager:
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
-
-                if self.rank == 2 :
-                    if epoch == 0  and 10 < batch_idx <= 12:
-                        time.sleep(0.1)
-
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
-
-                if (self.rpc_communicator.node_states[self.rank].health == False
-                        and self.rpc_communicator.median_iter_in_health_nodes() - self.rpc_communicator.node_states[self.rank].iter < self.rpc_communicator.slow_tolerance_value / 3):
-                    self.rpc_communicator.restart_sick_node()
 
                 if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
                     self.rpc_communicator.task_reassign_rpc.reassign_task_callback()
