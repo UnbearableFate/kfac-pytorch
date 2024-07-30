@@ -38,11 +38,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
-    model = MLP(num_hidden_layers=7,hidden_size=64)
+    model = MLP(num_hidden_layers=5,hidden_size=64)
     model = ModelSplitter(model, 64)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device='cpu',
+                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=40,device='cpu',
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR)
 
     mgr.rpc_train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test03")
