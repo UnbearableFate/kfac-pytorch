@@ -99,6 +99,7 @@ class ModelAvgRPCCommunicator:
         if style == 'buffer':
             self.send_func = self.send_model_param_to_buffer
 
+        self.index = 1
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
 
@@ -267,9 +268,11 @@ class ModelAvgRPCCommunicator:
         #self.average_model_param_from_store2()
 
     def send_all_model_param_alg07(self):
-        target = (self.rank + self.current_t()) % self.origin_world_size
+        target = (self.rank + self.index) % self.origin_world_size
+        self.index = (self.index + 1) % self.origin_world_size
         if target == self.rank:
             target = (target + 1) % self.origin_world_size
+            self.index = (self.index + 1) % self.origin_world_size
         self.send_model_param_to_buffer(target, layer_names=None)
         self.aggregate_model_from_buff()
     
