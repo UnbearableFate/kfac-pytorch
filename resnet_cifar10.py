@@ -5,6 +5,7 @@ import torch
 from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 from my_module.mobile_net import CustomMobileNetV3Small
+from my_module.model_split import ModelSplitter
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -39,6 +40,7 @@ if __name__ == '__main__':
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
     model = ResNetForCIFAR10()
+    model = ModelSplitter(model, 128)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50, device='cpu',

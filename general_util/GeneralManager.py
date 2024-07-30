@@ -127,7 +127,6 @@ class GeneralManager:
             self.test_by_rpc(epoch=i)
 
         self.write_test_result_rpc()
-        #self.rpc_communicator.broadcast_shutdown()
         self.writer.close()
         dist.barrier()
 
@@ -219,11 +218,11 @@ class GeneralManager:
                     self.rpc_communicator.update_assignment_callback()
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
-                if batch_idx % 30 == 0:
-                    gc.collect()
-                if self.writer is not None and batch_idx % 50 == 0:
+                
+                gc.collect()
+                if self.writer is not None and batch_idx % 10 == 0:
                     process = psutil.Process(os.getpid())
-                    self.writer.add_scalar('Memory', process.memory_info().rss / 1024**2, (epoch+1)*batch_idx)
+                    self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
                 t.update()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)

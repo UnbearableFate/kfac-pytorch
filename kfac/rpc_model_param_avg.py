@@ -1,3 +1,4 @@
+import gc
 import random
 import threading
 import time
@@ -153,6 +154,7 @@ class ModelAvgRPCCommunicator:
                 )
             except Exception as e:
                 print(f"send_model_param failed {e} from {self.rank} to {target}")
+        gc.collect()
     
     def send_model_param_to_store(self, target, layer_name):
         speed = self.get_local_node_speed()
@@ -209,6 +211,7 @@ class ModelAvgRPCCommunicator:
             )
         except Exception as e:
             print(f"send_model_param_to_buffer failed {e} from {self.rank} to {target}")
+        gc.collect()
 
     def get_local_node_speed(self):
         if self.rpc_communicator.node_states[self.rank].speed is not None and self.rpc_communicator.node_states[self.rank].speed != 0:
@@ -369,6 +372,7 @@ class ModelAvgRPCCommunicator:
         if temp.resurrection_flag:
             self.rpc_communicator.update_node_iter(self.rank, temp.term)
             self.rpc_communicator.print_rpc_state(f"resurrection in {self.rank} to {temp.term}") 
+        gc.collect()
         
     def Send_to_Easter_Point_Task_Assignment(self,health_node_list):
         result = dict()
@@ -445,4 +449,5 @@ def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, dat
                 break
         else:
             continue
+    gc.collect()
 
