@@ -82,6 +82,8 @@ class GeneralManager:
                            ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
         self.is_fault = True
         self.experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{self.world_size}_avg{self.model_avg_interval}"
+        if self.train_com_method == "rpc":
+            mischief.recover_func = self.rpc_communicator.restart_sick_node
 
     def train_and_test(self,log_dir,experiment_name,timestamp):
         model = self.model
@@ -179,7 +181,10 @@ class GeneralManager:
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
                 rpc_distributed.global_communicator.update_self_t()
-                #mischief.update_iter()
+                mischief.update_iter()
+                if self.is_fault:
+                    if mischief.is_sick_at(self.rank):
+                        time.sleep(0.2)
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()

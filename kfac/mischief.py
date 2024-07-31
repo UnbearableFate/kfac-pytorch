@@ -7,6 +7,7 @@ from kfac.enums import AllreduceMethod
 from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 class NodeStatus:
     def __init__(self,rank,discon_start_time = -1):
+        self.recover_flag = False
         self.is_connected = True
         self.resume_countdown = -1
         self.disconnect_start_time = discon_start_time
@@ -36,6 +37,8 @@ class NodeStatus:
         self.disconnect_start_time = -1
         POSSIBLE_DISCONNECTED_NODE[self.rank].is_connected = True
         SICK_NODES_NUM -= 1
+        if recover_func is not None:
+            recover_func()
 
 
     def update_status_in_iter(self):
@@ -66,6 +69,8 @@ WORLD_SIZE = 8
 
 sick_weight_magnification_ratio = 1
 health_weight_magnification_ratio = 1
+
+recover_func = None
 
 def is_normal():
     return not (DDP_TRIGGER or FACTOR_COMM_TRIGGER or INVERSE_COMM_TRIGGER)
