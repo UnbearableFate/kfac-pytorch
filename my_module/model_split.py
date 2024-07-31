@@ -48,7 +48,7 @@ class ModelSplitter(nn.Module):
         layers = []
         for name, layer in model.named_children():
             if isinstance(layer, nn.Linear) and layer.in_features > split_threshold:
-                if not isinstance(layers[-1], ParallelLayer):
+                if isinstance(layers[-1],nn.Conv2d):
                     layers.append(nn.Flatten())
                 layers.append(ParallelLayer(layer,split_threshold))
             elif isinstance(layer, nn.Sequential):
