@@ -93,6 +93,9 @@ class MLP(nn.Module):
         return self.layers(x)
 
 class SimpleCNN(nn.Module):
+    transform = transforms.Compose(
+    [transforms.ToTensor(),
+     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
     def __init__(self):
         super(SimpleCNN, self).__init__()
         self.model = nn.Sequential(
