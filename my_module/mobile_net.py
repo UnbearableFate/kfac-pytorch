@@ -24,9 +24,10 @@ class CustomMobileNetV3Small(nn.Module):
     def __init__(self, num_classes=10):
         super(CustomMobileNetV3Small, self).__init__()
         # 加载预训练的 MobileNetV3 Small 模型
-        self.model = models.mobilenet_v3_small(pretrained=False)
+        self.model = models.mobilenet_v3_small(weights = None , num_classes=10)
         # 修改最后的分类层
-        self.model.classifier[3] = nn.Linear(self.model.classifier[3].in_features, num_classes)
-
+        self.model.classifier[1].inplace = False
+        self.model.classifier[2].inplace = False
+        
     def forward(self, x):
         return self.model(x)

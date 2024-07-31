@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 
-
 class ParallelLayer(nn.Module):
     def __init__(self, original_layer, split_threshold):
         super(ParallelLayer, self).__init__()
@@ -49,6 +48,8 @@ class ModelSplitter(nn.Module):
         layers = []
         for name, layer in model.named_children():
             if isinstance(layer, nn.Linear) and layer.in_features > split_threshold:
+                if not isinstance(layers[-1], ParallelLayer):
+                    layers.append(nn.Flatten())
                 layers.append(ParallelLayer(layer,split_threshold))
             elif isinstance(layer, nn.Sequential):
                 layers.append(self.split_layers(layer,split_threshold))
