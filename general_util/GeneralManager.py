@@ -184,7 +184,7 @@ class GeneralManager:
                 mischief.update_iter()
                 if self.is_fault:
                     if mischief.is_sick_at(self.rank):
-                        time.sleep(0.2)
+                        time.sleep(0.1)
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()

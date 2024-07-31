@@ -38,13 +38,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
-    model = MLP(num_hidden_layers=8,hidden_size=64)
-    model = ModelSplitter(model, 32)
-    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
+    model = MLP(num_hidden_layers=3,hidden_size=64)
+    model = ModelSplitter(model, 64)
+    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=40,device='cpu',
+                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=10,device='cpu',
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR)
-    mgr.init_mischief(disconnect_ratio=0.3,max_sick_iter_ratio=0.2,max_disconnected_node_num=1)
+    mgr.init_mischief(disconnect_ratio=0.1,max_sick_iter_ratio=0.1,max_disconnected_node_num=1)
     mgr.rpc_train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test03")
     mgr.close_all()
     print("Done!")
