@@ -16,16 +16,16 @@ LOG_DIR = ""
 Share_DIR = ""
 if os.path.exists("/home/yu"):
     DATA_DIR = "/home/yu/data"
-    LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs"+today
+    LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs/runs"+today
     Share_DIR = "/home/yu/workspace/kfac-pytorch/share_files"
 elif os.path.exists("/Users/unbearablefate"):
     DATA_DIR = "/Users/unbearablefate/workspace/data"
-    LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs"+today
+    LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs/runs"+today
     Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
 elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
     DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
-    LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs"+today
-    Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data/share_files"
+    LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs/runs"+today
+    Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
 
 if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
     raise RuntimeError("Unknown environment.")
@@ -38,11 +38,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
-    model = MLP(num_hidden_layers=8,hidden_size=64)
-    #model = ModelSplitter(model, 64)
+    model = MLP(num_hidden_layers=3,hidden_size=64)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=40,device='cpu',
+                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=5,device='cpu',
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR)
 
     mgr.rpc_train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test03")

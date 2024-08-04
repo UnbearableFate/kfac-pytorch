@@ -224,7 +224,6 @@ class GeneralManager:
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
                 
-                gc.collect()
                 if self.writer is not None and batch_idx % 10 == 0:
                     process = psutil.Process(os.getpid())
                     self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)

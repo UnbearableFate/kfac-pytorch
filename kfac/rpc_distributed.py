@@ -107,7 +107,6 @@ class KfacRPCLayer:
         sigmoid_param = (recv_t - local_t) / (local_t + 1)
         recv_world_weight = 2 / ((1 + math.exp(-sigmoid_param)) * world_size)
         self.factor[factor_type] = (1 - recv_world_weight) * self.factor[factor_type] + recv_world_weight * recv_factor
-        gc.collect()
 
     def update_local_eigen_a(self, qa, da, t):
         if t <= self.recv_handled_a_version :
@@ -139,7 +138,6 @@ class KfacRPCLayer:
             else:
                 self.kfac_layer.dg = self.dg.clone()
                 self.kfac_layer.da = self.da.clone()
-        gc.collect()
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = ""):
@@ -428,7 +426,6 @@ class KFacRPCCommunicator:
         self.participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
         self.update_assignment_callback = None
         self.task_reassign_rpc.running_time = 0
-        gc.collect()
 
     def get_world_size(self):
         return len(self.node_states.keys())
@@ -475,7 +472,6 @@ class KFacRPCCommunicator:
             )
         except Exception as e:
             print(f"Failed to send factor to {target} from {self.rank}: {e}")
-        gc.collect()
         return True
 
     def broadcast_kfac_eigen_tensor_a(self, layer_name,qa:torch.Tensor,da:torch.Tensor):
@@ -499,7 +495,6 @@ class KFacRPCCommunicator:
                 )
             except Exception as e:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
-        gc.collect()
 
     def broadcast_kfac_eigen_tensor_g(self, layer_name,qg:torch.Tensor,dg:torch.Tensor,dadg: None|torch.Tensor):
         t = self.current_t()
@@ -530,7 +525,6 @@ class KFacRPCCommunicator:
                 )
             except Exception as e:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
-        gc.collect()
 
     def is_factor_computation_skipped(self, layer_name):
         if layer_name not in self.participate_factor_computation_layers and layer_name not in self.current_inverse_computation_layers:
@@ -659,7 +653,6 @@ def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
     current_t = self.current_t()
     self.rpc_layers[layer_name].update_local_factor(factor, current_t, from_iter, factor_type ,world_size=self.origin_world_size)
     self.update_node_iter(from_rank, from_iter)
-    gc.collect()
 
 def receive_eigen_tensor_a(from_rank, layer_name, qa, da, t):
     global global_communicator
