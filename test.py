@@ -67,8 +67,10 @@ testloader = DataLoader(testset, batch_size=16, shuffle=False, num_workers=2)
 #model = alexnet(num_classes = 10)
 #replace_relu_inplace(model)
 
-model = SimpleCNN()
-model = ModelSplitter(model, 128)
+#model = SimpleCNN()
+#model = ModelSplitter(model, 128)
+#model = CustomMobileNetV3Small(num_classes=10)
+model =  torchvision.models.efficientnet_b0(num_classes=10)
 model.to(device)
 # 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss()
