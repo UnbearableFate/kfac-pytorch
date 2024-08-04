@@ -2,7 +2,7 @@ ci:
   autofix_prs: false
 repos:
   - repo: 'https://github.com/pre-commit/pre-commit-hooks'
-    rev: v4.5.0
+    rev: v4.6.0
     hooks:
       - id: mixed-line-ending
       - id: trailing-whitespace
@@ -13,23 +13,19 @@ repos:
       - id: check-yaml
       - id: check-merge-conflict
       - id: name-tests-test
-      - id: double-quote-string-fixer
-  - repo: 'https://github.com/psf/black'
-    rev: 23.11.0
-    hooks:
-      - id: black
   - repo: 'https://github.com/codespell-project/codespell'
-    rev: v2.2.6
+    rev: v2.3.0
     hooks:
       - id: codespell
   - repo: 'https://github.com/charliermarsh/ruff-pre-commit'
-    rev: v0.1.6
+    rev: v0.5.5
     hooks:
       - id: ruff
         args:
           - '--fix'
+      - id: ruff-format
   - repo: 'https://github.com/pre-commit/mirrors-mypy'
-    rev: v1.7.0
+    rev: v1.11.0
     hooks:
       - id: mypy
         additional_dependencies: [types-tqdm]

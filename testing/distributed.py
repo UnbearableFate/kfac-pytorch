@@ -1,4 +1,5 @@
 """Decorator for running tests in simulated distributed environments."""
+
 from __future__ import annotations
 
 import multiprocessing
@@ -11,6 +12,8 @@ from typing import TypeVar
 
 import pytest
 import torch.distributed as dist
+
+from testing.utils import open_port
 
 # Worker timeout *after* the first worker has completed.
 UNIT_WORKER_TIMEOUT = 30
@@ -41,6 +44,8 @@ def distributed_test(
             spawn to run tests multiple times.
     """  # noqa: E501
 
+    port = open_port()
+
     def dist_wrap(run_func: FuncT) -> FuncT:
         """Second-level decorator that actually wraps the func."""
 
@@ -52,7 +57,7 @@ def distributed_test(
         ) -> None:
             """Initialize torch.distributed and execute the user function."""
             os.environ['MASTER_ADDR'] = '127.0.0.1'
-            os.environ['MASTER_PORT'] = '29503'
+            os.environ['MASTER_PORT'] = str(port)
             os.environ['LOCAL_RANK'] = str(local_rank)
             # NOTE: unit tests don't support multi-node so
             # local_rank == global rank

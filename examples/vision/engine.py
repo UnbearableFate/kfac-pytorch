@@ -1,4 +1,5 @@
 """Train and Eval functions for computer vision examples."""
+
 from __future__ import annotations
 
 import argparse
@@ -39,7 +40,7 @@ def train(
         total=math.ceil(len(train_loader) / args.batches_per_allreduce),
         bar_format='{l_bar}{bar:10}{r_bar}',
         desc=f'Epoch {epoch:3d}/{args.epochs:3d}',
-        disable=not args.verbose,
+        disable= True #not args.verbose,
     ) as t:
         for batch_idx, (data, target) in enumerate(train_loader):
             mini_step += 1
@@ -60,9 +61,8 @@ def train(
 
             loss = loss / args.batches_per_allreduce
 
-            if (
-                mini_step % args.batches_per_allreduce == 0
-                or batch_idx + 1 == len(train_loader)
+            if mini_step % args.batches_per_allreduce == 0 or (
+                batch_idx + 1 == len(train_loader)
             ):
                 if scaler is not None:
                     scaler.scale(loss).backward()
@@ -75,9 +75,8 @@ def train(
                     else:
                         loss.backward()
 
-            if (
-                mini_step % args.batches_per_allreduce == 0
-                or batch_idx + 1 == len(train_loader)
+            if mini_step % args.batches_per_allreduce == 0 or (
+                batch_idx + 1 == len(train_loader)
             ):
                 if preconditioner is not None:
                     if scaler is not None:
@@ -131,7 +130,7 @@ def test(
         total=len(val_loader),
         bar_format='{l_bar}{bar:10}|{postfix}',
         desc='             ',
-        disable=not args.verbose,
+        disable=True #not args.verbose,
     ) as t:
         with torch.no_grad():
             for i, (data, target) in enumerate(val_loader):

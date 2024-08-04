@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime
 import os
 import time
@@ -19,8 +20,6 @@ import examples.vision.optimizers as optimizers
 from examples.utils import save_checkpoint
 
 import kfac.mischief as mischief
-import logging
-logging.basicConfig(level=logging.NOTSET)
 
 try:
     from torch.cuda.amp import GradScaler
@@ -31,6 +30,21 @@ except ImportError:
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', 0))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', 0))
+
+def string_to_list(input_str):
+    try:
+        # 使用ast.literal_eval安全地评估字符串
+        result = ast.literal_eval(input_str)
+        # 检查结果是否为列表
+        if not isinstance(result, list):
+            raise argparse.ArgumentTypeError(f"Input is not a list: {input_str}")
+        # 检查列表元素是否全部为数字
+        if not all(isinstance(item, int) for item in result):
+            raise argparse.ArgumentTypeError(f"List items are not all integers: {input_str}")
+        return result
+    except (ValueError, SyntaxError):
+        # 捕获评估过程中的错误，并抛出ArgumentTypeError
+        raise argparse.ArgumentTypeError(f"Invalid input format: {input_str}")
 
 def parse_args() -> argparse.Namespace:
     """Get cmd line args."""
@@ -255,10 +269,40 @@ def parse_args() -> argparse.Namespace:
         help='local rank for distributed training',
     )
 
+    parser.add_argument(
+        '--disconnect-node-number',
+        type=int,
+        default=1,
+        help='disconnect-node',
+    )
+    parser.add_argument(
+        '--disconnect-terms',
+        type=int,
+        default=1,
+        help='disconnect-terms',
+    )
+    parser.add_argument(
+        '--connect-terms',
+        type=int,
+        default=9,
+        help='connect-terms',
+    )
+    parser.add_argument(
+        '--times',
+        type=int,
+        default=0,
+        help='connect-terms',
+    )
+
     args = parser.parse_args()
     if 'LOCAL_RANK' in os.environ:
         args.local_rank = int(os.environ['LOCAL_RANK'])
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+
+    mischief.DISCONNECTED_NODE_NUM = args.disconnect_node_number
+    mischief.DISCONNECT_TERM = args.disconnect_terms
+    mischief.CONNECT_TERM = args.connect_terms
+    mischief.TIMES = args.times
 
     return args
 
@@ -266,9 +310,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Main train and eval function."""
     args = parse_args()
-    
+    timeout = datetime.timedelta(seconds=20)
     #dist.init_process_group("nccl",world_size=ompi_world_size,rank=ompi_world_rank,init_method='file:///work/NBB/yu_mingzhe/share_files/dist_file')
-    dist.init_process_group("nccl",)
+    dist.init_process_group( "nccl",timeout=timeout)
 
     if args.cuda:
         torch.cuda.set_device(args.local_rank)
@@ -284,6 +328,7 @@ def main() -> None:
     if args.verbose:
         print('Collecting env info...')
         print(collect_env.get_pretty_env_info())
+        print(f"disconnect node list {mischief.DISCONNECTED_NODE}")
         print()
 
     for r in range(torch.distributed.get_world_size()):
@@ -310,15 +355,17 @@ def main() -> None:
     )
     mischief.add_hook_to_model(model)
 
-    # Add some tricks in DDP 
-    #add_hook_to_model(model)
-
     os.makedirs(args.log_dir, exist_ok=True)
     args.checkpoint_format = os.path.join(args.log_dir, args.checkpoint_format)
-    if dist.get_rank() in mischief.DISCONNECTED_NODE:
-        args.log_writer = SummaryWriter(f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/test03_6_4_2_e")
+
+    rank = dist.get_rank()
+    board_dir = board_dir = (f"/work/NBB/yu_mingzhe/experiments/runs/"
+                 f"cifar10_resnet32/p{dist.get_world_size()}n_{mischief.DISCONNECTED_NODE_NUM}e_"
+                 f"{mischief.CONNECT_TERM}ct_{mischief.DISCONNECT_TERM}dct_{args.times}")
+    if rank ==0:
+        args.log_writer = SummaryWriter(board_dir)
     else:
-        args.log_writer = SummaryWriter(f"/work/NBB/yu_mingzhe/kfac-pytorch/runs/test03_6_4_2_o")
+        args.log_writer = None 
 
     args.resume_from_epoch = 0
     """
@@ -369,7 +416,10 @@ def main() -> None:
     start = time.time()
 
     for epoch in range(args.resume_from_epoch + 1, args.epochs + 1):
-        mischief.term = preconditioner.steps
+        mischief.term = epoch-1
+        mischief.DISCONNECTED_NODE = mischief.shuffle_disconneted_node_list(dist.get_world_size(),args.epochs)
+        if args.verbose and not mischief.is_connected_in_this_term():
+             print(f"{mischief.DISCONNECTED_NODE} in term {mischief.term}")
         engine.train(
             epoch,
             model,
@@ -401,13 +451,15 @@ def main() -> None:
             )
         '''
 
+    dist.destroy_process_group()
     if args.verbose:
         print(
             '\nTraining time: {}'.format(
                 datetime.timedelta(seconds=time.time() - start),
             ),
         )
-
+        with open("/work/NBB/yu_mingzhe/kfac-pytorch/log",mode='a+') as f:
+            f.write('\nTraining time: {}'.format(datetime.timedelta(seconds=time.time() - start)))
 
 if __name__ == '__main__':
     main()

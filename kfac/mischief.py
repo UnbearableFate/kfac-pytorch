@@ -3,9 +3,11 @@ import logging
 import torch.distributed as dist
 import torch
 
-DISCONNECTED_NODE = [1,2]
-DISCONNECT_TERM = 4
-CONNECT_TERM = 6
+DISCONNECTED_NODE = []
+DISCONNECTED_NODE_NUM = 4
+DISCONNECT_TERM = 1
+CONNECT_TERM = 9
+TIMES = 0
 
 term = 0
 
@@ -27,20 +29,26 @@ def loglog(logger :logging.Logger,ranks, words, lv = logging.INFO):
     if dist.get_rank() in ranks:
         logger.log(level=lv, msg=f"rank {dist.get_rank()} : {words}")
 
-def is_inverse_communication_jumped(iter, src_worker_no, jump_step = 3) -> bool:
-    if not INVERSE_COMM_TRIGGER:
-        return True
-    if iter % jump_step == 0 and src_worker_no in DISCONNECTED_NODE:
-        easy_log_once("broadcast block", rank=1)
-        return False
-    else:
-        return True
+def shuffle_disconneted_node_list(world_size,epochs):
+    r = int(term / (CONNECT_TERM + DISCONNECT_TERM))
+    rounds = int(epochs/ (CONNECT_TERM + DISCONNECT_TERM))
+    step = world_size/rounds
+    node_list = []
+    offset = int(world_size / DISCONNECTED_NODE_NUM)
+    for i in range(DISCONNECTED_NODE_NUM):
+        node = (int(r*step) + i * offset)%world_size +TIMES
+        node_list.append(node)
+    DISCONNECTED_NODE = node_list
+    return node_list
 
 def is_connected_in_this_term():
     t = term % (CONNECT_TERM + DISCONNECT_TERM)
     if t < CONNECT_TERM :
         return True
     return False
+
+def get_connnecting_world_size():
+    return dist.get_world_size() - DISCONNECTED_NODE_NUM
 
 def all_reduce_with_disconnected(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
     if dist.get_rank() in DISCONNECTED_NODE and not is_connected_in_this_term():
@@ -51,7 +59,7 @@ def all_reduce_with_disconnected(state: object, bucket: dist.GradBucket) -> torc
         return fut
     else:
         return (
-            dist.all_reduce(tensor= (bucket.buffer() / (dist.get_world_size() -1)), async_op=True)
+            dist.all_reduce(tensor= (bucket.buffer() / (get_connnecting_world_size())), async_op=True)
             .get_future()
             .then(lambda fut: fut.value()[0])
         )
