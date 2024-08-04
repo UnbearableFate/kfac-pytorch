@@ -9,9 +9,10 @@ from torchvision.models import alexnet
 from my_module.custom_resnet import ResNetForCIFAR10 ,SimpleCNN
 import os
 from torch.utils.data import DataLoader
+from torchsummary import summary
 
 import kfac
-from my_module.mobile_net import CustomMobileNetV3Small
+from my_module.mobile_net import CustomMobileNetV3Small ,CustomMiniMobileNetV3Small ,cifar10_transform_test ,cifar10_transform_train
 import logging
 
 from my_module.model_split import ModelSplitter
@@ -43,6 +44,8 @@ def replace_relu_inplace(module):
     for name, child in module.named_children():
         if isinstance(child, nn.ReLU) and child.inplace:
             setattr(module, name, nn.ReLU(inplace=False))
+        elif isinstance(child, nn.SiLU) and child.inplace:
+            setattr(module, name, nn.SiLU(inplace=False))
         else:
             replace_relu_inplace(child)
 
@@ -57,10 +60,10 @@ transform2 = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-trainset = torchvision.datasets.CIFAR10(root=DATA_DIR+"/CIFAR10", train=True, download=False, transform=transform2)
+trainset = torchvision.datasets.CIFAR10(root=DATA_DIR+"/CIFAR10", train=True, download=False, transform=cifar10_transform_train)
 trainloader = DataLoader(trainset, batch_size=16, shuffle=True, num_workers=2)
 
-testset = torchvision.datasets.CIFAR10(root=DATA_DIR+"/CIFAR10", train=False, download=False, transform=transform2)
+testset = torchvision.datasets.CIFAR10(root=DATA_DIR+"/CIFAR10", train=False, download=False, transform=cifar10_transform_test)
 testloader = DataLoader(testset, batch_size=16, shuffle=False, num_workers=2)
 
 # 加载 MobileNetV3 模型并进行修改以适应 CIFAR-10
@@ -69,19 +72,23 @@ testloader = DataLoader(testset, batch_size=16, shuffle=False, num_workers=2)
 
 #model = SimpleCNN()
 #model = ModelSplitter(model, 128)
-#model = CustomMobileNetV3Small(num_classes=10)
-model =  torchvision.models.efficientnet_b0(num_classes=10)
+
+model = CustomMiniMobileNetV3Small(num_classes=10)
+#model  = torchvision.models.efficientnet_b0(num_classes = 10)
+#replace_relu_inplace(model)
+summary(model, (3, 224, 224))
+
 model.to(device)
 # 定义损失函数和优化器
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
+preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0","block.1.0"])
 
 # 训练模型
 def train(model, trainloader, criterion, optimizer, device):
     model.train()
-    for epoch in range(10):  # 训练10个epoch
+    for epoch in range(1):  # 训练10个epoch
         index = 1 
         for inputs, labels in trainloader:
             inputs, labels = inputs.to(device), labels.to(device)
@@ -94,9 +101,8 @@ def train(model, trainloader, criterion, optimizer, device):
             preconditioner.step()
             optimizer.step()
 
-            if index % 20 == 0:
-                print(f'Epoch {epoch+1} {index}, Loss: {loss.item()}')
-            index += 1
+            if index >=3 :
+                break
 
 # 测试模型
 def test(model, testloader, device):
@@ -117,4 +123,5 @@ def test(model, testloader, device):
 
 if __name__ == '__main__':
     train(model, trainloader, criterion, optimizer, device)
-    test(model, testloader, device)
+    #test(model, testloader, device)
+    
