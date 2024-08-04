@@ -1,4 +1,5 @@
 """End-to-end training test for KFACPreconditoner."""
+
 from __future__ import annotations
 
 from multiprocessing import Process
@@ -17,6 +18,9 @@ def train(grad_worker_frac: float) -> None:
     in_features = 10
     out_features = 10
     steps = 20
+
+    # https://github.com/pytorch/pytorch/issues/41197#issuecomment-656300677
+    torch.set_num_threads(1)
 
     x = torch.rand(batch_size, in_features)
     y = torch.rand(batch_size, out_features)
