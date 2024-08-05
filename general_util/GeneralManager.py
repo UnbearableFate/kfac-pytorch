@@ -170,6 +170,7 @@ class GeneralManager:
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
 
     def rpc_train(self, epoch):
+        print(f"start trian epoch {epoch}at rank {self.rank}")
         start_time = time.time()
         self.model.train()
         self.data_manager.set_epoch(epoch)
@@ -181,7 +182,9 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
+                print(f"start trian loop {batch_idx} at rank {self.rank}")
                 rpc_distributed.global_communicator.update_self_t()
+                print(f"update rpc loop {batch_idx} at rank {self.rank}")
                 '''
                 mischief.update_iter()
                 if self.is_fault:
