@@ -188,7 +188,7 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
-
+                self.rpc_communicator.print_rpc_state(f"load data ok in {batch_idx}")
                 lock = rpc_distributed.global_communicator.model_avg_rpc.lock
                 
                 if not lock.acquire(timeout=1):
@@ -197,14 +197,15 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
                 lock.release()
-                
+                self.rpc_communicator.print_rpc_state(f" forward ok in {batch_idx}")
                 if self.preconditioner is not None:
                     self.preconditioner.step()
-                
+                    self.rpc_communicator.print_rpc_state(f"kfac ok in {batch_idx}")
                 if not lock.acquire(timeout=1):
                     raise Exception("lock acquire failed at train2") 
                 self.optimizer.step()
                 lock.release()
+                self.rpc_communicator.print_rpc_state(f"opt ok in {batch_idx}")
                 
                 if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
                     self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
@@ -227,6 +228,7 @@ class GeneralManager:
                 if self.writer is not None and batch_idx % 10 == 0:
                     process = psutil.Process(os.getpid())
                     self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
+                self.rpc_communicator.print_rpc_state(f"update ok in {batch_idx}")
                 t.update()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
