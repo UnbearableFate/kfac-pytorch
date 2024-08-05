@@ -23,7 +23,7 @@ elif os.path.exists("/Users/unbearablefate"):
     LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs/runs"+today
     Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
 elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
-    DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
+    DATA_DIR = "/work/NBB/yu_mingzhe/data"
     LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs/runs"+today
     Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
 
