@@ -182,14 +182,16 @@ class GeneralManager:
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
                 rpc_distributed.global_communicator.update_self_t()
+                '''
                 mischief.update_iter()
                 if self.is_fault:
                     if mischief.is_sick_at(self.rank):
                         time.sleep(0.1)
+                '''
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
-                self.rpc_communicator.print_rpc_state(f"load data ok in {batch_idx}")
+                print(f"load data ok in {batch_idx} at rank {self.rank}")
                 lock = rpc_distributed.global_communicator.model_avg_rpc.lock
                 
                 if not lock.acquire(timeout=1):
