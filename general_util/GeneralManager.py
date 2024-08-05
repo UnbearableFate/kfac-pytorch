@@ -123,7 +123,8 @@ class GeneralManager:
         writer_name = f"{self.dataset_name}/{model_name}/{experiment_name}/{timestamp}/{dist.get_rank()}"
         self.writer = SummaryWriter(
             log_dir=os.path.join(log_dir, writer_name))
-
+        dist.barrier()
+        print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
         for i in range(0, self.epochs):
             self.rpc_train(epoch=i)
             self.test_by_rpc(epoch=i)
