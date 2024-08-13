@@ -59,7 +59,7 @@ class GeneralManager:
                 self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
                                                                             preconditioner=self.preconditioner,model=model ,
                                                                             share_file_path=share_file_path, timestamp=timestamp ,
-                                                                            log_dir = log_dir)
+                                                                            log_dir = log_dir, device=device)
         else:
             self.preconditioner = None
 

@@ -47,6 +47,14 @@ def normalized_l2_similarity(tensor1, tensor2):
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
+def full_connnection_device_map(world_size,rank):
+    device_map = {}
+    for i in range(world_size):
+        if i == rank:
+            continue
+        device_map[rpc_work_name(i)] = {0 : 0}
+    return device_map
+
 class NodeState():
     def __init__(self,rank):
         self.rank = rank
@@ -140,7 +148,7 @@ class KfacRPCLayer:
                 self.kfac_layer.da = self.da.clone()
 
 class KFacRPCCommunicator:
-    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = ""):
+    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
         self.writer = None
         self.node_state_lock = threading.Lock()
 
@@ -151,11 +159,20 @@ class KFacRPCCommunicator:
         self.request_regression_record = set()
 
         self.io_layers = None
+
         options = rpc.TensorPipeRpcBackendOptions(
             num_worker_threads=16,
             init_method=f"file://{share_file_path}/rpc_share{timestamp}",
             rpc_timeout=30,
         )
+        if device == "cuda" or device.type == "cuda":
+            options = rpc.TensorPipeRpcBackendOptions(
+                num_worker_threads=16,
+                init_method=f"file://{share_file_path}/rpc_share{timestamp}",
+                rpc_timeout=30,
+                device_maps=full_connnection_device_map(world_size,rank)
+            )
+        self.device = device
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)
         self.origin_world_size = world_size
         self.rank = rank
