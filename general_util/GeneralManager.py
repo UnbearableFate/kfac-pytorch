@@ -170,7 +170,6 @@ class GeneralManager:
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
 
     def rpc_train(self, epoch):
-        print(f"start trian epoch {epoch}at rank {self.rank}")
         start_time = time.time()
         self.model.train()
         self.data_manager.set_epoch(epoch)
@@ -182,9 +181,7 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                print(f"start trian loop {batch_idx} at rank {self.rank}")
                 rpc_distributed.global_communicator.update_self_t()
-                print(f"update rpc loop {batch_idx} at rank {self.rank}")
                 '''
                 mischief.update_iter()
                 if self.is_fault:
@@ -194,7 +191,6 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
-                print(f"load data ok in {batch_idx} at rank {self.rank}")
                 lock = rpc_distributed.global_communicator.model_avg_rpc.lock
                 
                 if not lock.acquire(timeout=1):
@@ -203,16 +199,13 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
                 lock.release()
-                self.rpc_communicator.print_rpc_state(f" forward ok in {batch_idx}")
                 if self.preconditioner is not None:
                     self.preconditioner.step()
-                    self.rpc_communicator.print_rpc_state(f"kfac ok in {batch_idx}")
                 if not lock.acquire(timeout=1):
                     raise Exception("lock acquire failed at train2") 
                 self.optimizer.step()
                 lock.release()
-                self.rpc_communicator.print_rpc_state(f"opt ok in {batch_idx}")
-                
+
                 if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
                     self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                     rpc_distributed.global_communicator.send_model_param()
