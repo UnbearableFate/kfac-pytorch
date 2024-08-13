@@ -130,6 +130,7 @@ class GeneralManager:
         for i in range(0, self.epochs):
             self.rpc_train(epoch=i)
             self.test_by_rpc(epoch=i)
+            gc.collect()
 
         self.write_test_result_rpc()
         self.writer.close()
@@ -226,9 +227,14 @@ class GeneralManager:
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
                 
-                if self.writer is not None and batch_idx % 10 == 0:
+                if self.writer is not None and batch_idx % 50 == 0:
                     process = psutil.Process(os.getpid())
                     self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
+                    allocated_memory = torch.cuda.memory_allocated(0)  # 0 表示 GPU 0
+                    cached_memory = torch.cuda.memory_reserved(0)  # 0 表示 GPU 0
+                    self.writer.add_scalar('Memory/GPU_Allocated', allocated_memory / 1024**3, (epoch+1)*batch_idx)
+                    self.writer.add_scalar('Memory/GPU_Cached', cached_memory / 1024**3, (epoch+1)*batch_idx)
+
                 t.update()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
@@ -277,8 +283,6 @@ class GeneralManager:
         rpc_distributed.global_communicator.send_rpc_test_result(correct, total, epoch)
 
     def write_test_result_rpc(self):
-        if self.rank != self.rpc_communicator.task_reassign_rpc.leader_rank:
-            return
         for e in range(self.epochs):
             accuracy = rpc_distributed.global_communicator.wait_and_return_test_result(e)
             self.writer.add_scalar('Accuracy/test', accuracy, e)

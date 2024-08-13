@@ -46,11 +46,11 @@ if __name__ == '__main__':
     device = torch.device("cuda:0")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"])
-    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
+    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device=device,
+                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=20,device=device,
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
 
-    mgr.rpc_train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test03")
+    mgr.rpc_train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test_cc")
     mgr.close_all()
     print("Done!")

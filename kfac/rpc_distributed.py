@@ -614,7 +614,7 @@ class KFacRPCCommunicator:
         while epoch not in self.model_accuracy_statistic or self.model_accuracy_statistic[epoch]['recv_ct'] < self.origin_world_size:
             time.sleep(0.1)
             wait_time += 1
-            if wait_time > 30:
+            if wait_time > 2:
                 break
         
         if epoch in self.model_accuracy_statistic:
