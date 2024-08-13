@@ -20,7 +20,10 @@ import kfac.rpc_distributed as rpc_distributed
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 class GeneralManager:
-    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp="" ,log_dir ='', trainsform_train=None,transform_test=None):
+    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,
+                 is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp="" ,log_dir ='',
+                 trainsform_train=None,transform_test=None,
+                 precondtioner=None):
         if share_file_path is not None:
             if ompi_world_size <= 0:
                 raise RuntimeError("Unable to initialize process group.")
@@ -46,15 +49,14 @@ class GeneralManager:
 
         self.data_manager = DataPreparer(data_path_root=data_dir, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                     sampler=sampler_func, batch_size=batch_size ,train_transform=trainsform_train,test_transform=transform_test)
-
-        model = model.to(device)
-        if train_com_method == 'ddp':
-            model = torch.nn.parallel.DistributedDataParallel(model)
         
         self.loss_func = nn.CrossEntropyLoss() 
         self.optimizer = torch.optim.Adam(model.parameters())
         if is_2nd_order:
-            self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
+            if precondtioner is not None:
+                self.preconditioner = precondtioner
+            else:
+                self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
             if train_com_method == "rpc":
                 self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
                                                                             preconditioner=self.preconditioner,model=model ,
@@ -227,7 +229,6 @@ class GeneralManager:
                 if self.writer is not None and batch_idx % 10 == 0:
                     process = psutil.Process(os.getpid())
                     self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
-                self.rpc_communicator.print_rpc_state(f"update ok in {batch_idx}")
                 t.update()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
