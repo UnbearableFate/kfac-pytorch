@@ -4,7 +4,7 @@
 #PBS -q gpu
 #PBS -T openmpi
 #PBS -b 8
-#PBS -l elapstim_req=00:30:00
+#PBS -l elapstim_req=00:40:00
 #PBS -v NQSV_MPI_VER=gdr/4.1.6/gcc8.3.1-cuda12.3.2
 #PBS -M kanakawapanman@gmail.com
 

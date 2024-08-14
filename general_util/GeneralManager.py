@@ -47,10 +47,11 @@ class GeneralManager:
         except Exception as e:
             raise RuntimeError(f"Unable to create log directory: {log_dir}")
 
+        data_dir +=str(rank)
         self.data_manager = DataPreparer(data_path_root=data_dir, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                     sampler=sampler_func, batch_size=batch_size ,train_transform=trainsform_train,test_transform=transform_test)
-        
-        self.loss_func = nn.CrossEntropyLoss() 
+
+        self.loss_func = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(model.parameters())
         if is_2nd_order:
             if precondtioner is not None:
@@ -65,7 +66,7 @@ class GeneralManager:
         else:
             self.preconditioner = None
 
-        self.dataset_name = dataset_name 
+        self.dataset_name = dataset_name
         self.device = device
         self.model = model
         self.epochs = epochs
@@ -108,8 +109,8 @@ class GeneralManager:
             else:
                 self.train(epoch=i)
                 self.test_all(epoch=i)
-        
-        if self.train_com_method == "rpc": 
+
+        if self.train_com_method == "rpc":
             self.write_test_result_rpc()
 
         self.writer.close()
@@ -177,6 +178,10 @@ class GeneralManager:
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
+        print(f"Total batches: {len(train_loader)} at rank {self.rank}")
+        data_iter = iter(train_loader)
+        data, target = next(data_iter)
+        print(f"Data shape: {data.shape}, Target shape: {target.shape} at rank {self.rank}")
         with (tqdm(
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
@@ -195,7 +200,7 @@ class GeneralManager:
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
                 lock = rpc_distributed.global_communicator.model_avg_rpc.lock
-                
+
                 if not lock.acquire(timeout=1):
                     raise Exception("lock acquire failed at train")
                 output = self.model(data)
@@ -205,7 +210,7 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 if not lock.acquire(timeout=1):
-                    raise Exception("lock acquire failed at train2") 
+                    raise Exception("lock acquire failed at train2")
                 self.optimizer.step()
                 lock.release()
 
@@ -226,7 +231,7 @@ class GeneralManager:
                     self.rpc_communicator.update_assignment_callback()
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
-                
+
                 if self.writer is not None and batch_idx % 50 == 0:
                     process = psutil.Process(os.getpid())
                     self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
@@ -268,7 +273,7 @@ class GeneralManager:
             correct_sum, total_sum = correct_total_tensor.unbind()
             accuracy = correct_sum.item() / total_sum.item()
             self.writer.add_scalar('Accuracy/test', accuracy, epoch)
-    
+
     def test_by_rpc(self, epoch):
         self.model.eval()
         correct = 0
@@ -296,7 +301,7 @@ class GeneralManager:
             ratio = mischief.sick_weight_magnification_ratio / len(health_nodes)
         else:
             ratio = mischief.health_weight_magnification_ratio / len(health_nodes)
-        
+
         flat_tensor = fuse_model_paramenters(model)
         if dist.get_rank() in health_nodes:
             fut = dist.all_reduce(flat_tensor, op=dist.ReduceOp.SUM,async_op=True).get_future()

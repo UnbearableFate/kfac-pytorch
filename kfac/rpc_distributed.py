@@ -52,7 +52,7 @@ def full_connnection_device_map(world_size,rank):
     for i in range(world_size):
         if i == rank:
             continue
-        device_map[rpc_work_name(i)] = {0 : 0}
+        device_map[rpc_work_name(i)] = {rank : i}
     return device_map
 
 class NodeState():
@@ -282,7 +282,7 @@ class KFacRPCCommunicator:
         global logger
         if self.min_iter_in_health_nodes() == self.current_t():
             logger.debug(f"current iter {self.current_t()} in rank {self.rank}, {text}")
-    
+
     def __repr__(self):
         log = f"Rank {self.rank} : iter {self.current_t()}\n"
         for name, layer in self.rpc_layers.items():
@@ -464,10 +464,10 @@ class KFacRPCCommunicator:
                 or self.rpc_layers[layer_name].recv_handled_g_version < current_t - staleness_tolerance):
             return False
         return True
-    
+
     def assigned_worker(self, layer_name, factor_type):
         return self.rpc_layers[layer_name].assigned_worker[factor_type]
-    
+
     def send_kfac_factor(self,layer_name:str,factor_tensor :torch.Tensor, factor_type:str):
         if layer_name not in self.participate_factor_computation_layers and layer_name not in self.assigned_layers:
             return True
@@ -582,7 +582,7 @@ class KFacRPCCommunicator:
             elif len(self.current_inverse_computation_layers) > 0:
                 layer_name = random.choice(self.current_inverse_computation_layers)
                 self.current_inverse_computation_layers.remove(layer_name)
-            
+
         if late_than_local >= 1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
             if len(self.current_inverse_computation_layers) < len(self.assigned_layers):
                 for layer_name in reversed(self.assigned_layers):
@@ -616,7 +616,7 @@ class KFacRPCCommunicator:
             wait_time += 1
             if wait_time > 2:
                 break
-        
+
         if epoch in self.model_accuracy_statistic:
             return self.model_accuracy_statistic[epoch]['correct_ct'] / self.model_accuracy_statistic[epoch]['total_ct']
         else:

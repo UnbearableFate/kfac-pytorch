@@ -33,6 +33,8 @@ elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
 if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
     raise RuntimeError("Unknown environment.")
 
+ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
+ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -43,7 +45,7 @@ if __name__ == '__main__':
     print(f"timestamp: {timestamp}")
 
     model = CustomMiniMobileNetV3Small(num_classes=10)
-    device = torch.device("cuda:0")
+    device = torch.device(f"cuda:{ompi_world_rank}")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"])
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
