@@ -32,7 +32,7 @@ class GeneralManager:
             if not dist.is_initialized():
                 raise RuntimeError("Unable to initialize process group.")
         self.writer = None
-        batch_size=64
+        batch_size=32
         rank = dist.get_rank()
         world_size = dist.get_world_size()
         if rank == 0:
