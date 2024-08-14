@@ -45,12 +45,13 @@ if __name__ == '__main__':
     print(f"timestamp: {timestamp}")
 
     model = CustomMobileNetV3Small(num_classes=10)
-    device = torch.device(f"cuda:{ompi_world_rank}")
+    device = torch.device(f"cuda:0")
+    #device = torch.device(f"cuda:{ompi_world_rank}")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"])
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=20,device=device,
+                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=5,device=device,
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
 
     mgr.rpc_train_and_test()

@@ -119,7 +119,7 @@ class ModelAvgRPCCommunicator:
                     if name.endswith("bias"):
                         io_layers[layer_name].bias = param
         return io_layers
-    
+
     def init_neighbor_model_store(self):
         for node in self.rpc_communicator.get_health_nodes_rank_list():
             if node == self.rank:
@@ -152,7 +152,7 @@ class ModelAvgRPCCommunicator:
                 )
             except Exception as e:
                 print(f"send_model_param failed {e} from {self.rank} to {target}")
-    
+
     def send_model_param_to_store(self, target, layer_name):
         speed = self.get_local_node_speed()
         with torch.no_grad():
@@ -247,14 +247,14 @@ class ModelAvgRPCCommunicator:
             target = random.choice(target_chioce_list)
             self.send_model_param(target, layer_name,False)
         #self.send_to_sick_nodes_sometimes()
-    
+
     def send_all_model_param_alg03(self):
         target_chioce_list = [state.rank for state in self.rpc_communicator.get_health_node_state_list()]
         for rank in target_chioce_list:
             if rank == self.rank:
                 continue
             self.send_model_param_dict_to_store(rank ,layer_names=None)
-        
+
         self.average_model_param_from_store()
 
     def send_all_model_param_alg06(self):
@@ -274,7 +274,7 @@ class ModelAvgRPCCommunicator:
             self.index = (self.index + 1) % self.origin_world_size
         self.send_model_param_to_buffer(target, layer_names=None)
         self.aggregate_model_from_buff()
-    
+
     def average_model_param_from_store(self):
         with torch.no_grad():
             if not model_avg_rpc_communicator.lock.acquire(timeout= 3):
@@ -321,11 +321,11 @@ class ModelAvgRPCCommunicator:
 
         for rank, weight in self.neighbor_weight_store.items():
             self.neighbor_weight_store[rank] = weight / loss_sum
-        
+
         with torch.no_grad():
             if not model_avg_rpc_communicator.lock.acquire(timeout= 3):
                 raise Exception("lock acquire failed at average_model_param_from_store")
-            
+
             for layer_name, layer in self.io_layers.items():
                 weight = torch.clone(layer.weight).mul_(self.neighbor_weight_store[self.rank])
                 bias = None
@@ -357,18 +357,18 @@ class ModelAvgRPCCommunicator:
             buf_model.lock.release()
         temp.term = int(temp.term / self.buffer_size)
 
-        if not self.lock.acquire(timeout= 3):
-            raise Exception("lock acquire failed at aggregate_model_from_buff")
-        with torch.no_grad(): 
+        #if not self.lock.acquire(timeout= 3):
+        #    raise Exception("lock acquire failed at aggregate_model_from_buff")
+        with torch.no_grad():
             for layer_name, layer in self.io_layers.items():
                 layer.weight = layer.weight*p + temp.layer_store[layer_name].weight
                 if layer.bias is not None:
                     layer.bias = layer.bias*p + temp.layer_store[layer_name].bias
-        self.lock.release()
+        #self.lock.release()
         if temp.resurrection_flag:
             self.rpc_communicator.update_node_iter(self.rank, temp.term)
-            self.rpc_communicator.print_rpc_state(f"resurrection in {self.rank} to {temp.term}") 
-        
+            self.rpc_communicator.print_rpc_state(f"resurrection in {self.rank} to {temp.term}")
+
     def Send_to_Easter_Point_Task_Assignment(self,health_node_list):
         result = dict()
         for layer_name, layer in self.io_layers.items():

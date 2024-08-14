@@ -269,10 +269,7 @@ class KFacRPCCommunicator:
         # 将 FileHandler 添加到日志记录器
         logger.addHandler(file_handler)
 
-        # 移除默认的 StreamHandler（终端输出）
-        if logger.hasHandlers():
-            logger.handlers.clear()
-            logger.addHandler(file_handler)
+        logger.propagate = False
 
     def print_rpc_state(self, text = ""):
         global logger
