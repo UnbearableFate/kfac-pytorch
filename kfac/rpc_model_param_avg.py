@@ -195,19 +195,20 @@ class ModelAvgRPCCommunicator:
             layer_names = self.io_layers.keys()
 
         data = []
-        for layer_name in layer_names:
-            weight = self.io_layers[layer_name].weight
-            bias = self.io_layers[layer_name].bias
-            data.append((layer_name, weight, bias))
+        with torch.no_grad():
+            for layer_name in layer_names:
+                weight = self.io_layers[layer_name].weight
+                bias = self.io_layers[layer_name].bias
+                data.append((layer_name, weight, bias))
 
-        try:
-            rpc.rpc_async(
-                to=rpc_work_name(target),
-                func=receive_model_param_dict_to_buffer,
-                args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data ,speed, resurrection_flag)
-            )
-        except Exception as e:
-            print(f"send_model_param_to_buffer failed {e} from {self.rank} to {target}")
+            try:
+                rpc.rpc_async(
+                    to=rpc_work_name(target),
+                    func=receive_model_param_dict_to_buffer,
+                    args=(self.rank,self.rpc_communicator.current_t(),self.loss_value, data ,speed, resurrection_flag)
+                )
+            except Exception as e:
+                print(f"send_model_param_to_buffer failed {e} from {self.rank} to {target}")
 
     def get_local_node_speed(self):
         if self.rpc_communicator.node_states[self.rank].speed is not None and self.rpc_communicator.node_states[self.rank].speed != 0:

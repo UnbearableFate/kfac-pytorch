@@ -209,8 +209,10 @@ class GeneralManager:
                 #    raise Exception("lock acquire failed at train")
                 rpc_distributed.global_communicator.print_rpc_state(f"forward data size{data.shape} epoch {epoch} batch {batch_idx}")
                 output = self.model(data)
+
                 rpc_distributed.global_communicator.print_rpc_state(f"backward out size{output.shape} ,target size {target.shape} epoch {epoch} batch {batch_idx}")
                 loss = self.loss_func(output, target)
+
                 rpc_distributed.global_communicator.print_rpc_state(f"backward end, loss {loss.item()} epoch {epoch} batch {batch_idx}")
                 try:
                     loss.backward()
