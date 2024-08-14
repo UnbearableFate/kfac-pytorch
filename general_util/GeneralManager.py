@@ -20,9 +20,9 @@ import kfac.rpc_distributed as rpc_distributed
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 class GeneralManager:
-    def __init__(self,data_dir,dataset_name,model,sampler_func = None,train_com_method="ddp",interval=10,
-                 is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp="" ,log_dir ='',
-                 trainsform_train=None,transform_test=None,
+    def __init__(self, data_dir, dataset_name, model, sampler_func = None, train_com_method="ddp", interval=10,
+                 is_2nd_order =True, epochs=100, device=torch.device("cuda:0"), share_file_path=None, timestamp="", log_dir ='',
+                 transform_train=None, transform_test=None,
                  precondtioner=None):
         self.experiment_name_detail = None
         if share_file_path is not None:
@@ -56,7 +56,7 @@ class GeneralManager:
             raise RuntimeError(f"Unable to create log directory: {log_dir}")
 
         self.data_manager = DataPreparer(data_path_root=data_dir, dataset_name=dataset_name, world_size=world_size, rank=rank,
-                                    sampler=sampler_func, batch_size=batch_size ,train_transform=trainsform_train,test_transform=transform_test)
+                                         sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test)
 
         self.loss_func = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(model.parameters())

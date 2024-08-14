@@ -42,8 +42,9 @@ if __name__ == '__main__':
     model = ModelSplitter(model, 128)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=40,device='cpu',
-                         share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR,trainsform_train=SimpleCNN.transform,transform_test=SimpleCNN.transform)
+                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=40, device='cpu',
+                         share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR,
+                         transform_train=SimpleCNN.transform, transform_test=SimpleCNN.transform)
 
     mgr.rpc_train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test05")
     mgr.close_all()
