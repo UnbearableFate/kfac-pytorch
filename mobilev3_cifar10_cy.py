@@ -48,6 +48,8 @@ if __name__ == '__main__':
     device = torch.device(f"cuda:{ompi_world_rank}")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"])
+
+    data_path = DATA_DIR+str(ompi_world_rank)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=1, is_2nd_order=True, epochs=20,device=device,

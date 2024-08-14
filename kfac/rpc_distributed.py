@@ -1,7 +1,5 @@
-import datetime
 import gc
 import math
-import os
 import random
 import statistics
 import sys
@@ -48,6 +46,14 @@ def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
 def full_connnection_device_map(world_size,rank):
+    device_map = {}
+    for i in range(world_size):
+        if i == rank:
+            continue
+        device_map[rpc_work_name(i)] = {0 : 0}
+    return device_map
+
+def local_full_connnection_device_map(world_size,rank):
     device_map = {}
     for i in range(world_size):
         if i == rank:
@@ -251,9 +257,8 @@ class KFacRPCCommunicator:
         return statistics.median(iters)
 
     def init_logger(self,rank,log_dir):
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
         # 创建一个 FileHandler，并设置级别为 DEBUG
-        file_handler = logging.FileHandler(f'{log_dir}/log_{rank}_{timestamp}.log')
+        file_handler = logging.FileHandler(f'{log_dir}/log_{rank}.log')
         file_handler.setLevel(logging.DEBUG)
 
         # 创建一个日志格式器，并将其添加到 FileHandler

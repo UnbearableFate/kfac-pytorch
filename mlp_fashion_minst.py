@@ -40,15 +40,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
-    model = MLP(num_hidden_layers=8,hidden_size=128)
-    device = torch.device("cuda:0")
+    model = MLP(num_hidden_layers=4,hidden_size=32)
+    device = torch.device("cpu")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"])
+    print(DATA_DIR)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device=device,
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
 
-    mgr.rpc_train_and_test(log_dir=LOG_DIR, timestamp=timestamp, experiment_name="test03")
+    mgr.rpc_train_and_test()
     mgr.close_all()
     print("Done!")

@@ -24,6 +24,7 @@ class GeneralManager:
                  is_2nd_order =True,epochs=100,device=torch.device("cuda:0"),share_file_path=None,timestamp="" ,log_dir ='',
                  trainsform_train=None,transform_test=None,
                  precondtioner=None):
+        self.experiment_name_detail = None
         if share_file_path is not None:
             if ompi_world_size <= 0:
                 raise RuntimeError("Unable to initialize process group.")
@@ -32,13 +33,20 @@ class GeneralManager:
             if not dist.is_initialized():
                 raise RuntimeError("Unable to initialize process group.")
         self.writer = None
-        batch_size=32
+        batch_size=64
         rank = dist.get_rank()
         world_size = dist.get_world_size()
         if rank == 0:
             logging.basicConfig(level=logging.NOTSET)
         else:
             logging.basicConfig(level=logging.DEBUG)
+
+        model_name = type(model).__name__
+        if hasattr(model, "model_name"):
+            model_name = model.model_name
+        log_detail = f"{dataset_name}/{model_name}/{timestamp}"
+        log_dir = os.path.join(log_dir,log_detail)
+        self.log_dir = log_dir
 
         try :
             os.makedirs(log_dir)
@@ -47,7 +55,6 @@ class GeneralManager:
         except Exception as e:
             raise RuntimeError(f"Unable to create log directory: {log_dir}")
 
-        data_dir +=str(rank)
         self.data_manager = DataPreparer(data_path_root=data_dir, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                     sampler=sampler_func, batch_size=batch_size ,train_transform=trainsform_train,test_transform=transform_test)
 
@@ -88,19 +95,14 @@ class GeneralManager:
         if self.train_com_method == "rpc":
             mischief.recover_func = self.rpc_communicator.restart_sick_node
 
-    def train_and_test(self,log_dir,experiment_name,timestamp):
-        model = self.model
-        model_name =  type(model).__name__
-        if hasattr(model, "model_name"):
-            model_name = model.model_name
-        if hasattr(self, "experiment_name_detail"):
-            experiment_name = f"{experiment_name}_{self.experiment_name_detail}"
-        writer_name = f"{self.dataset_name}/{model_name}/{experiment_name}/{timestamp}/{dist.get_rank()}"
+    def train_and_test(self):
+        writer_path = self.log_dir
+        if self.experiment_name_detail is not None:
+            writer_path = os.path.join(writer_path,self.experiment_name_detail)
+        writer_name = os.path.join(writer_path,str(self.rank))
         self.writer = SummaryWriter(
-            log_dir=os.path.join(log_dir, writer_name))
-
+            log_dir=writer_name)
         self.rpc_communicator.writer = self.writer
-
 
         for i in range(0, self.epochs):
             if self.train_com_method == "rpc":
@@ -116,18 +118,17 @@ class GeneralManager:
         self.writer.close()
         self.rpc_communicator.broadcast_shutdown()
 
-    def rpc_train_and_test(self,log_dir,experiment_name,timestamp):
-        model = self.model
-        model_name = type(model).__name__
-        if hasattr(model, "model_name"):
-            model_name = model.model_name
-        if hasattr(self, "experiment_name_detail"):
-            experiment_name = f"{experiment_name}_{self.experiment_name_detail}"
-        writer_name = f"{self.dataset_name}/{model_name}/{experiment_name}/{timestamp}/{dist.get_rank()}"
+    def rpc_train_and_test(self):
+        writer_path = self.log_dir
+        if self.experiment_name_detail is not None:
+            writer_path = os.path.join(writer_path, self.experiment_name_detail)
+        writer_name = os.path.join(writer_path, str(self.rank))
         self.writer = SummaryWriter(
-            log_dir=os.path.join(log_dir, writer_name))
+            log_dir=writer_name)
+        self.rpc_communicator.writer = self.writer
         dist.barrier()
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
+
         for i in range(0, self.epochs):
             self.rpc_train(epoch=i)
             self.test_by_rpc(epoch=i)
@@ -186,9 +187,10 @@ class GeneralManager:
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
                 desc=f'Epoch {epoch:3d}/{self.epochs:3d}',
-                disable=(self.rank != 0)
+                disable=True
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
+                rpc_distributed.global_communicator.print_rpc_state(f"start epoch {epoch} batch {batch_idx}")
                 rpc_distributed.global_communicator.update_self_t()
                 '''
                 mischief.update_iter()
@@ -218,8 +220,10 @@ class GeneralManager:
                     self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                     rpc_distributed.global_communicator.send_model_param()
 
+                """
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
+                """
 
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
@@ -240,6 +244,7 @@ class GeneralManager:
                     self.writer.add_scalar('Memory/GPU_Allocated', allocated_memory / 1024**3, (epoch+1)*batch_idx)
                     self.writer.add_scalar('Memory/GPU_Cached', cached_memory / 1024**3, (epoch+1)*batch_idx)
 
+                rpc_distributed.global_communicator.print_rpc_state(f"end epoch {epoch} batch {batch_idx}")
                 t.update()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
