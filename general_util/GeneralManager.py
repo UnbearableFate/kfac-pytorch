@@ -26,7 +26,7 @@ class GeneralManager:
                  precondtioner=None):
         self.experiment_name_detail = None
         self.writer = None
-        batch_size=16
+        batch_size=64
         rank = dist.get_rank()
         world_size = dist.get_world_size()
         if rank == 0:
