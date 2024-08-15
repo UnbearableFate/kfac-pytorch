@@ -440,6 +440,7 @@ class KFacRPCCommunicator:
                 self.assigned_layers.append(name)
             else:
                 self.candidate_participate_factor_computation_layers.append(name)
+        gc.collect()
         self.print_rpc_state(f"update new assignment {new_assignment_generation}: {new_assignment}")
         self.current_inverse_computation_layers = self.assigned_layers.copy()
         self.participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()

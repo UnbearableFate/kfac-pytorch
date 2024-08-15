@@ -92,7 +92,7 @@ class ModelAvgRPCCommunicator:
         self.neighbor_weight_store : Dict[int, float] = dict()
         #self.init_neighbor_model_store()
 
-        self.buffer_size = 2
+        self.buffer_size = 1
         self.model_recv_buffer :List[ModelStore]= self.creat_model_recv_buffer(self.buffer_size)
 
         if style == 'buffer':
