@@ -106,7 +106,7 @@ class DataPreparer:
             self.test_transform = test_transform
         else:
             self.test_transform = DataPreparer.test_transform_dict[dataset_name]
-        
+
         self.train_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=True, download=False,
                                                                      transform=self.train_transform)
         self.test_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=False, download=False,
@@ -114,7 +114,7 @@ class DataPreparer:
         self.batch_size = batch_size
 
         if sampler is None:
-            self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=17)
+            self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7)
         else:
             self.train_sampler = sampler(self.train_dataset,world_size,rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
 

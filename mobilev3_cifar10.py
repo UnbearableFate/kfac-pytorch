@@ -45,8 +45,8 @@ if __name__ == '__main__':
     print(f"timestamp: {timestamp}")
 
     model = CustomMobileNetV3Small(num_classes=10)
-    device = torch.device(f"cuda:0")
-    #device = torch.device(f"cuda:{ompi_world_rank}")
+    #device = torch.device(f"cuda:0")
+    device = torch.device(f"cuda:{ompi_world_rank%4}")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"])
 

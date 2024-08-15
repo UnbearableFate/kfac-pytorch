@@ -147,3 +147,4 @@ runs*
 *.sh.e*
 *.sh.o*
 share_files/
+core*

@@ -179,10 +179,10 @@ class GeneralManager:
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
-        print(f"Total batches: {len(train_loader)} at rank {self.rank}")
+        #print(f"Total batches: {len(train_loader)} at rank {self.rank}")
         data_iter = iter(train_loader)
         data, target = next(data_iter)
-        print(f"Data shape: {data.shape}, Target shape: {target.shape} at rank {self.rank}")
+        #print(f"Data shape: {data.shape}, Target shape: {target.shape} at rank {self.rank}")
         with (tqdm(
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
@@ -190,7 +190,7 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                rpc_distributed.global_communicator.print_rpc_state(f"start epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"start epoch {epoch} batch {batch_idx}")
                 rpc_distributed.global_communicator.update_self_t()
                 '''
                 mischief.update_iter()
@@ -198,50 +198,45 @@ class GeneralManager:
                     if mischief.is_sick_at(self.rank):
                         time.sleep(0.1)
                 '''
-                rpc_distributed.global_communicator.print_rpc_state(f"load data epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"load data epoch {epoch} batch {batch_idx}")
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
                 #lock = rpc_distributed.global_communicator.model_avg_rpc.lock
 
-                rpc_distributed.global_communicator.print_rpc_state(f"forward epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"forward epoch {epoch} batch {batch_idx}")
                 #if not lock.acquire(timeout=1):
                 #    raise Exception("lock acquire failed at train")
-                rpc_distributed.global_communicator.print_rpc_state(f"forward data size{data.shape} epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"forward data size{data.shape} epoch {epoch} batch {batch_idx}")
                 output = self.model(data)
 
-                rpc_distributed.global_communicator.print_rpc_state(f"backward out size{output.shape} ,target size {target.shape} epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"backward out size{output.shape} ,target size {target.shape} epoch {epoch} batch {batch_idx}")
                 loss = self.loss_func(output, target)
 
-                rpc_distributed.global_communicator.print_rpc_state(f"backward end, loss {loss.item()} epoch {epoch} batch {batch_idx}")
-                try:
-                    loss.backward()
-                except Exception as e:
-                    raise RuntimeError(f"back error: {e}")
-                rpc_distributed.global_communicator.print_rpc_state(f"backward ok,  epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"backward end, loss {loss.item()} epoch {epoch} batch {batch_idx}")
+                loss.backward()
+                #rpc_distributed.global_communicator.print_rpc_state(f"backward ok,  epoch {epoch} batch {batch_idx}")
                 #lock.release()
 
-                rpc_distributed.global_communicator.print_rpc_state(f"precondition epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"precondition epoch {epoch} batch {batch_idx}")
                 if self.preconditioner is not None:
                     self.preconditioner.step()
 
-                rpc_distributed.global_communicator.print_rpc_state(f"grad update epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"grad update epoch {epoch} batch {batch_idx}")
                 #if not lock.acquire(timeout=1):
                 #    raise Exception("lock acquire failed at train2")
                 self.optimizer.step()
                 #lock.release()
 
-                rpc_distributed.global_communicator.print_rpc_state(f"send model epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"send model epoch {epoch} batch {batch_idx}")
                 if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
                     self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                     rpc_distributed.global_communicator.send_model_param()
 
-                """
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
-                """
 
-                rpc_distributed.global_communicator.print_rpc_state(f"other epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"other epoch {epoch} batch {batch_idx}")
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
@@ -253,15 +248,15 @@ class GeneralManager:
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
 
-                if self.writer is not None and batch_idx % 50 == 0:
+                if self.writer is not None and batch_idx % 20 == 0:
                     process = psutil.Process(os.getpid())
                     self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
-                    allocated_memory = torch.cuda.memory_allocated(0)  # 0 表示 GPU 0
-                    cached_memory = torch.cuda.memory_reserved(0)  # 0 表示 GPU 0
+                    allocated_memory = torch.cuda.memory_allocated(self.rank%4)  # 0 表示 GPU 0
+                    cached_memory = torch.cuda.memory_reserved(self.rank%4)  # 0 表示 GPU 0
                     self.writer.add_scalar('Memory/GPU_Allocated', allocated_memory / 1024**3, (epoch+1)*batch_idx)
                     self.writer.add_scalar('Memory/GPU_Cached', cached_memory / 1024**3, (epoch+1)*batch_idx)
 
-                rpc_distributed.global_communicator.print_rpc_state(f"end epoch {epoch} batch {batch_idx}")
+                #rpc_distributed.global_communicator.print_rpc_state(f"end epoch {epoch} batch {batch_idx}")
                 t.update()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
