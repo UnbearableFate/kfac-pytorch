@@ -25,15 +25,8 @@ class GeneralManager:
                  transform_train=None, transform_test=None,
                  precondtioner=None):
         self.experiment_name_detail = None
-        if share_file_path is not None:
-            if ompi_world_size <= 0:
-                raise RuntimeError("Unable to initialize process group.")
-            timeout = datetime.timedelta(seconds=120)
-            dist.init_process_group("gloo", init_method=f"file://{share_file_path}/pg_share{timestamp}",rank=ompi_world_rank, world_size=ompi_world_size ,timeout= timeout)
-            if not dist.is_initialized():
-                raise RuntimeError("Unable to initialize process group.")
         self.writer = None
-        batch_size=32
+        batch_size=64
         rank = dist.get_rank()
         world_size = dist.get_world_size()
         if rank == 0:

@@ -10,6 +10,7 @@ from my_module.mobile_net import CustomMiniMobileNetV3Small, CustomMobileNetV3Sm
 from my_module.model_split import ModelSplitter
 from torchvision import transforms
 import logging
+import torch.distributed as dist
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -47,6 +48,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
+
+    timeout = datetime.timedelta(seconds=120)
+    dist.init_process_group("gloo", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
+                            world_size=ompi_world_size, timeout=timeout)
+    if not dist.is_initialized():
+        raise RuntimeError("Unable to initialize process group.")
 
     model = CustomMobileNetV3Small(num_classes=10)
     device = torch.device(f"cuda:0")
