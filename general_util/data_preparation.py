@@ -113,7 +113,6 @@ class DataPreparer:
                                                                     transform=self.test_transform)
         self.batch_size = batch_size
 
-        """
         if sampler is None:
             self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7)
         else:
@@ -126,10 +125,6 @@ class DataPreparer:
         self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False,
                                       sampler=self.test_sampler,
                                       num_workers=0)
-        """
-        self.train_sampler = None
-        self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
-        self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     def set_epoch(self,epoch):
         if self.train_sampler is not None and hasattr(self.train_sampler,"set_epoch"):

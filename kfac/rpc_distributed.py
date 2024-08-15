@@ -176,7 +176,7 @@ class KFacRPCCommunicator:
                 num_worker_threads=16,
                 init_method=f"file://{share_file_path}/rpc_share{timestamp}",
                 rpc_timeout=30,
-                device_maps=full_connnection_device_map(world_size,rank)
+                device_maps=local_full_connnection_device_map(world_size,rank)
             )
         self.device = device
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)
