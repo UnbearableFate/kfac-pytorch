@@ -9,6 +9,7 @@ from general_util.GeneralManager import GeneralManager
 from my_module.mobile_net import CustomMiniMobileNetV3Small, CustomMobileNetV3Small
 from my_module.model_split import ModelSplitter
 from torchvision import transforms
+import logging
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -36,6 +37,8 @@ if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
+if ompi_world_rank == 0:
+    logging.basicConfig(level=logging.NOTSET)
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -46,7 +49,7 @@ if __name__ == '__main__':
     print(f"timestamp: {timestamp}")
 
     model = CustomMobileNetV3Small(num_classes=10)
-    device = torch.device(f"cuda:{ompi_world_rank%4}")
+    device = torch.device(f"cuda:0")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007)
 
