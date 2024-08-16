@@ -98,18 +98,10 @@ class GeneralManager:
         self.rpc_communicator.writer = self.writer
 
         for i in range(0, self.epochs):
-            if self.train_com_method == "rpc":
-                self.rpc_train(epoch=i)
-                self.test_by_rpc(epoch=i)
-            else:
-                self.train(epoch=i)
-                self.test_all(epoch=i)
-
-        if self.train_com_method == "rpc":
-            self.write_test_result_rpc()
+            self.train(epoch=i)
+            self.test_all(epoch=i)
 
         self.writer.close()
-        self.rpc_communicator.broadcast_shutdown()
 
     def rpc_train_and_test(self):
         writer_path = self.log_dir
@@ -151,7 +143,7 @@ class GeneralManager:
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.to(self.device)
                 target = target.to(self.device)
-                mischief.update_iter()
+                #mischief.update_iter()
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = self.loss_func(output, target)
