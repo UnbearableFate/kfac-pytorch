@@ -7,6 +7,7 @@ import kfac
 from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
+import torch.distributed as dist
 import logging
 
 logging.basicConfig(level=logging.NOTSET)
@@ -35,6 +36,11 @@ elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
 if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
     raise RuntimeError("Unknown environment.")
 
+ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
+ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
+if ompi_world_rank == 0:
+    logging.basicConfig(level=logging.NOTSET)
+
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -43,14 +49,21 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
-    model = MLP(num_hidden_layers=15,hidden_size=256)
-    device = torch.device("cuda:0")
+
+    timeout = datetime.timedelta(seconds=120)
+    dist.init_process_group("gloo", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
+                            world_size=ompi_world_size, timeout=timeout)
+    if not dist.is_initialized():
+        raise RuntimeError("Unable to initialize process group.")
+
+    model = MLP(num_hidden_layers=3,hidden_size=32)
+    device = torch.device("cpu")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003 ,inv_update_steps=20)
     print(DATA_DIR)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=1, is_2nd_order=True, epochs=50,device=device,
+                         train_com_method='rpc', interval=10, is_2nd_order=True, epochs=5,device=device,
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
 
     mgr.rpc_train_and_test()
