@@ -121,10 +121,10 @@ class DataPreparer:
         self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
 
         self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=(self.train_sampler is None),
-                                       sampler=self.train_sampler, num_workers=1, persistent_workers =True)
+                                       sampler=self.train_sampler, num_workers=0, persistent_workers =False)
         self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False,
                                       sampler=self.test_sampler,
-                                      num_workers=1, persistent_workers=True)
+                                      num_workers=0, persistent_workers=False)
 
     def set_epoch(self,epoch):
         if self.train_sampler is not None and hasattr(self.train_sampler,"set_epoch"):
