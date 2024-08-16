@@ -116,9 +116,8 @@ class GeneralManager:
         for i in range(0, self.epochs):
             self.rpc_train(epoch=i)
             self.test_by_rpc(epoch=i)
-            gc.collect()
+            self.rpc_communicator.write_model_test_accuracy(i,self.epochs)
 
-        self.write_test_result_rpc()
         self.writer.close()
         dist.barrier()
 

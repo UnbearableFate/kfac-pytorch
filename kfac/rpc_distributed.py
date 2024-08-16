@@ -625,6 +625,17 @@ class KFacRPCCommunicator:
         else:
             return 0
 
+    def write_model_test_accuracy(self, epoch, max_epoch):
+        for i in range(epoch):
+            if i not in self.model_accuracy_statistic:
+                break
+            if "written" in self.model_accuracy_statistic[i]:
+                continue
+            if self.model_accuracy_statistic[epoch]['recv_ct'] >= self.origin_world_size-1 or epoch == max_epoch-1:
+                if self.writer is not None:
+                    self.writer.add_scalar("test/accuracy", self.model_accuracy_statistic[epoch]['correct_ct'] / self.model_accuracy_statistic[epoch]['total_ct'], i)
+                    self.model_accuracy_statistic[i]["written"] = True
+
     def restart_sick_node(self): # call by sick nodes
         if self.node_states[self.rank].health == False and self.task_reassign_rpc.assignment_generation not in self.request_regression_record:
             self.task_reassign_rpc.resurrection_declaration()
