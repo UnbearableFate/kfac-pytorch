@@ -95,7 +95,6 @@ class GeneralManager:
         writer_name = os.path.join(writer_path,str(self.rank))
         self.writer = SummaryWriter(
             log_dir=writer_name)
-        self.rpc_communicator.writer = self.writer
 
         for i in range(0, self.epochs):
             self.train(epoch=i)

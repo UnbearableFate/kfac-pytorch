@@ -11,6 +11,8 @@ from my_module.model_split import ModelSplitter
 from torchvision import transforms
 import logging
 import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -49,15 +51,16 @@ if __name__ == '__main__':
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
 
-    timeout = datetime.timedelta(seconds=120)
+    timeout = datetime.timedelta(seconds=30)
     dist.init_process_group("nccl", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
 
-    model = CustomMobileNetV3Small(num_classes=10)
     device = torch.device(f"cuda:0")
+    model = CustomMobileNetV3Small(num_classes=10)
     model = model.to(device)
+    model = DDP(model)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007)
 
     transform = transforms.Compose([
@@ -71,10 +74,9 @@ if __name__ == '__main__':
     data_path = DATA_DIR + str(ompi_world_rank)
     mgr = GeneralManager(data_dir=data_path, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='ddp', interval=5, is_2nd_order=True, epochs=3, device=device,
+                         train_com_method='ddp', interval=5, is_2nd_order=True, epochs=50, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
                          transform_train=transform, transform_test=transform)
 
     mgr.train_and_test()
-    mgr.close_all()
     print("Done!")
