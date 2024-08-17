@@ -50,7 +50,7 @@ def full_connnection_device_map(world_size,rank):
     for i in range(world_size):
         if i == rank:
             continue
-        device_map[rpc_work_name(i)] = {0 : 0}
+        device_map[rpc_work_name(i)] = {0 : 0,1:1,2:2,3:3}
     return device_map
 
 def local_full_connnection_device_map(world_size,rank):

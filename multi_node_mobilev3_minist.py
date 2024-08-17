@@ -11,6 +11,7 @@ from my_module.model_split import ModelSplitter
 from torchvision import transforms
 import logging
 import torch.distributed as dist
+import shutil
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -40,6 +41,8 @@ ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 if ompi_world_rank == 0:
     logging.basicConfig(level=logging.NOTSET)
+
+shutil.copytree("/work/NBB/yu_mingzhe/data","/scr/data")
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -50,7 +53,7 @@ if __name__ == '__main__':
     print(f"timestamp: {timestamp}")
 
     timeout = datetime.timedelta(seconds=120)
-    dist.init_process_group("nccl", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
+    dist.init_process_group("gloo", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
@@ -68,7 +71,7 @@ if __name__ == '__main__':
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    data_path = DATA_DIR + str(ompi_world_rank)
+    data_path = "/scr/data"
     mgr = GeneralManager(data_dir=data_path, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=10, is_2nd_order=True, epochs=3, device=device,

@@ -107,6 +107,7 @@ class DataPreparer:
         else:
             self.test_transform = DataPreparer.test_transform_dict[dataset_name]
 
+        print(f"data path : {self.data_path}")
         self.train_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=True, download=False,
                                                                      transform=self.train_transform)
         self.test_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=False, download=False,
