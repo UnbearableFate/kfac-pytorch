@@ -56,7 +56,7 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
 
-    model = MLP(num_hidden_layers=8,hidden_size=128)
+    model = MLP(num_hidden_layers=16,hidden_size=256)
     rank = dist.get_rank()
     device = torch.device(f"cuda:{rank%4}")
     model = model.to(device)

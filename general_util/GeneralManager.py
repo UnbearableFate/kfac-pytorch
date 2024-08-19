@@ -26,14 +26,9 @@ class GeneralManager:
                  precondtioner=None):
         self.experiment_name_detail = None
         self.writer = None
-        batch_size=32
+        batch_size=64
         rank = dist.get_rank()
         world_size = dist.get_world_size()
-        if rank == 0:
-            logging.basicConfig(level=logging.NOTSET)
-        else:
-            logging.basicConfig(level=logging.DEBUG)
-
         model_name = type(model).__name__
         if hasattr(model, "model_name"):
             model_name = model.model_name
