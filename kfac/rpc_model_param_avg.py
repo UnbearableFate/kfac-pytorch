@@ -282,7 +282,7 @@ class ModelAvgRPCCommunicator:
         if target == self.rank:
             target = (target + 1) % self.origin_world_size
             self.index = (self.index + 1) % self.origin_world_size
-        layers = random.choices(list(self.io_layers.keys()), k=2)
+        layers = random.choices(list(self.io_layers.keys()), k=1)
         self.send_model_param_to_buffer(target, layer_names=layers)
         self.aggregate_model_from_buff()
 
