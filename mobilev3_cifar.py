@@ -58,7 +58,7 @@ if __name__ == '__main__':
     model = CustomMobileNetV3Small(num_classes=10)
     device = torch.device(f"cuda:{ompi_world_rank%4}")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=10)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -71,7 +71,7 @@ if __name__ == '__main__':
     data_path = DATA_DIR + str(ompi_world_rank%8)
     mgr = GeneralManager(data_dir=data_path, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=7, is_2nd_order=True, epochs=50, device=device,
+                         train_com_method='rpc', interval=13, is_2nd_order=True, epochs=50, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
                          transform_train=None, transform_test=None)
 
