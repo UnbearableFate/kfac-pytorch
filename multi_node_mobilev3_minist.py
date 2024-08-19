@@ -42,7 +42,7 @@ ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 if ompi_world_rank == 0:
     logging.basicConfig(level=logging.NOTSET)
 
-#shutil.copytree("/work/NBB/yu_mingzhe/data","/scr/data")
+shutil.copytree("/work/NBB/yu_mingzhe/data","/scr/data")
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -61,7 +61,7 @@ if __name__ == '__main__':
     model = CustomMobileNetV3Small(num_classes=10)
     device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007,inv_update_steps=10)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007,inv_update_steps=11)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -71,10 +71,10 @@ if __name__ == '__main__':
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    #data_path = "/scr/data"
-    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
+    data_path = "/scr/data"
+    mgr = GeneralManager(data_dir=data_path, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=10, is_2nd_order=True, epochs=3, device=device,
+                         train_com_method='rpc', interval=13, is_2nd_order=True, epochs=20, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
                          transform_train=transform, transform_test=transform)
 

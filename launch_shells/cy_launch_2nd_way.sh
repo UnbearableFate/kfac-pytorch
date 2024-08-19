@@ -17,5 +17,5 @@ mpirun ${NQSII_MPIOPTS} --mca orte_base_help_aggregate 0 --mca plm_base_verbose 
  --mca rmaps_base_verbose 100 --mca rml_base_verbose 100 --mca oob_base_verbose 100 \
  --mca btl_base_verbose 100 --mca mpi_abort_print_stack 1 \
  -x PATH -np 4 -npernode 1 --report-bindings \
- /home/NBB/yu_mingzhe/miniconda3/envs/basic_env/bin/python /work/NBB/yu_mingzhe/kfac-pytorch/mlp_fashion_minst.py \
+ /home/NBB/yu_mingzhe/miniconda3/envs/basic_env/bin/python /work/NBB/yu_mingzhe/multi_node_mobilev3_minist.py \
  --timestamp="$current_time"
