@@ -167,13 +167,13 @@ class KFacRPCCommunicator:
         self.io_layers = None
 
         options = rpc.TensorPipeRpcBackendOptions(
-            num_worker_threads=24,
+            num_worker_threads=32,
             init_method=f"file://{share_file_path}/rpc_share{timestamp}",
             rpc_timeout=30,
         )
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
-                num_worker_threads=24,
+                num_worker_threads=32,
                 init_method=f"file://{share_file_path}/rpc_share{timestamp}",
                 rpc_timeout=30,
                 device_maps=full_connnection_device_map(world_size,rank)
