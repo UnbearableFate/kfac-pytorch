@@ -45,7 +45,7 @@ def normalized_l2_similarity(tensor1, tensor2):
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
-def full_connnection_device_map(world_size,rank):
+def full_connection_device_map(world_size,rank):
     device_map = {}
     for i in range(world_size):
         if i == rank:
@@ -53,7 +53,7 @@ def full_connnection_device_map(world_size,rank):
         device_map[rpc_work_name(i)] = {0 : 0}
     return device_map
 
-def local_full_connnection_device_map(world_size,rank):
+def local_full_connection_device_map(world_size,rank):
     device_map = {}
     for i in range(world_size):
         if i == rank:
@@ -167,16 +167,16 @@ class KFacRPCCommunicator:
         self.io_layers = None
 
         options = rpc.TensorPipeRpcBackendOptions(
-            num_worker_threads=32,
+            num_worker_threads=24,
             init_method=f"file://{share_file_path}/rpc_share{timestamp}",
             rpc_timeout=30,
         )
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
-                num_worker_threads=32,
+                num_worker_threads=24,
                 init_method=f"file://{share_file_path}/rpc_share{timestamp}",
                 rpc_timeout=30,
-                device_maps=full_connnection_device_map(world_size,rank)
+                device_maps=local_full_connection_device_map(world_size,rank)
             )
         self.device = device
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)

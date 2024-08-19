@@ -56,8 +56,9 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
 
-    model = MLP(num_hidden_layers=4,hidden_size=32)
-    device = torch.device("cuda:0")
+    model = MLP(num_hidden_layers=8,hidden_size=128)
+    rank = dist.get_rank()
+    device = torch.device(f"cuda:{rank%4}")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003 ,inv_update_steps=13)
     data_path = DATA_DIR + str(ompi_world_rank%8)
