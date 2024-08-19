@@ -61,7 +61,7 @@ if __name__ == '__main__':
     model = CustomMobileNetV3Small(num_classes=10)
     device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007,inv_update_steps=21)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0","classifier.0","classifier.3"],damping=0.007,inv_update_steps=21)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224

@@ -454,9 +454,9 @@ class KFacRPCCommunicator:
         return len(self.get_health_node_state_list())
 
     def is_factor_ready(self, layer_name, factor_type):
-        if self.rpc_layers[layer_name].factor_recv_ct[factor_type] >= self.current_t() * (self.origin_world_size-1):
+        if self.rpc_layers[layer_name].factor_recv_ct[factor_type] >= 0:
             return True
-        return
+        return False
 
     def is_eigen_tensor_ready(self, layer_name,staleness_tolerance = 0):
         current_t = self.current_t()
