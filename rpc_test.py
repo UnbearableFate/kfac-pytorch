@@ -55,9 +55,12 @@ if __name__ == '__main__':
                  args=(big_tensor,ompi_world_rank))
     print(f"big tensor send ok {ompi_world_rank}")
     tensor = torch.rand([1024,1024,32]).to(device)
-    for i in range(40):
-        rpc.rpc_async(rpc_work_name((ompi_world_rank+1)%ompi_world_size),
-                     get_cuda_tensor,
-                     args=(tensor,ompi_world_rank, i+1))
+    for i in range(20):
+        for j in range(ompi_world_size):
+            if j == ompi_world_rank:
+                continue
+            rpc.rpc_async(rpc_work_name(j),
+                         get_cuda_tensor,
+                         args=(tensor,ompi_world_rank, i+1))
     print(f"many tensor send ok {ompi_world_rank}")
     rpc.shutdown()
