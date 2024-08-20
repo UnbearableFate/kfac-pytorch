@@ -14,8 +14,8 @@ if ompi_world_size == -1 or ompi_world_rank == -1:
 DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
 Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
 
-def get_cuda_tensor(tensor,from_rank):
-    print(f"get tensor shape {tensor.shape} from {from_rank} ,deivce :{tensor.device.type}")
+def get_cuda_tensor(tensor,from_rank,ct=0):
+    print(f"get tensor shape {tensor.shape} from {from_rank} ,deivce :{tensor.device.type},count {ct} " )
 
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
@@ -54,10 +54,10 @@ if __name__ == '__main__':
                  get_cuda_tensor,
                  args=(big_tensor,ompi_world_rank))
     print(f"big tensor send ok {ompi_world_rank}")
-    tensor = torch.rand(1024,1024).to(device)
-    for i in range(20):
+    tensor = torch.rand([1024,1024,32]).to(device)
+    for i in range(40):
         rpc.rpc_async(rpc_work_name((ompi_world_rank+1)%ompi_world_size),
                      get_cuda_tensor,
-                     args=(tensor,ompi_world_rank))
+                     args=(tensor,ompi_world_rank, i+1))
     print(f"many tensor send ok {ompi_world_rank}")
     rpc.shutdown()
