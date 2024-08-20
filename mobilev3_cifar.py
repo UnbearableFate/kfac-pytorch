@@ -59,7 +59,7 @@ if __name__ == '__main__':
     data_path = DATA_DIR + str(ompi_world_rank%8)
     mgr = GeneralManager(data_dir=data_path, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=13, is_2nd_order=True, epochs=50, device=device,
+                         train_com_method='rpc', interval=13, is_2nd_order=True, epochs=10, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
                          transform_train=None, transform_test=None)
 
