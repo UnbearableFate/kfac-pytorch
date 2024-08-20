@@ -4,14 +4,10 @@ import argparse
 import torch
 
 import kfac
-from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
-from my_module.mobile_net import CustomMiniMobileNetV3Small, CustomMobileNetV3Small, CustomMiniMobileNetV3ForCIFAR10
-from my_module.model_split import ModelSplitter
-from torchvision import transforms
+from my_module.mobile_net import CustomMiniMobileNetV3ForCIFAR10
 import torch.distributed as dist
 import logging
-
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
