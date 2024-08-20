@@ -12,18 +12,18 @@ reduce_divider = 1
 dilation = 1
 
 inverted_residual_setting = [
-    bneck_conf(16, 3, 16, 16, True, "RE", 2, 1),  # C1
-    bneck_conf(16, 3, 72, 24, False, "RE", 2, 1),  # C2
-    bneck_conf(24, 3, 88, 24, False, "RE", 1, 1),
-    bneck_conf(24, 5, 96, 40, True, "HS", 2, 1),  # C3
-    #bneck_conf(40, 5, 240, 40, True, "HS", 1, 1),
-    #bneck_conf(40, 5, 240, 40, True, "HS", 1, 1),
-    #bneck_conf(40, 5, 120, 48, True, "HS", 1, 1),
-    #bneck_conf(48, 5, 144, 48, True, "HS", 1, 1),
-    bneck_conf(40, 5, 288, 96 // reduce_divider, True, "HS", 2, dilation),  # C4
-    bneck_conf(96 // reduce_divider, 5, 576 // reduce_divider, 96 // reduce_divider, True, "HS", 1, dilation),
-    #bneck_conf(96 // reduce_divider, 5, 576 // reduce_divider, 96 // reduce_divider, True, "HS", 1, dilation),
-    ]
+    bneck_conf(16, 3, 16, 16, True, "RE", 1, 1),  # C1: stride从2改为1，避免初始下采样
+    bneck_conf(16, 3, 72, 24, False, "RE", 2, 1),  # C2: 保持stride为2
+    bneck_conf(24, 3, 88, 24, False, "RE", 1, 1),  # 保持stride为1
+    bneck_conf(24, 5, 96, 40, True, "HS", 2, 1),  # C3: 保持stride为2
+    bneck_conf(40, 5, 240, 40, True, "HS", 1, 1),  # 保持stride为1
+    bneck_conf(40, 5, 240, 40, True, "HS", 1, 1),  # 保持stride为1
+    bneck_conf(40, 5, 120, 48, True, "HS", 1, 1),  # 保持stride为1
+    bneck_conf(48, 5, 144, 48, True, "HS", 1, 1),  # 保持stride为1
+    bneck_conf(48, 5, 288, 96, True, "HS", 1, 1),  # C4: stride从2改为1，避免过多下采样
+    bneck_conf(96, 5, 576, 96, True, "HS", 1, 1),  # 保持stride为1
+    bneck_conf(96, 5, 576, 96, True, "HS", 1, 1),  # 保持stride为1
+]
 
 last_channel = adjust_channels(1024 // reduce_divider)  # C5
 
@@ -54,12 +54,9 @@ class CustomMobileNetV3Small(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-class CustomMiniMobileNetV3Small(nn.Module):
-
-    cf10_trans_train = cifar10_transform_train
-    cf10_trans_test = cifar10_transform_test
+class CustomMiniMobileNetV3ForCIFAR10(nn.Module):
     def __init__(self, num_classes=10):
-        super(CustomMiniMobileNetV3Small, self).__init__()
+        super(CustomMiniMobileNetV3ForCIFAR10, self).__init__()
         # super mini MobileNetV3 Small 模型
         self.model = MobileNetV3(inverted_residual_setting, last_channel, num_classes=num_classes)
         # 修改最后的分类层

@@ -6,7 +6,7 @@ import torch
 import kfac
 from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
-from my_module.mobile_net import CustomMiniMobileNetV3Small, CustomMobileNetV3Small
+from my_module.mobile_net import CustomMiniMobileNetV3Small, CustomMobileNetV3Small, CustomMiniMobileNetV3ForCIFAR10
 from my_module.model_split import ModelSplitter
 from torchvision import transforms
 import torch.distributed as dist
@@ -55,18 +55,10 @@ if __name__ == '__main__':
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
-    model = CustomMobileNetV3Small(num_classes=10)
+    model = CustomMiniMobileNetV3ForCIFAR10(num_classes=10)
     device = torch.device(f"cuda:{ompi_world_rank%4}")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17)
-
-    transform = transforms.Compose([
-        transforms.Resize(224),  # 将图像大小调整为224x224
-        transforms.Grayscale(num_output_channels=3),  # 将灰度图像转换为3通道的RGB图像
-        transforms.ToTensor(),  # 将图像转换为张量，并且将像素值缩放到 [0, 1] 范围内
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],  # 对RGB通道进行标准化
-                             std=[0.229, 0.224, 0.225]),
-    ])
 
     data_path = DATA_DIR + str(ompi_world_rank%8)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
