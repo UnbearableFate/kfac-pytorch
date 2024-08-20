@@ -25,7 +25,7 @@ def full_connection_device_map(world_size,rank):
     for i in range(world_size):
         if i == rank:
             continue
-        device_map[rpc_work_name(i)] = {0:0}
+        device_map[rpc_work_name(i)] = {ompi_world_rank%4:i%4}
     return device_map
 
 if __name__ == '__main__':
