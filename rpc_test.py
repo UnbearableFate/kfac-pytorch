@@ -1,3 +1,6 @@
+import argparse
+import datetime
+
 import torch
 import torch.distributed.rpc as rpc
 import os
@@ -12,33 +15,49 @@ DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
 Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
 
 def get_cuda_tensor(tensor,from_rank):
-    print(f"get tensor{tensor} from {from_rank} ,deivce :{tensor.device.type}")
+    print(f"get tensor shape {tensor.shape} from {from_rank} ,deivce :{tensor.device.type}")
 
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
-def local_full_connnection_device_map(world_size,rank):
+def full_connection_device_map(world_size,rank):
     device_map = {}
     for i in range(world_size):
         if i == rank:
             continue
-        device_map[rpc_work_name(i)] = {rank :i}
+        device_map[rpc_work_name(i)] = {0:0}
     return device_map
 
 if __name__ == '__main__':
-    dmap = local_full_connnection_device_map(ompi_world_size,ompi_world_rank)
+    dmap = full_connection_device_map(ompi_world_size,ompi_world_rank)
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    parser = argparse.ArgumentParser(description="experiment script")
+    parser.add_argument('--timestamp', type=str, default=timestamp)
+    args = parser.parse_args()
+    timestamp = args.timestamp
+    print(f"timestamp: {timestamp}")
     options = rpc.TensorPipeRpcBackendOptions(
         num_worker_threads=16,
-        init_method=f"file://{Share_DIR}/rpc_share_test",
+        init_method=f"file://{Share_DIR}/rpc_share_test_{timestamp}",
         rpc_timeout=30,
         device_maps=dmap
     )
 
     rpc.init_rpc(rpc_work_name(ompi_world_rank), rank=ompi_world_rank, world_size=ompi_world_size, rpc_backend_options=options)
     print(f"Hello from {ompi_world_rank}")
+    device = torch.device(f"cuda:{ompi_world_rank % 4}")
 
-    tensor = torch.rand(2,2).to("cuda:"+str(ompi_world_rank))
-    rpc.rpc_sync(rpc_work_name((ompi_world_rank+1)%ompi_world_size),
+    num_elements = 268435456
+
+    big_tensor = torch.rand(num_elements, dtype=torch.float32).to(device)
+    rpc.rpc_async(rpc_work_name((ompi_world_rank+1)%ompi_world_size),
                  get_cuda_tensor,
-                 args=(tensor,ompi_world_rank))
+                 args=(big_tensor,ompi_world_rank))
+    print(f"big tensor send ok {ompi_world_rank}")
+    tensor = torch.rand(1024,1024).to(device)
+    for i in range(20):
+        rpc.rpc_async(rpc_work_name((ompi_world_rank+1)%ompi_world_size),
+                     get_cuda_tensor,
+                     args=(tensor,ompi_world_rank))
+    print(f"many tensor send ok {ompi_world_rank}")
     rpc.shutdown()
