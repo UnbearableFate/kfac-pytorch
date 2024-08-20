@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from kfac.layers.eigen import KFACEigenLayer,KFACBaseLayer
     from kfac.assignment import KAISAAssignment
     from kfac.base_preconditioner import BaseKFACPreconditioner, KFACPreconditioner
+    from general_util.GeneralManager import GeneralManager
 
 # 创建日志记录器
 logger = logging.getLogger('my_logger')
@@ -155,6 +156,7 @@ class KfacRPCLayer:
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
+        self.preconditioner = preconditioner
         self.writer = None
         self.node_state_lock = threading.Lock()
 
@@ -578,13 +580,18 @@ class KFacRPCCommunicator:
         self.participate_factor_computation_layers = \
             self.candidate_participate_factor_computation_layers[:len(self.participate_factor_computation_layers)]
         self.current_inverse_computation_layers = self.assigned_layers[:len(self.current_inverse_computation_layers)]
-        if forward_than_local >= math.ceil(self.get_world_size() * 0.7) and iter_diff > 3: # local is too slow, work less
+        if forward_than_local >= math.ceil(self.get_world_size() * 0.7) and iter_diff > 5: # local is too slow, work less
             if len(self.participate_factor_computation_layers) > 0:
                 layer_name = random.choice(self.participate_factor_computation_layers)
                 self.participate_factor_computation_layers.remove(layer_name)
             elif len(self.current_inverse_computation_layers) > 0:
                 layer_name = random.choice(self.current_inverse_computation_layers)
                 self.current_inverse_computation_layers.remove(layer_name)
+            else:
+                if self.preconditioner.inv_update_steps < 30:
+                    self.preconditioner._inv_update_steps += 1
+                if self.preconditioner.factor_update_steps < 30:
+                    self.preconditioner._factor_update_steps += 1
 
         if late_than_local >= 1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
             if len(self.current_inverse_computation_layers) < len(self.assigned_layers):

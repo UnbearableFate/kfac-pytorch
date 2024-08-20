@@ -190,13 +190,14 @@ class RPCTaskManager:
             self.start_election()
         elif self.election_period > RPCTaskManager.max_election_period:
             if self.identity == 2:
-                time.sleep(random.random() * (self.rank+1) * 0.1)
+                """
                 if self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slow_tolerance_value :
                     self.rpc_communicator.print_rpc_state(f"start election again")
                     self.start_election()
                 else:
-                    self.rpc_communicator.print_rpc_state(f"give up election")
-                    self.update_follwer_state(self.leader_rank,self.currentTerm)
+                """
+                self.rpc_communicator.print_rpc_state(f"give up election")
+                self.update_follwer_state(self.leader_rank,self.currentTerm-1)
             elif (self.identity == 1 and
                   (self.votedFor is not None and  self.rpc_communicator.node_states[self.votedFor].iter - self.rpc_communicator.node_states[self.leader_rank].iter < RPCTaskManager.slow_tolerance_value)):
                 self.update_follwer_state(self.leader_rank,self.currentTerm)
