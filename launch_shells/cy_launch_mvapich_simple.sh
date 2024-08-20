@@ -16,5 +16,5 @@ current_time=$(date "+%Y%m%d%H%M")
 mpiexec ${NQSII_MPIOPTS} --mca mpi_abort_print_stack 1 \
  -genv MV2_NUM_HCAS 4 \
  -np 8 --map-by ppr:4:node:PE=3 --bind-to socket:0 --report-bindings \
- /home/NBB/yu_mingzhe/miniconda3/envs/basic_env/bin/python /work/NBB/yu_mingzhe/kfac-pytorch/rpc_resnet_cifar.py \
+ /home/NBB/yu_mingzhe/miniconda3/envs/basic_env/bin/python /work/NBB/yu_mingzhe/kfac-pytorch/mobilev3_cifar.py \
  --timestamp="$current_time"
