@@ -14,9 +14,6 @@ if ompi_world_size == -1 or ompi_world_rank == -1:
 DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
 Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
 
-def get_cuda_tensor(tensor,from_rank,ct=0):
-    print(f"get tensor shape {tensor.shape} from {from_rank} ,deivce :{tensor.device.type},count {ct} " )
-
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
@@ -27,6 +24,14 @@ def full_connection_device_map(world_size,rank):
             continue
         device_map[rpc_work_name(i)] = {ompi_world_rank%4:i%4}
     return device_map
+
+device = torch.device(f"cuda:{ompi_world_rank % 4}")
+local_tensor = torch.rand([1024,1024,32]).to(device)
+
+def get_cuda_tensor(tensor,from_rank,ct=0):
+    global local_tensor
+    print(f"get tensor shape {tensor.shape} from {from_rank} ,deivce :{tensor.device.type},count {ct} " )
+    local_tensor = local_tensor*1/2 + tensor*1/2
 
 if __name__ == '__main__':
     dmap = full_connection_device_map(ompi_world_size,ompi_world_rank)
@@ -45,22 +50,13 @@ if __name__ == '__main__':
 
     rpc.init_rpc(rpc_work_name(ompi_world_rank), rank=ompi_world_rank, world_size=ompi_world_size, rpc_backend_options=options)
     print(f"Hello from {ompi_world_rank}")
-    device = torch.device(f"cuda:{ompi_world_rank % 4}")
 
-    num_elements = 268435456
-
-    big_tensor = torch.rand(num_elements, dtype=torch.float32).to(device)
-    rpc.rpc_async(rpc_work_name((ompi_world_rank+1)%ompi_world_size),
-                 get_cuda_tensor,
-                 args=(big_tensor,ompi_world_rank))
-    print(f"big tensor send ok {ompi_world_rank}")
-    tensor = torch.rand([1024,1024,32]).to(device)
-    for i in range(20):
+    for i in range(25):
         for j in range(ompi_world_size):
             if j == ompi_world_rank:
                 continue
             rpc.rpc_async(rpc_work_name(j),
                          get_cuda_tensor,
-                         args=(tensor,ompi_world_rank, i+1))
+                         args=(local_tensor,ompi_world_rank, i+1))
     print(f"many tensor send ok {ompi_world_rank}")
     rpc.shutdown()
