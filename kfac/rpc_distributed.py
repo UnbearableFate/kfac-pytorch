@@ -456,7 +456,7 @@ class KFacRPCCommunicator:
         return len(self.get_health_node_state_list())
 
     def is_factor_ready(self, layer_name, factor_type):
-        if self.rpc_layers[layer_name].factor_recv_ct[factor_type] >= 0:
+        if self.rpc_layers[layer_name].factor_recv_ct[factor_type] > 0:
             return True
         return False
 
@@ -590,8 +590,6 @@ class KFacRPCCommunicator:
             else:
                 if self.preconditioner.inv_update_steps < 30:
                     self.preconditioner._inv_update_steps += 1
-                if self.preconditioner.factor_update_steps < 30:
-                    self.preconditioner._factor_update_steps += 1
 
         if late_than_local >= 1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
             if len(self.current_inverse_computation_layers) < len(self.assigned_layers):
