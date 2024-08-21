@@ -338,13 +338,11 @@ class BaseKFACPreconditioner:
         # Will be a no-op if bucketing was not used
         self._tdc.flush_allreduce_buckets()
 
-        self.is_inverse_computation = False
         # Compute Inverses
-        if self.steps % self.inv_update_steps == 0:
-            self.is_inverse_computation = True
-            if rpc_dist.global_communicator is not None:
-                rpc_dist.global_communicator.compute_and_broadcast_inverse(preconditioner=self)
-            else:
+        if rpc_dist.global_communicator is not None:
+            rpc_dist.global_communicator.compute_and_broadcast_inverse(preconditioner=self)
+        else:
+            if self.steps % self.inv_update_steps == 0:
                 for name, layer in reversed(list(self._layers.values())):
                     if get_rank() == self._assignment.inv_worker(name, 'A'):
                         layer.compute_a_inv(damping=self.damping)

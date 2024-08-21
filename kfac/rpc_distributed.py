@@ -156,6 +156,22 @@ class KfacRPCLayer:
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
+        self.local_timer = 0
+        self.send_ct = 0
+        self.send_max = 15
+
+        self.send_facter_interval = 3
+        self.next_send_factor_time = self.send_facter_interval + rank
+        self.is_send_factor = False
+
+        self.send_eigen_interval = 13
+        self.next_send_eigen_time = self.send_eigen_interval + rank
+        self.is_send_eigen = False
+
+        self.send_model_param_interval = 7
+        self.next_send_model_param_time = self.send_model_param_interval + rank
+        self.is_send_model_param = False
+
         self.preconditioner = preconditioner
         self.writer = None
         self.node_state_lock = threading.Lock()
@@ -316,6 +332,11 @@ class KFacRPCCommunicator:
 
     def update_self_t(self):
         self.loop_start_time = time.time()
+        self.local_timer += 1
+        self.send_ct = 0
+        self.is_send_factor = False
+        self.is_send_eigen = False
+        self.is_send_model_param = False
         if not self.node_state_lock.acquire(timeout=1):
             raise RuntimeError("Failed to acquire lock in update_self_t")
         self.node_states[self.rank].iter += 1
@@ -335,6 +356,21 @@ class KFacRPCCommunicator:
         self.node_state_lock.release()
 
     def compute_and_broadcast_inverse(self, preconditioner: 'BaseKFACPreconditioner'):
+        if self.is_send_factor:
+            print(f"Rank {self.rank} jump invers because sending factor at {self.local_timer}")
+            self.next_send_factor_time += self.send_facter_interval
+            if (self.next_send_factor_time == self.next_send_eigen_time
+                or self.next_send_factor_time == self.next_send_model_param_time):
+                self.next_send_factor_time += max(self.next_send_factor_time,self.next_send_model_param_time)+1
+
+            if self.next_send_eigen_time == self.local_timer:
+                self.next_send_factor_time += 1
+            return
+
+        if self.next_send_eigen_time != self.local_timer:
+            return
+        print(f"Rank {self.rank} start inverse computation at {self.local_timer}")
+        self.is_send_eigen = True
         current_t = self.current_t()
         task_set = set()
         packaged_send_dict = dict()
@@ -363,6 +399,11 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
+
+        self.next_send_eigen_time += self.send_eigen_interval
+        if (self.next_send_eigen_time == self.next_send_factor_time or
+            self.next_send_eigen_time == self.next_send_model_param_time):
+            self.next_send_eigen_time += max(self.next_send_factor_time,self.next_send_model_param_time)+1
 
     def package_send_eigen_tensor(self,packaged_send_dict ,layer_name, factor_type):
         if factor_type == "A":
@@ -493,6 +534,11 @@ class KFacRPCCommunicator:
             #self.print_rpc_state(f"update local factor {factor_type} of {layer_name} in rank {self.rank}")
             self.rpc_layers[layer_name].update_local_factor(factor_tensor.clone(), t, t, factor_type, world_size=self.origin_world_size)
             return
+
+        if self.next_send_factor_time != self.local_timer:
+            return
+        else:
+            self.is_send_factor = True
         try:
             rpc.rpc_async(
                 to=rpc_work_name(target),
@@ -615,7 +661,21 @@ class KFacRPCCommunicator:
                         break
 
     def send_model_param(self):
-        self.model_avg_rpc.send_all_model_param_alg07()
+        if self.is_send_factor or self.is_send_eigen:
+            print(f"Rank {self.rank} jump send model param because sending factor at {self.local_timer}")
+            if self.next_send_model_param_time == self.local_timer:
+                self.next_send_model_param_time += 1
+            self.is_send_model_param = False
+            return
+
+        print(f"Rank {self.rank} send model param at {self.local_timer}")
+        self.model_avg_rpc.send_all_model_param_alg08()
+        self.is_send_model_param = True
+
+        self.next_send_model_param_time += self.send_model_param_interval
+        if (self.next_send_model_param_time == self.next_send_factor_time
+               or self.next_send_model_param_time == self.next_send_eigen_time):
+            self.next_send_model_param_time  = max(self.next_send_factor_time, self.next_send_eigen_time) + 1
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
         for i in range(self.origin_world_size):
