@@ -286,6 +286,17 @@ class ModelAvgRPCCommunicator:
         self.send_model_param_to_buffer(target, layer_names=layers)
         self.aggregate_model_from_buff()
 
+    def send_all_model_param_alg09(self):
+        group_start_rank = self.rank // 4 * 4
+        target = group_start_rank + (self.rank + self.index) % 4
+        self.index = (self.index + 1) % 4
+        if target == self.rank:
+            target = group_start_rank+ (target + 1) % 4
+            self.index = (self.index + 1) % 4
+        layers = random.choices(list(self.io_layers.keys()), k=1)
+        self.send_model_param_to_buffer(target, layer_names=layers)
+        self.aggregate_model_from_buff()
+
     def average_model_param_from_store(self):
         with torch.no_grad():
             if not model_avg_rpc_communicator.lock.acquire(timeout= 3):

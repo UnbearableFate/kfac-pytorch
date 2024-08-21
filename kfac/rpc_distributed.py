@@ -667,11 +667,12 @@ class KFacRPCCommunicator:
                 self.next_send_model_param_time += 1
             self.is_send_model_param = False
             return
+
         if self.next_send_model_param_time != self.local_timer:
             return
 
         print(f"Rank {self.rank} send model param at {self.local_timer}")
-        self.model_avg_rpc.send_all_model_param_alg08()
+        self.model_avg_rpc.send_all_model_param_alg09()
         self.is_send_model_param = True
 
         self.next_send_model_param_time += self.send_model_param_interval
