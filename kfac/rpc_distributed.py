@@ -364,7 +364,7 @@ class KFacRPCCommunicator:
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
 
-    def package_send_eigen_tensor(self,packaged_send_dict:Dict[str] ,layer_name, factor_type):
+    def package_send_eigen_tensor(self,packaged_send_dict ,layer_name, factor_type):
         if factor_type == "A":
             return self.rpc_layers[layer_name].qa, self.rpc_layers[layer_name].da
         elif factor_type == "G":
