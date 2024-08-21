@@ -216,6 +216,7 @@ class GeneralManager:
                     rpc_distributed.global_communicator.print_rpc_state()
 
                 #rpc_distributed.global_communicator.print_rpc_state(f"other epoch {epoch} batch {batch_idx}")
+                """
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
@@ -234,7 +235,7 @@ class GeneralManager:
                     cached_memory = torch.cuda.memory_reserved(self.rank%4)  # 0 表示 GPU 0
                     self.writer.add_scalar('Memory/GPU_Allocated', allocated_memory / 1024**3, (epoch+1)*batch_idx)
                     self.writer.add_scalar('Memory/GPU_Cached', cached_memory / 1024**3, (epoch+1)*batch_idx)
-
+                """
                 #rpc_distributed.global_communicator.print_rpc_state(f"end epoch {epoch} batch {batch_idx}")
                 t.update()
             if self.writer is not None:

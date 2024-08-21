@@ -337,6 +337,7 @@ class KFacRPCCommunicator:
     def compute_and_broadcast_inverse(self, preconditioner: 'BaseKFACPreconditioner'):
         current_t = self.current_t()
         task_set = set()
+        packaged_send_dict = dict()
         for layer_name in self.current_inverse_computation_layers:
             task_set.add(layer_name + "#A")
             #task_set.add(layer_name + "#G")
@@ -359,10 +360,16 @@ class KFacRPCCommunicator:
                     kfac_layer.compute_g_inv(damping=preconditioner.damping)
                     self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name, qg=kfac_layer.qg, dg=kfac_layer.dg,
                                                 dadg=kfac_layer.dgda)
-
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
+
+    def package_send_eigen_tensor(self,packaged_send_dict:Dict[str] ,layer_name, factor_type):
+        if factor_type == "A":
+            return self.rpc_layers[layer_name].qa, self.rpc_layers[layer_name].da
+        elif factor_type == "G":
+            return self.rpc_layers[layer_name].qg, self.rpc_layers[layer_name].dg, self.rpc_layers[layer_name].dgda
+
 
     def compute_preconditioned_gradients(self,damping):
         current_t = self.current_t()
@@ -507,8 +514,10 @@ class KFacRPCCommunicator:
         t= self.current_t()
         self.rpc_layers[layer_name].update_local_eigen_a(qa.clone(), da.clone,t)
 
-        for i in range(self.origin_world_size-1):
-            target_rank = (self.rank + i + 1) % self.origin_world_size
+        start_rank = (self.rank // 4) * 4
+        for target_rank in range(start_rank ,start_rank + 4):
+            if target_rank == self.rank:
+                continue
             try :
                 rpc.rpc_async(
                     to=rpc_work_name(target_rank),
@@ -537,8 +546,10 @@ class KFacRPCCommunicator:
         else:
             self.rpc_layers[layer_name].update_local_eigen_g(qg.clone(), dg.clone(), dadg, t)
 
-        for i in range(self.origin_world_size-1):
-            target_rank = (self.rank + i + 1) % self.origin_world_size
+        start_rank = (self.rank // 4) * 4
+        for target_rank in range(start_rank, start_rank+4):
+            if target_rank == self.rank:
+                continue
             try:
                 rpc.rpc_async(
                     to=rpc_work_name(target_rank),
