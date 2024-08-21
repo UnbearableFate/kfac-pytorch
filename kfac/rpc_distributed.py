@@ -615,7 +615,7 @@ class KFacRPCCommunicator:
                         break
 
     def send_model_param(self):
-        self.model_avg_rpc.send_all_model_param_alg08()
+        self.model_avg_rpc.send_all_model_param_alg07()
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
         for i in range(self.origin_world_size):

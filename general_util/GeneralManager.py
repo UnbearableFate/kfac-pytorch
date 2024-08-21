@@ -207,11 +207,9 @@ class GeneralManager:
                 #lock.release()
 
                 #rpc_distributed.global_communicator.print_rpc_state(f"send model epoch {epoch} batch {batch_idx}")
-                '''
                 if rpc_distributed.global_communicator.current_t() % self.model_avg_interval == 0:
                     self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                     rpc_distributed.global_communicator.send_model_param()
-                '''
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 

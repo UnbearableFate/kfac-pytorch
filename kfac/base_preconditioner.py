@@ -364,7 +364,7 @@ class BaseKFACPreconditioner:
                             group=self._assignment.grad_worker_group(name),
                         )
                 self._tdc.flush_allreduce_buckets()
-        """
+
         # Compute Preconditioned Gradients
         if rpc_dist.global_communicator is not None:
             ok = rpc_dist.global_communicator.compute_preconditioned_gradients(self.damping)
@@ -388,7 +388,7 @@ class BaseKFACPreconditioner:
         # Update gradients in-place
         for _, layer in reversed(list(self._layers.values())):
             layer.update_grad(scale=scale)
-        """
+
         self._steps += 1
         self._mini_steps = defaultdict(int)
 
