@@ -85,6 +85,7 @@ class BaseKFACPreconditioner:
                 (default: None).
             loglevel (int): logging level (default: logging.DEBUG).
         """
+        self.is_inverse_computation = False
         if not callable(factor_update_steps) and not 0 < factor_update_steps:
             raise ValueError('factor_update_steps must be > 0')
         if not callable(inv_update_steps) and not 0 < inv_update_steps:
@@ -337,8 +338,10 @@ class BaseKFACPreconditioner:
         # Will be a no-op if bucketing was not used
         self._tdc.flush_allreduce_buckets()
 
+        self.is_inverse_computation = False
         # Compute Inverses
         if self.steps % self.inv_update_steps == 0:
+            self.is_inverse_computation = True
             if rpc_dist.global_communicator is not None:
                 rpc_dist.global_communicator.compute_and_broadcast_inverse(preconditioner=self)
             else:
