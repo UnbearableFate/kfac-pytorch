@@ -1,4 +1,5 @@
 import datetime
+import shutil
 import os
 import argparse
 import torch
@@ -37,6 +38,10 @@ ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 if ompi_world_rank == 0:
     logging.basicConfig(level=logging.NOTSET)
+
+if ompi_world_rank%4 == 0:
+    shutil.copytree("/work/NBB/yu_mingzhe/data","/scr/data",dirs_exist_ok=True)
+
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -54,9 +59,10 @@ if __name__ == '__main__':
     model = CustomMiniMobileNetV3ForCIFAR10(num_classes=10)
     device = torch.device(f"cuda:{ompi_world_rank%4}")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17, update_factors_in_hook=False)
 
-    data_path = DATA_DIR + str(ompi_world_rank%8)
+    data_path = "/scr/data"
+    dist.barrier()
     mgr = GeneralManager(data_dir=data_path, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=13, is_2nd_order=True, epochs=10, device=device,
