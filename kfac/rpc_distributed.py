@@ -160,7 +160,7 @@ class KFacRPCCommunicator:
         self.send_ct = 0
         self.send_max = 15
 
-        self.send_facter_interval = 3
+        self.send_facter_interval = 5
         self.next_send_factor_time = self.send_facter_interval + rank
         self.is_send_factor = False
 
@@ -168,7 +168,7 @@ class KFacRPCCommunicator:
         self.next_send_eigen_time = self.send_eigen_interval + rank
         self.is_send_eigen = False
 
-        self.send_model_param_interval = 7
+        self.send_model_param_interval = 17
         self.next_send_model_param_time = self.send_model_param_interval + rank
         self.is_send_model_param = False
 
@@ -666,6 +666,8 @@ class KFacRPCCommunicator:
             if self.next_send_model_param_time == self.local_timer:
                 self.next_send_model_param_time += 1
             self.is_send_model_param = False
+            return
+        if self.next_send_model_param_time != self.local_timer:
             return
 
         print(f"Rank {self.rank} send model param at {self.local_timer}")
