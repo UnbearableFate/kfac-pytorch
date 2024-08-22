@@ -306,6 +306,14 @@ class ModelAvgRPCCommunicator:
                 continue
             self.send_model_param_to_buffer(target_rank, layer_names=None)
 
+        offset = self.rank - self.rank // 4 * 4
+        for g in range(len(self.send_rank_group)):
+            if g == self.group_id:
+                continue
+            target_rank = self.send_rank_group[g][offset]
+            print(f"send_all_model_param_alg10 {self.rank} to {target_rank}")
+            self.send_model_param_to_buffer(target_rank, layer_names=None)
+
     def average_model_param_from_store(self):
         with torch.no_grad():
             if not model_avg_rpc_communicator.lock.acquire(timeout= 3):

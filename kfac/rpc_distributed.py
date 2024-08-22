@@ -505,7 +505,6 @@ class KFacRPCCommunicator:
 
             # 将每个包发送给不同的目标节点
             for i, target_rank in enumerate(target_ranks):
-                print(f"Sending eigen tensor package{i} size {package_sizes[i]} to {target_rank} from {self.rank}")
                 try:
                     rpc.rpc_async(
                         to=rpc_work_name(target_rank),
