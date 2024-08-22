@@ -393,7 +393,6 @@ class KFacRPCCommunicator:
         self.is_send_eigen = True
         current_t = self.current_t()
         task_set = set()
-        packaged_send_dict = dict()
         for layer_name in self.current_inverse_computation_layers:
             task_set.add(layer_name + "#A")
             #task_set.add(layer_name + "#G")
@@ -486,23 +485,23 @@ class KFacRPCCommunicator:
             eigen_tensor_packages[min_index].append(package)
             package_sizes[min_index] += package_size
 
-        print(f"Package sizes: {package_sizes} ,len of eigen_tensor_packages: {len(eigen_tensor_packages)}")
+        filtered_eigen_tensor_packages = [sublist for sublist in eigen_tensor_packages if sublist]
 
         # 获取目标组并排除自身所在的组
         for grp in range(len(self.send_rank_group)):
             if grp == self.group_id:
                 continue
 
-            target_ranks = self.send_rank_group[grp]
+            target_ranks = random.choices(self.send_rank_group[grp], k=len(filtered_eigen_tensor_packages))
 
             # 将每个包发送给不同的目标节点
             for i, target_rank in enumerate(target_ranks):
-                print(f"Sending eigen tensor package{i} to {target_rank} from {self.rank}")
+                print(f"Sending eigen tensor package{i} size {package_sizes[i]} to {target_rank} from {self.rank}")
                 try:
                     rpc.rpc_async(
                         to=rpc_work_name(target_rank),
                         func=receive_eigen_tensor_package,
-                        args=(self.rank, self.current_t(), eigen_tensor_packages[i])
+                        args=(self.rank, self.current_t(), filtered_eigen_tensor_packages[i])
                     )
                 except Exception as e:
                     print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
