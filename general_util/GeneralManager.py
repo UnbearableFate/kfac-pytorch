@@ -21,12 +21,12 @@ ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 class GeneralManager:
     def __init__(self, data_dir, dataset_name, model, sampler_func = None, train_com_method="ddp", interval=10,
-                 is_2nd_order =True, epochs=100, device=torch.device("cuda:0"), share_file_path=None, timestamp="", log_dir ='',
+                 is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), share_file_path=None, timestamp="", log_dir ='',
                  transform_train=None, transform_test=None,
                  precondtioner=None):
         self.experiment_name_detail = None
         self.writer = None
-        batch_size=64
+        batch_size=batch_size
         rank = dist.get_rank()
         world_size = dist.get_world_size()
         model_name = type(model).__name__

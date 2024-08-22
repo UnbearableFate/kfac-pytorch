@@ -6,7 +6,7 @@ import torch
 
 import kfac
 from general_util.GeneralManager import GeneralManager
-from my_module.mobile_net import CustomMiniMobileNetV3ForCIFAR10
+from my_module.mobile_net import CustomMiniMobileNetV3ForCIFAR10 , CustomMobileNetV3Small
 import torch.distributed as dist
 import logging
 

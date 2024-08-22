@@ -56,15 +56,15 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
 
-    model = MLP(num_hidden_layers=4,hidden_size=32)
+    model = MLP(num_hidden_layers=8,hidden_size=32)
     rank = dist.get_rank()
-    #device = torch.device(f"cuda:{rank%4}")
-    device = torch.device(f"cpu")
+    device = torch.device(f"cuda:{rank%4}")
+    #device = torch.device(f"cpu")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003 ,inv_update_steps=13)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=11, is_2nd_order=True, epochs=1,device=device,
+                         train_com_method='rpc', interval=11, is_2nd_order=True, epochs=1,batch_size=4 ,device=device,
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
 
     mgr.rpc_train_and_test()

@@ -8,12 +8,12 @@ import time
 import torch
 import torch.distributed.rpc as rpc
 import threading
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 import logging
 import kfac.rpc_model_param_avg as model_param_avg_rpc
 import kfac.rpc_task_manager as task_manager
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING ,List
 if TYPE_CHECKING:
     from kfac.layers.eigen import KFACEigenLayer,KFACBaseLayer
     from kfac.assignment import KAISAAssignment
@@ -154,12 +154,27 @@ class KfacRPCLayer:
                 self.kfac_layer.dg = self.dg.clone()
                 self.kfac_layer.da = self.da.clone()
 
+def create_groups(world_size, rank, local_device_num = 4)-> Tuple[List[List[int]], int]:
+    send_rank_group = []
+    rank_group_number = -1
+
+    for i in range(0, world_size, local_device_num):
+        group = list(range(i, min(i + local_device_num, world_size)))
+
+        if rank in group:
+            group.remove(rank)
+            rank_group_number = len(send_rank_group)
+
+        send_rank_group.append(group)
+
+    return send_rank_group, rank_group_number
+
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
+        self.send_rank_group, self.group_id= create_groups(world_size,rank)
         self.local_timer = 0
         self.send_ct = 0
         self.send_max = 15
-
         self.send_facter_interval = 5
         self.next_send_factor_time = self.send_facter_interval + rank
         self.is_send_factor = False
@@ -185,13 +200,13 @@ class KFacRPCCommunicator:
         self.io_layers = None
 
         options = rpc.TensorPipeRpcBackendOptions(
-            num_worker_threads=24,
+            num_worker_threads=16,
             init_method=f"file://{share_file_path}/rpc_share{timestamp}",
             rpc_timeout=30,
         )
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
-                num_worker_threads=24,
+                num_worker_threads=32,
                 init_method=f"file://{share_file_path}/rpc_share{timestamp}",
                 rpc_timeout=30,
                 device_maps=local_full_connection_device_map(world_size,rank)
@@ -357,7 +372,6 @@ class KFacRPCCommunicator:
 
     def compute_and_broadcast_inverse(self, preconditioner: 'BaseKFACPreconditioner'):
         if self.is_send_factor:
-            print(f"Rank {self.rank} jump invers because sending factor at {self.local_timer}")
             self.next_send_factor_time += self.send_facter_interval
             if (self.next_send_factor_time == self.next_send_eigen_time
                 or self.next_send_factor_time == self.next_send_model_param_time):
@@ -369,7 +383,6 @@ class KFacRPCCommunicator:
 
         if self.next_send_eigen_time != self.local_timer:
             return
-        print(f"Rank {self.rank} start inverse computation at {self.local_timer}")
         self.is_send_eigen = True
         current_t = self.current_t()
         task_set = set()
@@ -399,17 +412,34 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
+        self.package_send_eigen_tensor()
 
         self.next_send_eigen_time += self.send_eigen_interval
         if (self.next_send_eigen_time == self.next_send_factor_time or
             self.next_send_eigen_time == self.next_send_model_param_time):
             self.next_send_eigen_time += max(self.next_send_factor_time,self.next_send_model_param_time)+1
 
-    def package_send_eigen_tensor(self,packaged_send_dict ,layer_name, factor_type):
-        if factor_type == "A":
-            return self.rpc_layers[layer_name].qa, self.rpc_layers[layer_name].da
-        elif factor_type == "G":
-            return self.rpc_layers[layer_name].qg, self.rpc_layers[layer_name].dg, self.rpc_layers[layer_name].dgda
+    def package_send_eigen_tensor(self):
+        eigen_tensor_package = dict()
+        for layer_name in self.current_inverse_computation_layers:
+            rpc_layer = self.rpc_layers[layer_name]
+            eigen_tensor_package[layer_name] = {"A": (rpc_layer.qa, rpc_layer.da),
+                                                "G": (rpc_layer.qg, rpc_layer.dg, rpc_layer.dgda)}
+
+        for grp in range(len(self.send_rank_group)):
+            if grp == self.group_id:
+                continue
+            target_rank = random.choice(self.send_rank_group[grp])
+
+            try:
+                rpc.rpc_async(
+                    to=rpc_work_name(target_rank),
+                    func=receive_eigen_tensor_package,
+                    args=(self.rank,self.current_t(), eigen_tensor_package)
+                )
+            except Exception as e:
+                print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
+
 
 
     def compute_preconditioned_gradients(self,damping):
@@ -560,8 +590,7 @@ class KFacRPCCommunicator:
         t= self.current_t()
         self.rpc_layers[layer_name].update_local_eigen_a(qa.clone(), da.clone,t)
 
-        start_rank = (self.rank // 4) * 4
-        for target_rank in range(start_rank ,start_rank + 4):
+        for target_rank in self.send_rank_group[self.group_id]:
             if target_rank == self.rank:
                 continue
             try :
@@ -592,8 +621,7 @@ class KFacRPCCommunicator:
         else:
             self.rpc_layers[layer_name].update_local_eigen_g(qg.clone(), dg.clone(), dadg, t)
 
-        start_rank = (self.rank // 4) * 4
-        for target_rank in range(start_rank, start_rank+4):
+        for target_rank in self.send_rank_group[self.group_id]:
             if target_rank == self.rank:
                 continue
             try:
@@ -662,7 +690,6 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.is_send_factor or self.is_send_eigen:
-            print(f"Rank {self.rank} jump send model param because sending factor at {self.local_timer}")
             if self.next_send_model_param_time == self.local_timer:
                 self.next_send_model_param_time += 1
             self.is_send_model_param = False
@@ -671,7 +698,6 @@ class KFacRPCCommunicator:
         if self.next_send_model_param_time != self.local_timer:
             return
 
-        print(f"Rank {self.rank} send model param at {self.local_timer}")
         self.model_avg_rpc.send_all_model_param_alg09()
         self.is_send_model_param = True
 
@@ -778,6 +804,32 @@ def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, t):
         return
     global_communicator.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
     global_communicator.update_node_iter(from_rank, t)
+
+def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
+    global global_communicator
+    global_communicator.update_node_iter(from_rank, t)
+    for layer_name, eigen_tensor in eigen_tensor_package.items():
+        qa, da = eigen_tensor["A"]
+        qg, dg, dgda = eigen_tensor["G"]
+        global_communicator.rpc_layers[layer_name].update_local_eigen_a(qa, da, t)
+        global_communicator.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dgda, t)
+    print(f"Rank {global_communicator.rank} receive eigen tensor package from {from_rank} at {t}")
+
+    if from_rank in global_communicator.send_rank_group[global_communicator.group_id]:
+        return # broaddcast from same group
+
+    for target_rank in global_communicator.send_rank_group[global_communicator.group_id]:
+        if target_rank == global_communicator.rank:
+            continue
+        try:
+            rpc.rpc_async(
+                to=rpc_work_name(target_rank),
+                func=receive_eigen_tensor_package,
+                args=(global_communicator.rank, t, eigen_tensor_package)
+            )
+        except Exception as e:
+            print(f"Failed to send eigen tensor to {target_rank} from {global_communicator.rank}: {e}")
+        print(f"Rank {global_communicator.rank} resend eigen tensor package to {target_rank} at {t}")
 
 def recv_rpc_test_result(correct_ct, total_ct, epoch):
     global global_communicator
