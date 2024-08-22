@@ -151,15 +151,15 @@ class KfacRPCLayer:
         assert self.recv_handled_a_version >=0 and self.recv_handled_g_version >= 0
         if self.last_load_handled_a_version < self.recv_handled_a_version:
             with self.qa_lock:
-                self.kfac_layer.qa = self.qa.clone()
-                self.kfac_layer.qg = self.qg.clone()
+                self.kfac_layer.qa = self.qa
+                self.kfac_layer.qg = self.qg
         if self.last_load_handled_g_version < self.recv_handled_g_version:
             with self.qg_lock:
                 if self.prediv_eigenvalues:
-                    self.kfac_layer.dgda = self.dgda.clone()
+                    self.kfac_layer.dgda = self.dgda
                 else:
-                    self.kfac_layer.dg = self.dg.clone()
-                    self.kfac_layer.da = self.da.clone()
+                    self.kfac_layer.dg = self.dg
+                    self.kfac_layer.da = self.da
 
 def create_groups(world_size, rank, local_device_num = 4)-> Tuple[List[List[int]], int]:
     send_rank_group = []
@@ -410,10 +410,12 @@ class KFacRPCCommunicator:
                 kfac_layer = self.rpc_layers[layer_name].kfac_layer
                 self.load_factor(kfac_layer=kfac_layer, factor_type=factor_type)
                 if factor_type == "A":
-                    kfac_layer.compute_a_inv(damping=preconditioner.damping)
+                    with self.rpc_layers[layer_name].qa_lock:
+                        kfac_layer.compute_a_inv(damping=preconditioner.damping)
                     self.broadcast_kfac_eigen_tensor_a(layer_name=layer_name, qa=kfac_layer.qa, da=kfac_layer.da)
                 elif factor_type == "G":
-                    kfac_layer.compute_g_inv(damping=preconditioner.damping)
+                    with self.rpc_layers[layer_name].qg_lock:
+                        kfac_layer.compute_g_inv(damping=preconditioner.damping)
                     self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name, qg=kfac_layer.qg, dg=kfac_layer.dg,
                                                 dadg=kfac_layer.dgda)
                 task_set.remove(ready_task_name)
@@ -449,10 +451,13 @@ class KFacRPCCommunicator:
 
     def package_send_eigen_tensor_balance(self):
         # 初始化空的包列表
-        eigen_tensor_packages = [[] for _ in range(len(self.send_rank_group[self.group_id]))]
+        eigen_tensor_packages = [[] for _ in range(4)]
         package_sizes = [0] * len(eigen_tensor_packages)  # 初始化每个包的总大小
 
         def calculate_tensor_size(tensor):
+            if not isinstance(tensor, torch.Tensor):
+                print(f"tensor is not a tensor: {tensor} type {type(tensor)}")
+                raise ValueError("tensor is not a tensor")
             if tensor is None:
                 return 0
             return tensor.numel()  # 返回tensor的元素数量，可以根据需要改成字节数 tensor.element_size() * tensor.numel()
@@ -481,6 +486,8 @@ class KFacRPCCommunicator:
             eigen_tensor_packages[min_index].append(package)
             package_sizes[min_index] += package_size
 
+        print(f"Package sizes: {package_sizes} ,len of eigen_tensor_packages: {len(eigen_tensor_packages)}")
+
         # 获取目标组并排除自身所在的组
         for grp in range(len(self.send_rank_group)):
             if grp == self.group_id:
@@ -490,6 +497,7 @@ class KFacRPCCommunicator:
 
             # 将每个包发送给不同的目标节点
             for i, target_rank in enumerate(target_ranks):
+                print(f"Sending eigen tensor package{i} to {target_rank} from {self.rank}")
                 try:
                     rpc.rpc_async(
                         to=rpc_work_name(target_rank),
@@ -647,7 +655,7 @@ class KFacRPCCommunicator:
                 'has not computed inv yet.',
             )
         t= self.current_t()
-        self.rpc_layers[layer_name].update_local_eigen_a(qa.clone(), da.clone,t)
+        self.rpc_layers[layer_name].update_local_eigen_a(qa, da,t)
 
         for target_rank in self.send_rank_group[self.group_id]:
             if target_rank == self.rank:
@@ -676,9 +684,9 @@ class KFacRPCCommunicator:
             )
 
         if self.rpc_layers[layer_name].prediv_eigenvalues:
-            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg.clone(), t)
+            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
         else:
-            self.rpc_layers[layer_name].update_local_eigen_g(qg.clone(), dg.clone(), dadg, t)
+            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
 
         for target_rank in self.send_rank_group[self.group_id]:
             if target_rank == self.rank:
