@@ -56,16 +56,16 @@ if __name__ == '__main__':
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
-    model = CustomMiniMobileNetV3ForCIFAR10(num_classes=10)
+    model = CustomMobileNetV3Small(num_classes=10)
     device = torch.device(f"cuda:{ompi_world_rank%4}")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17, update_factors_in_hook=False)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17, update_factors_in_hook=True)
 
     data_path = "/scr/data"
     dist.barrier()
     mgr = GeneralManager(data_dir=data_path, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=13, is_2nd_order=True, epochs=10, device=device,
+                         train_com_method='rpc', interval=13, is_2nd_order=True, epochs=20, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
                          transform_train=None, transform_test=None)
 
