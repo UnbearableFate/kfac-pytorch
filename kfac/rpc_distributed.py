@@ -110,6 +110,9 @@ class KfacRPCLayer:
         self.ahead_weight_param = 1
         self.name = name
 
+        self.qa_lock = threading.Lock()
+        self.qg_lock = threading.Lock()
+
     def reassign_inverse_workers(self, a_handler, g_handler):
         self.assigned_worker['A'] = a_handler
         self.assigned_worker['G'] = g_handler
@@ -126,17 +129,19 @@ class KfacRPCLayer:
     def update_local_eigen_a(self, qa, da, t):
         if t <= self.recv_handled_a_version :
             return # outdated
-        self.qa = qa
-        self.da = da
-        self.recv_handled_a_version = t
+        with self.qa_lock:
+            self.qa = qa
+            self.da = da
+            self.recv_handled_a_version = t
 
     def update_local_eigen_g(self, qg, dg, dgda, t):
         if t <= self.recv_handled_g_version :
             return # outdated
-        self.qg = qg
-        self.dg = dg
-        self.dgda = dgda
-        self.recv_handled_g_version = t
+        with self.qg_lock:
+            self.qg = qg
+            self.dg = dg
+            self.dgda = dgda
+            self.recv_handled_g_version = t
 
     def clear_count_dict(self,local_t):
         self.factor_recv_ct : Dict[str:Dict[int, int]] = {"A" : {}, "G": {} }
@@ -145,14 +150,16 @@ class KfacRPCLayer:
         assert self.name == self.kfac_layer.name
         assert self.recv_handled_a_version >=0 and self.recv_handled_g_version >= 0
         if self.last_load_handled_a_version < self.recv_handled_a_version:
-            self.kfac_layer.qa = self.qa.clone()
-            self.kfac_layer.qg = self.qg.clone()
+            with self.qa_lock:
+                self.kfac_layer.qa = self.qa.clone()
+                self.kfac_layer.qg = self.qg.clone()
         if self.last_load_handled_g_version < self.recv_handled_g_version:
-            if self.prediv_eigenvalues:
-                self.kfac_layer.dgda = self.dgda.clone()
-            else:
-                self.kfac_layer.dg = self.dg.clone()
-                self.kfac_layer.da = self.da.clone()
+            with self.qg_lock:
+                if self.prediv_eigenvalues:
+                    self.kfac_layer.dgda = self.dgda.clone()
+                else:
+                    self.kfac_layer.dg = self.dg.clone()
+                    self.kfac_layer.da = self.da.clone()
 
 def create_groups(world_size, rank, local_device_num = 4)-> Tuple[List[List[int]], int]:
     send_rank_group = []
@@ -412,7 +419,7 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
-        self.package_send_eigen_tensor()
+        self.package_send_eigen_tensor_balance()
 
         self.next_send_eigen_time += self.send_eigen_interval
         if (self.next_send_eigen_time == self.next_send_factor_time or
@@ -440,7 +447,57 @@ class KFacRPCCommunicator:
             except Exception as e:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
 
+    def package_send_eigen_tensor_balance(self):
+        # 初始化空的包列表
+        eigen_tensor_packages = [[] for _ in range(len(self.send_rank_group[self.group_id]))]
+        package_sizes = [0] * len(eigen_tensor_packages)  # 初始化每个包的总大小
 
+        def calculate_tensor_size(tensor):
+            if tensor is None:
+                return 0
+            return tensor.numel()  # 返回tensor的元素数量，可以根据需要改成字节数 tensor.element_size() * tensor.numel()
+
+        # 逐层放入包中，使用贪心算法
+        for layer_name in self.current_inverse_computation_layers:
+            rpc_layer = self.rpc_layers[layer_name]
+            package = {
+                "layer_name": layer_name,
+                "A": (rpc_layer.qa, rpc_layer.da),
+                "G": (rpc_layer.qg, rpc_layer.dg, rpc_layer.dgda)
+            }
+
+            # 计算这个layer的总大小
+            package_size = (
+                    calculate_tensor_size(rpc_layer.qa) +
+                    calculate_tensor_size(rpc_layer.da) +
+                    calculate_tensor_size(rpc_layer.qg) +
+                    calculate_tensor_size(rpc_layer.dgda)
+            )
+
+            # 找到当前最小的包
+            min_index = package_sizes.index(min(package_sizes))
+
+            # 将当前layer放入最小的包中
+            eigen_tensor_packages[min_index].append(package)
+            package_sizes[min_index] += package_size
+
+        # 获取目标组并排除自身所在的组
+        for grp in range(len(self.send_rank_group)):
+            if grp == self.group_id:
+                continue
+
+            target_ranks = self.send_rank_group[grp]
+
+            # 将每个包发送给不同的目标节点
+            for i, target_rank in enumerate(target_ranks):
+                try:
+                    rpc.rpc_async(
+                        to=rpc_work_name(target_rank),
+                        func=receive_eigen_tensor_package,
+                        args=(self.rank, self.current_t(), eigen_tensor_packages[i])
+                    )
+                except Exception as e:
+                    print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
 
     def compute_preconditioned_gradients(self,damping):
         current_t = self.current_t()
@@ -810,7 +867,8 @@ def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, t):
 def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
     global global_communicator
     global_communicator.update_node_iter(from_rank, t)
-    for layer_name, eigen_tensor in eigen_tensor_package.items():
+    for eigen_tensor in eigen_tensor_package:
+        layer_name = eigen_tensor["layer_name"]
         qa, da = eigen_tensor["A"]
         qg, dg, dgda = eigen_tensor["G"]
         global_communicator.rpc_layers[layer_name].update_local_eigen_a(qa, da, t)
