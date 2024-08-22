@@ -178,6 +178,7 @@ def create_groups(world_size, rank, local_device_num = 4)-> Tuple[List[List[int]
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
+        self.eigen_tensor_packages = None
         self.send_rank_group, self.group_id= create_groups(world_size,rank)
         self.local_timer = 0
         self.send_ct = 0
@@ -449,8 +450,7 @@ class KFacRPCCommunicator:
             except Exception as e:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
 
-    def package_send_eigen_tensor_balance(self):
-        # 初始化空的包列表
+    def compute_layer_split(self):
         eigen_tensor_packages = [[] for _ in range(4)]
         package_sizes = [0] * len(eigen_tensor_packages)  # 初始化每个包的总大小
 
@@ -464,7 +464,8 @@ class KFacRPCCommunicator:
 
         send_layers = []
         for layer_name in self.rpc_layers.keys():
-            if (self.rpc_layers[layer_name].assigned_worker['A'] == self.rank or self.rpc_layers[layer_name].assigned_worker['G'] == self.rank
+            if (self.rpc_layers[layer_name].assigned_worker['A'] == self.rank or
+                    self.rpc_layers[layer_name].assigned_worker['G'] == self.rank
                     or self.rpc_layers[layer_name].assigned_worker['A'] in self.send_rank_group[self.group_id]
                     or self.rpc_layers[layer_name].assigned_worker['G'] in self.send_rank_group[self.group_id]):
                 if self.is_eigen_tensor_ready(layer_name):
@@ -473,11 +474,6 @@ class KFacRPCCommunicator:
         # 逐层放入包中，使用贪心算法
         for layer_name in send_layers:
             rpc_layer = self.rpc_layers[layer_name]
-            package = {
-                "layer_name": layer_name,
-                "A": (rpc_layer.qa, rpc_layer.da),
-                "G": (rpc_layer.qg, rpc_layer.dg, rpc_layer.dgda)
-            }
 
             # 计算这个layer的总大小
             package_size = (
@@ -491,10 +487,27 @@ class KFacRPCCommunicator:
             min_index = package_sizes.index(min(package_sizes))
 
             # 将当前layer放入最小的包中
-            eigen_tensor_packages[min_index].append(package)
+            eigen_tensor_packages[min_index].append(layer_name)
             package_sizes[min_index] += package_size
 
         filtered_eigen_tensor_packages = [sublist for sublist in eigen_tensor_packages if sublist]
+
+        self.eigen_tensor_packages = filtered_eigen_tensor_packages
+
+    def package_send_eigen_tensor_balance(self):
+        if self.eigen_tensor_packages is None:
+            self.compute_layer_split()
+        filtered_eigen_tensor_packages = []
+        for tensor_package in self.eigen_tensor_packages:
+            package = []
+            for layer_name in tensor_package:
+                rpc_layer = self.rpc_layers[layer_name]
+                package.append({
+                    "layer_name": layer_name,
+                    "A": (rpc_layer.qa, rpc_layer.da),
+                    "G": (rpc_layer.qg, rpc_layer.dg, rpc_layer.dgda)
+                })
+            filtered_eigen_tensor_packages.append(package)
 
         # 获取目标组并排除自身所在的组
         for grp in range(len(self.send_rank_group)):
@@ -598,6 +611,7 @@ class KFacRPCCommunicator:
         self.participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
         self.update_assignment_callback = None
         self.task_reassign_rpc.running_time = 0
+        self.eigen_tensor_packages = None
 
     def get_world_size(self):
         return len(self.node_states.keys())

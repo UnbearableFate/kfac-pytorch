@@ -35,6 +35,7 @@ class LayerParameterStore:
         self.weight = None
         self.bias = None
         self.loss_value = 0
+        self.size = 0
 
     def set_model_content(self,weight, bias, loss_value ):
         self.weight = weight
@@ -73,6 +74,7 @@ class ModelAvgRPCCommunicator:
     iter_weight = 0.7
 
     def __init__(self, rank, model,rpc_communicator: 'KFacRPCCommunicator'):
+
         self.send_rank_group = rpc_communicator.send_rank_group
         self.group_id = rpc_communicator.group_id
         self.world_size = rpc_communicator.get_world_size
@@ -80,6 +82,7 @@ class ModelAvgRPCCommunicator:
         self.rank = rank
         self.model = model
         self.io_layers = self.register_layer(model)
+        self.model_send_packages = self.compute_layer_split()
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
         self.current_t = self.rpc_communicator.current_t
         self.start_target = (self.rank + 1 ) % self.world_size()
@@ -104,6 +107,34 @@ class ModelAvgRPCCommunicator:
         self.index = 1
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
+
+    def compute_layer_split(self):
+        eigen_tensor_packages = [[] for _ in range(4)]
+        package_sizes = [0] * len(eigen_tensor_packages)  # 初始化每个包的总大小
+
+        def calculate_tensor_size(tensor):
+            if tensor is None:
+                return 0
+            return tensor.numel()  # 返回tensor的元素数量，可以根据需要改成字节数 tensor.element_size() * tensor.numel()
+
+        # 逐层放入包中，使用贪心算法
+        for layer_name ,layer in self.io_layers.items():
+            # 计算这个layer的总大小
+            package_size = (
+                    calculate_tensor_size(layer.weight) +
+                    calculate_tensor_size(layer.bias)
+            )
+
+            # 找到当前最小的包
+            min_index = package_sizes.index(min(package_sizes))
+
+            # 将当前layer放入最小的包中
+            eigen_tensor_packages[min_index].append(layer_name)
+            package_sizes[min_index] += package_size
+
+        filtered_eigen_tensor_packages = [sublist for sublist in eigen_tensor_packages if sublist]
+
+        return filtered_eigen_tensor_packages
 
     def set_loss(self, loss_value):
         self.loss_value = loss_value
@@ -307,12 +338,14 @@ class ModelAvgRPCCommunicator:
             self.send_model_param_to_buffer(target_rank, layer_names=None)
 
         offset = self.rank - self.rank // 4 * 4
+        if offset >= len(self.model_send_packages):
+            return
         for g in range(len(self.send_rank_group)):
             if g == self.group_id:
                 continue
             target_rank = self.send_rank_group[g][offset]
-            print(f"send_all_model_param_alg10 {self.rank} to {target_rank}")
-            self.send_model_param_to_buffer(target_rank, layer_names=None)
+            print(f"send_all_model_param_alg10 part {offset} {self.rank} to {target_rank}")
+            self.send_model_param_to_buffer(target_rank, layer_names=self.model_send_packages[offset])
 
     def average_model_param_from_store(self):
         with torch.no_grad():
