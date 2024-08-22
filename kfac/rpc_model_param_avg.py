@@ -72,7 +72,9 @@ class ModelAvgRPCCommunicator:
     loss_weight = 1.8
     iter_weight = 0.7
 
-    def __init__(self,  rank, model,rpc_communicator: 'KFacRPCCommunicator', style = 'buffer'):
+    def __init__(self, rank, model,rpc_communicator: 'KFacRPCCommunicator'):
+        self.send_rank_group = rpc_communicator.send_rank_group
+        self.group_id = rpc_communicator.group_id
         self.world_size = rpc_communicator.get_world_size
         self.origin_world_size = rpc_communicator.origin_world_size
         self.rank = rank
@@ -92,11 +94,12 @@ class ModelAvgRPCCommunicator:
         self.neighbor_weight_store : Dict[int, float] = dict()
         #self.init_neighbor_model_store()
 
-        self.buffer_size = 1
+        self.buffer_size = 3
         self.model_recv_buffer :List[ModelStore]= self.creat_model_recv_buffer(self.buffer_size)
+        self.is_aggregated = [False for _ in range(self.buffer_size)]
 
-        if style == 'buffer':
-            self.send_func = self.send_model_param_to_buffer
+        #if style == 'buffer':
+        #    self.send_func = self.send_model_param_to_buffer
 
         self.index = 1
         global model_avg_rpc_communicator
@@ -121,7 +124,7 @@ class ModelAvgRPCCommunicator:
         return io_layers
 
     def init_neighbor_model_store(self):
-        for node in self.rpc_communicator.get_health_nodes_rank_list():
+        for node in self.send_rank_group[self.group_id]:
             if node == self.rank:
                 continue
             self.neighbor_model_store[node] = dict()
@@ -297,6 +300,12 @@ class ModelAvgRPCCommunicator:
         self.send_model_param_to_buffer(target, layer_names=layers)
         self.aggregate_model_from_buff()
 
+    def send_all_model_param_alg10(self):
+        for target_rank in self.send_rank_group[self.group_id]:
+            if target_rank == self.rank:
+                continue
+            self.send_model_param_to_buffer(target_rank, layer_names=None)
+
     def average_model_param_from_store(self):
         with torch.no_grad():
             if not model_avg_rpc_communicator.lock.acquire(timeout= 3):
@@ -320,7 +329,7 @@ class ModelAvgRPCCommunicator:
                 bias /= self.origin_world_size
                 layer.weight = weight
                 layer.bias = bias
-            model_avg_rpc_communicator.lock.release()
+            #model_avg_rpc_communicator.lock.release()
 
     def average_model_param_from_store2(self):
         if self.loss_value == 0:
@@ -363,9 +372,14 @@ class ModelAvgRPCCommunicator:
             model_avg_rpc_communicator.lock.release()
 
     def aggregate_model_from_buff(self):
-        p = 1/ (self.buffer_size+1)
+        aggregate_index_list = []
+        for i in range(self.buffer_size):
+            if not self.is_aggregated[i] and self.model_recv_buffer[i].loss_value != 0:
+                aggregate_index_list.append(i)
+        p = 1/ (len(aggregate_index_list)+1)
         temp = ModelStore(self.io_layers)
-        for buf_model in self.model_recv_buffer:
+        for index in aggregate_index_list:
+            buf_model = self.model_recv_buffer[index]
             if not buf_model.lock.acquire(timeout= 3):
                 raise Exception("lock acquire failed at aggregate_model_from_buff")
             for layer_name, layer in buf_model.layer_store.items():
@@ -376,6 +390,7 @@ class ModelAvgRPCCommunicator:
             if buf_model.resurrection_flag:
                 temp.resurrection_flag = True
             buf_model.resurrection_flag = False
+            self.is_aggregated[index] = True
             buf_model.lock.release()
         temp.term = int(temp.term / self.buffer_size)
 
@@ -450,7 +465,14 @@ def receive_model_param_dict_to_neighbor_store(from_rank, from_rank_iter, from_l
 def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, data, speed = 0, resurrection_flag = False):
     global model_avg_rpc_communicator
     model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter, speed=speed)
-    indices = list(range(model_avg_rpc_communicator.buffer_size))  # 创建包含范围内所有数值的列表
+    selected_list =[]
+    for i in range(model_avg_rpc_communicator.buffer_size):
+        if model_avg_rpc_communicator.is_aggregated[i]:
+            selected_list.append(i)
+    if len(selected_list) > 0:
+        indices = selected_list  # 创建包含范围内所有数值的列表
+    else:
+        indices = list(range(model_avg_rpc_communicator.buffer_size))  # 创建包含范围内所有数值的列表
     random.shuffle(indices)
     for i in indices:
         if model_avg_rpc_communicator.model_recv_buffer[i].lock.acquire(blocking=False):
@@ -463,7 +485,21 @@ def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, dat
             finally:
                 # 释放锁
                 model_avg_rpc_communicator.model_recv_buffer[i].lock.release()
+                model_avg_rpc_communicator.is_aggregated[i] = False
                 break
         else:
             continue
-
+    i = indices[0]
+    if model_avg_rpc_communicator.model_recv_buffer[i].lock.acquire(timeout=0.5):
+        try:
+            for layer_name, model_weight, model_bias in data:
+                model_avg_rpc_communicator.model_recv_buffer[i].layer_store[layer_name].aggregate_model_content_by_loss(
+                    model_weight, model_bias, from_loss)
+                model_avg_rpc_communicator.model_recv_buffer[i].term = max(
+                    model_avg_rpc_communicator.model_recv_buffer[i].term, from_rank_iter)
+                if resurrection_flag:
+                    model_avg_rpc_communicator.model_recv_buffer[i].resurrection_flag = True
+        finally:
+            # 释放锁
+            model_avg_rpc_communicator.model_recv_buffer[i].lock.release()
+            model_avg_rpc_communicator.is_aggregated[i] = False

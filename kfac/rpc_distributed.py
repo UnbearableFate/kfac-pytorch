@@ -213,7 +213,7 @@ class KFacRPCCommunicator:
         )
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
-                num_worker_threads=32,
+                num_worker_threads=20,
                 init_method=f"file://{share_file_path}/rpc_share{timestamp}",
                 rpc_timeout=30,
                 device_maps=local_full_connection_device_map(world_size,rank)
@@ -773,7 +773,7 @@ class KFacRPCCommunicator:
         if self.next_send_model_param_time != self.local_timer:
             return
 
-        self.model_avg_rpc.send_all_model_param_alg09()
+        self.model_avg_rpc.send_all_model_param_alg10()
         self.is_send_model_param = True
 
         self.next_send_model_param_time += self.send_model_param_interval
