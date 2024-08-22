@@ -788,6 +788,8 @@ class KFacRPCCommunicator:
 
         self.model_avg_rpc.send_all_model_param_alg10()
         self.is_send_model_param = True
+        #if (self.local_timer // self.send_model_param_interval)% 2 == 0:
+        #    self.model_avg_rpc.send_all_model_param_alg10_2()
 
         self.next_send_model_param_time += self.send_model_param_interval
         if (self.next_send_model_param_time == self.next_send_factor_time

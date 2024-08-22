@@ -337,6 +337,9 @@ class ModelAvgRPCCommunicator:
                 continue
             self.send_model_param_to_buffer(target_rank, layer_names=None)
 
+        self.aggregate_model_from_buff()
+
+    def send_all_model_param_alg10_2(self):
         offset = self.rank - self.rank // 4 * 4
         if offset < len(self.model_send_packages):
             self.index = (self.index + 1) % len(self.send_rank_group)
@@ -347,18 +350,6 @@ class ModelAvgRPCCommunicator:
             print(f"send_all_model_param_alg10 part {offset} {self.rank} to {target_rank}")
             layers = random.choices(list(self.io_layers.keys()), k=1)
             self.send_model_param_to_buffer(target_rank, layer_names=layers)
-
-        """
-        for g in range(len(self.send_rank_group)):
-            if g == self.group_id:
-                continue
-            target_rank = self.send_rank_group[g][offset]
-            print(f"send_all_model_param_alg10 part {offset} {self.rank} to {target_rank}")
-            #self.send_model_param_to_buffer(target_rank, layer_names=self.model_send_packages[offset])
-            layers = random.choices(list(self.io_layers.keys()), k=1)
-            self.send_model_param_to_buffer(target_rank, layer_names=layers)
-        """
-        self.aggregate_model_from_buff()
 
     def average_model_param_from_store(self):
         with torch.no_grad():
