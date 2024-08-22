@@ -420,7 +420,8 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
-        self.package_send_eigen_tensor_balance()
+        if self.rank % 4 == 0:
+            self.package_send_eigen_tensor_balance()
 
         self.next_send_eigen_time += self.send_eigen_interval
         if (self.next_send_eigen_time == self.next_send_factor_time or
@@ -461,8 +462,16 @@ class KFacRPCCommunicator:
                 return 0
             return tensor.numel()  # 返回tensor的元素数量，可以根据需要改成字节数 tensor.element_size() * tensor.numel()
 
+        send_layers = []
+        for layer_name in self.rpc_layers.keys():
+            if (self.rpc_layers[layer_name].assigned_worker['A'] == self.rank or self.rpc_layers[layer_name].assigned_worker['G'] == self.rank
+                    or self.rpc_layers[layer_name].assigned_worker['A'] in self.send_rank_group[self.group_id]
+                    or self.rpc_layers[layer_name].assigned_worker['G'] in self.send_rank_group[self.group_id]):
+                if self.is_eigen_tensor_ready(layer_name):
+                    send_layers.append(layer_name)
+
         # 逐层放入包中，使用贪心算法
-        for layer_name in self.current_inverse_computation_layers:
+        for layer_name in send_layers:
             rpc_layer = self.rpc_layers[layer_name]
             package = {
                 "layer_name": layer_name,
@@ -872,6 +881,8 @@ def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, t):
     global_communicator.update_node_iter(from_rank, t)
 
 def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
+    if len(eigen_tensor_package) == 0:
+        return
     global global_communicator
     global_communicator.update_node_iter(from_rank, t)
     for eigen_tensor in eigen_tensor_package:
@@ -888,7 +899,7 @@ def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
         if target_rank == global_communicator.rank:
             continue
         try:
-            rpc.rpc_async(
+            rpc.rpc_sync(
                 to=rpc_work_name(target_rank),
                 func=receive_eigen_tensor_package,
                 args=(global_communicator.rank, t, eigen_tensor_package)
