@@ -569,6 +569,8 @@ class KFacRPCCommunicator:
             return
         else:
             self.is_send_factor = True
+        if target not in self.send_rank_group[self.group_id]:
+            return
         try:
             rpc.rpc_async(
                 to=rpc_work_name(target),
@@ -813,7 +815,6 @@ def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
         qg, dg, dgda = eigen_tensor["G"]
         global_communicator.rpc_layers[layer_name].update_local_eigen_a(qa, da, t)
         global_communicator.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dgda, t)
-    print(f"Rank {global_communicator.rank} receive eigen tensor package from {from_rank} at {t}")
 
     if from_rank in global_communicator.send_rank_group[global_communicator.group_id]:
         return # broaddcast from same group
@@ -829,7 +830,6 @@ def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
             )
         except Exception as e:
             print(f"Failed to send eigen tensor to {target_rank} from {global_communicator.rank}: {e}")
-        print(f"Rank {global_communicator.rank} resend eigen tensor package to {target_rank} at {t}")
 
 def recv_rpc_test_result(correct_ct, total_ct, epoch):
     global global_communicator
