@@ -110,6 +110,9 @@ class KfacRPCLayer:
         self.ahead_weight_param = 1
         self.name = name
 
+        self.eigen_a_lock = threading.Lock()
+        self.eigen_g_lock = threading.Lock()
+
     def reassign_inverse_workers(self, a_handler, g_handler):
         self.assigned_worker['A'] = a_handler
         self.assigned_worker['G'] = g_handler
@@ -126,17 +129,19 @@ class KfacRPCLayer:
     def update_local_eigen_a(self, qa, da, t):
         if t <= self.recv_handled_a_version :
             return # outdated
-        self.qa = qa
-        self.da = da
-        self.recv_handled_a_version = t
+        with self.eigen_a_lock:
+            self.qa = qa
+            self.da = da
+            self.recv_handled_a_version = t
 
     def update_local_eigen_g(self, qg, dg, dgda, t):
         if t <= self.recv_handled_g_version :
             return # outdated
-        self.qg = qg
-        self.dg = dg
-        self.dgda = dgda
-        self.recv_handled_g_version = t
+        with self.eigen_g_lock:
+            self.qg = qg
+            self.dg = dg
+            self.dgda = dgda
+            self.recv_handled_g_version = t
 
     def clear_count_dict(self,local_t):
         self.factor_recv_ct : Dict[str:Dict[int, int]] = {"A" : {}, "G": {} }
@@ -145,14 +150,14 @@ class KfacRPCLayer:
         assert self.name == self.kfac_layer.name
         assert self.recv_handled_a_version >=0 and self.recv_handled_g_version >= 0
         if self.last_load_handled_a_version < self.recv_handled_a_version:
-            self.kfac_layer.qa = self.qa.clone()
-            self.kfac_layer.qg = self.qg.clone()
+            self.kfac_layer.qa = self.qa
+            self.kfac_layer.qg = self.qg
         if self.last_load_handled_g_version < self.recv_handled_g_version:
             if self.prediv_eigenvalues:
-                self.kfac_layer.dgda = self.dgda.clone()
+                self.kfac_layer.dgda = self.dgda
             else:
-                self.kfac_layer.dg = self.dg.clone()
-                self.kfac_layer.da = self.da.clone()
+                self.kfac_layer.dg = self.dg
+                self.kfac_layer.da = self.da
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
@@ -353,10 +358,12 @@ class KFacRPCCommunicator:
                 kfac_layer = self.rpc_layers[layer_name].kfac_layer
                 self.load_factor(kfac_layer=kfac_layer, factor_type=factor_type)
                 if factor_type == "A":
-                    kfac_layer.compute_a_inv(damping=preconditioner.damping)
+                    with self.rpc_layers[layer_name].eigen_a_lock:
+                        kfac_layer.compute_a_inv(damping=preconditioner.damping)
                     self.broadcast_kfac_eigen_tensor_a(layer_name=layer_name, qa=kfac_layer.qa, da=kfac_layer.da)
                 elif factor_type == "G":
-                    kfac_layer.compute_g_inv(damping=preconditioner.damping)
+                    with self.rpc_layers[layer_name].eigen_g_lock:
+                        kfac_layer.compute_g_inv(damping=preconditioner.damping)
                     self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name, qg=kfac_layer.qg, dg=kfac_layer.dg,
                                                 dadg=kfac_layer.dgda)
 
@@ -505,7 +512,7 @@ class KFacRPCCommunicator:
                 'has not computed inv yet.',
             )
         t= self.current_t()
-        self.rpc_layers[layer_name].update_local_eigen_a(qa.clone(), da.clone,t)
+        self.rpc_layers[layer_name].update_local_eigen_a(qa, da,t)
 
         for i in range(self.origin_world_size-1):
             target_rank = (self.rank + i + 1) % self.origin_world_size
@@ -533,9 +540,9 @@ class KFacRPCCommunicator:
             )
 
         if self.rpc_layers[layer_name].prediv_eigenvalues:
-            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg.clone(), t)
+            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
         else:
-            self.rpc_layers[layer_name].update_local_eigen_g(qg.clone(), dg.clone(), dadg, t)
+            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
 
         for i in range(self.origin_world_size-1):
             target_rank = (self.rank + i + 1) % self.origin_world_size
