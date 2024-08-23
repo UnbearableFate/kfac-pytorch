@@ -464,7 +464,10 @@ class BaseKFACPreconditioner:
                 self._update_factors_in_hook
                 and self._mini_steps[name] % self._accumulation_steps == 0
             ):
-                with rpc_dist.global_communicator.rpc_layers[layer.name].factor_a_lock:
+                if rpc_dist.global_communicator is not None:
+                    with rpc_dist.global_communicator.rpc_layers[layer.name].factor_a_lock:
+                        layer.update_a_factor(alpha=self.factor_decay)
+                else:
                     layer.update_a_factor(alpha=self.factor_decay)
                 layer.reduce_a_factor(self._assignment.factor_group(name, 'A'))
 
@@ -487,6 +490,9 @@ class BaseKFACPreconditioner:
                 self._update_factors_in_hook
                 and self._mini_steps[name] % self._accumulation_steps == 0
             ):
-                with rpc_dist.global_communicator.rpc_layers[layer.name].factor_g_lock:
+                if rpc_dist.global_communicator is not None:
+                    with rpc_dist.global_communicator.rpc_layers[layer.name].factor_g_lock:
+                        layer.update_g_factor(alpha=self.factor_decay)
+                else:
                     layer.update_g_factor(alpha=self.factor_decay)
                 layer.reduce_g_factor(self._assignment.factor_group(name, 'G'))

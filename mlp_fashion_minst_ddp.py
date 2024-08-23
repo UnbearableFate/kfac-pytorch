@@ -4,12 +4,14 @@ import argparse
 import torch
 
 import kfac
+from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
-from my_module.mobile_net import CustomMiniMobileNetV3ForCIFAR10 ,CustomMobileNetV3Small
+from my_module.model_split import ModelSplitter
 import torch.distributed as dist
 import logging
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+logging.basicConfig(level=logging.NOTSET)
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -39,6 +41,7 @@ ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 if ompi_world_rank == 0:
     logging.basicConfig(level=logging.NOTSET)
+
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -53,17 +56,18 @@ if __name__ == '__main__':
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
-    model = CustomMobileNetV3Small(num_classes=10)
-    device = torch.device(f"cuda:{ompi_world_rank%4}")
+
+    model = MLP(num_hidden_layers=4,hidden_size=32)
+    rank = dist.get_rank()
+    #device = torch.device(f"cuda:{rank%4}")
+    device = torch.device("cpu")
     model = model.to(device)
     model = DDP(model)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17)
-
-    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003 ,inv_update_steps=13)
+    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
-                         train_com_method='ddp', interval=13, is_2nd_order=True, epochs=80, device=device,
-                         share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
-                         transform_train=None, transform_test=None)
+                         train_com_method='ddp', interval=11, is_2nd_order=True, epochs=1,device=device,
+                         share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
 
     mgr.train_and_test()
     dist.destroy_process_group()
