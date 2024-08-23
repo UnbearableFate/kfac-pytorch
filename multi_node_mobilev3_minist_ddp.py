@@ -6,7 +6,7 @@ import torch
 import kfac
 from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
-from my_module.mobile_net import CustomMiniMobileNetV3Small, CustomMobileNetV3Small
+from my_module.mobile_net import CustomMobileNetV3Small
 from my_module.model_split import ModelSplitter
 from torchvision import transforms
 import logging

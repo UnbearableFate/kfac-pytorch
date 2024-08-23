@@ -8,6 +8,8 @@ from general_util.GeneralManager import GeneralManager
 from my_module.mobile_net import CustomMiniMobileNetV3ForCIFAR10 ,CustomMobileNetV3Small
 import torch.distributed as dist
 import logging
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -54,12 +56,13 @@ if __name__ == '__main__':
     model = CustomMobileNetV3Small(num_classes=10)
     device = torch.device(f"cuda:{ompi_world_rank%4}")
     model = model.to(device)
+    model = DDP(model)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17)
 
     data_path = DATA_DIR + str(ompi_world_rank%8)
     mgr = GeneralManager(data_dir=data_path, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=13, is_2nd_order=True, epochs=80, device=device,
+                         train_com_method='ddp', interval=13, is_2nd_order=True, epochs=80, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
                          transform_train=None, transform_test=None)
 
