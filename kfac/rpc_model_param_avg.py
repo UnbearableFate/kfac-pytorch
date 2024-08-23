@@ -92,7 +92,7 @@ class ModelAvgRPCCommunicator:
         self.neighbor_weight_store : Dict[int, float] = dict()
         #self.init_neighbor_model_store()
 
-        self.buffer_size = 1
+        self.buffer_size = 2
         self.model_recv_buffer :List[ModelStore]= self.creat_model_recv_buffer(self.buffer_size)
         self.is_aggregated = [False for _ in range(self.buffer_size)]
 
@@ -275,6 +275,14 @@ class ModelAvgRPCCommunicator:
             target = (target + 1) % self.origin_world_size
             self.index = (self.index + 1) % self.origin_world_size
         self.send_model_param_to_buffer(target, layer_names=None)
+
+        target = (self.rank + self.index) % self.origin_world_size
+        self.index = (self.index + 1) % self.origin_world_size
+        if target == self.rank:
+            target = (target + 1) % self.origin_world_size
+            self.index = (self.index + 1) % self.origin_world_size
+        self.send_model_param_to_buffer(target, layer_names=None)
+
         self.aggregate_model_from_buff()
 
     def send_all_model_param_alg08(self):
