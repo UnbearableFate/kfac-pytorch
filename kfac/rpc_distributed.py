@@ -112,6 +112,9 @@ class KfacRPCLayer:
 
         self.eigen_a_lock = threading.Lock()
         self.eigen_g_lock = threading.Lock()
+        self.factor_a_lock = threading.Lock()
+        self.factor_g_lock = threading.Lock()
+        self.factor_lock : Dict[str:threading.Lock] = {"A": self.factor_a_lock, "G": self.factor_g_lock}
 
     def reassign_inverse_workers(self, a_handler, g_handler):
         self.assigned_worker['A'] = a_handler
@@ -120,11 +123,13 @@ class KfacRPCLayer:
     def update_local_factor(self, recv_factor, local_t, recv_t, factor_type, world_size = 8):
         self.factor_recv_ct[factor_type] += 1
         if self.factor[factor_type] is None:
-            self.factor[factor_type] = recv_factor
+            with self.factor_lock[factor_type]:
+                self.factor[factor_type] = recv_factor
             return
         sigmoid_param = (recv_t - local_t) / (local_t + 1)
         recv_world_weight = 2 / ((1 + math.exp(-sigmoid_param)) * world_size)
-        self.factor[factor_type] = (1 - recv_world_weight) * self.factor[factor_type] + recv_world_weight * recv_factor
+        with self.factor_lock[factor_type]:
+            self.factor[factor_type] = (1 - recv_world_weight) * self.factor[factor_type] + recv_world_weight * recv_factor
 
     def update_local_eigen_a(self, qa, da, t):
         if t <= self.recv_handled_a_version :
@@ -311,9 +316,11 @@ class KFacRPCCommunicator:
         if self.assigned_worker(kfac_layer.name, factor_type) == self.rank:
             assert self.rpc_layers[kfac_layer.name].factor[factor_type] is not None
             if factor_type == "A":
-                kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
+                with self.rpc_layers[kfac_layer.name].factor_a_lock:
+                    kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"]
             if factor_type == "G":
-                kfac_layer.g_factor = self.rpc_layers[kfac_layer.name].factor["G"].clone().detach()
+                with self.rpc_layers[kfac_layer.name].factor_g_lock:
+                    kfac_layer.g_factor = self.rpc_layers[kfac_layer.name].factor["G"]
         return True
 
     def shutdown(self):
@@ -491,7 +498,7 @@ class KFacRPCCommunicator:
         t = self.current_t()
         if target == self.rank:
             #self.print_rpc_state(f"update local factor {factor_type} of {layer_name} in rank {self.rank}")
-            self.rpc_layers[layer_name].update_local_factor(factor_tensor.clone(), t, t, factor_type, world_size=self.origin_world_size)
+            self.rpc_layers[layer_name].update_local_factor(factor_tensor, t, t, factor_type, world_size=self.origin_world_size)
             return
         try:
             rpc.rpc_async(
