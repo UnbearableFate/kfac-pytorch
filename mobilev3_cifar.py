@@ -5,7 +5,7 @@ import torch
 
 import kfac
 from general_util.GeneralManager import GeneralManager
-from my_module.mobile_net import CustomMiniMobileNetV3ForCIFAR10
+from my_module.mobile_net import CustomMiniMobileNetV3ForCIFAR10 ,CustomMobileNetV3Small
 import torch.distributed as dist
 import logging
 
@@ -51,7 +51,7 @@ if __name__ == '__main__':
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
-    model = CustomMiniMobileNetV3ForCIFAR10(num_classes=10)
+    model = CustomMobileNetV3Small(num_classes=10)
     device = torch.device(f"cuda:{ompi_world_rank%4}")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007, inv_update_steps=17)
