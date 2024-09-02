@@ -140,11 +140,10 @@ dmypy.json
 
 data/
 *.txt
-job_req_torchrun.sh.e*
-job_req_torchrun.sh.o*
 runs*
 .idea
 *.sh.e*
 *.sh.o*
 share_files/
 core*
+runs
