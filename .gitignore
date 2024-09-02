@@ -144,3 +144,4 @@ job_req_torchrun.sh.e*
 job_req_torchrun.sh.o*
 .idea
 runs
+share_files
