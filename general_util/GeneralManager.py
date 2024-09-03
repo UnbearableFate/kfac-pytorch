@@ -117,7 +117,7 @@ class GeneralManager:
         dist.barrier()
 
     def close_all(self):
-        if rpc_distributed.rpc.is_available():
+        if rpc_distributed.global_communicator is not None and rpc_distributed.rpc.is_available():
             self.rpc_communicator.close_rpc()
         if dist.is_initialized():
             dist.destroy_process_group()
