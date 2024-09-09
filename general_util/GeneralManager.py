@@ -236,7 +236,6 @@ class GeneralManager:
                 """
                 #rpc_distributed.global_communicator.print_rpc_state(f"end epoch {epoch} batch {batch_idx}")
                 t.update()
-            self.rpc_communicator.model_avg_rpc.send_all_model_param_alg10_3()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)

@@ -421,34 +421,13 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
-        if self.rank % 4 == 0:
-            self.package_send_eigen_tensor_balance()
+        #if self.rank % 4 == 0:
+        #    self.package_send_eigen_tensor_balance()
 
         self.next_send_eigen_time += self.send_eigen_interval
         if (self.next_send_eigen_time == self.next_send_factor_time or
             self.next_send_eigen_time == self.next_send_model_param_time):
             self.next_send_eigen_time += max(self.next_send_factor_time,self.next_send_model_param_time)+1
-
-    def package_send_eigen_tensor(self):
-        eigen_tensor_package = dict()
-        for layer_name in self.current_inverse_computation_layers:
-            rpc_layer = self.rpc_layers[layer_name]
-            eigen_tensor_package[layer_name] = {"A": (rpc_layer.qa, rpc_layer.da),
-                                                "G": (rpc_layer.qg, rpc_layer.dg, rpc_layer.dgda)}
-
-        for grp in range(len(self.send_rank_group)):
-            if grp == self.group_id:
-                continue
-            target_rank = random.choice(self.send_rank_group[grp])
-
-            try:
-                rpc.rpc_async(
-                    to=rpc_work_name(target_rank),
-                    func=receive_eigen_tensor_package,
-                    args=(self.rank,self.current_t(), eigen_tensor_package)
-                )
-            except Exception as e:
-                print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
 
     def compute_layer_split(self):
         eigen_tensor_packages = [[] for _ in range(4)]
@@ -655,8 +634,8 @@ class KFacRPCCommunicator:
             return
         else:
             self.is_send_factor = True
-        if target not in self.send_rank_group[self.group_id]:
-            return
+        #if target not in self.send_rank_group[self.group_id]:
+        #    return
         try:
             rpc.rpc_async(
                 to=rpc_work_name(target),
@@ -678,7 +657,8 @@ class KFacRPCCommunicator:
         t= self.current_t()
         self.rpc_layers[layer_name].update_local_eigen_a(qa, da,t)
 
-        for target_rank in self.send_rank_group[self.group_id]:
+        #for target_rank in self.send_rank_group[self.group_id]:
+        for target_rank in range(self.origin_world_size):
             if target_rank == self.rank:
                 continue
             try :
@@ -709,7 +689,8 @@ class KFacRPCCommunicator:
         else:
             self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
 
-        for target_rank in self.send_rank_group[self.group_id]:
+        #for target_rank in self.send_rank_group[self.group_id]:
+        for target_rank in range(self.origin_world_size):
             if target_rank == self.rank:
                 continue
             try:
@@ -786,7 +767,7 @@ class KFacRPCCommunicator:
         if self.next_send_model_param_time != self.local_timer:
             return
 
-        self.model_avg_rpc.send_all_model_param_alg10()
+        self.model_avg_rpc.send_all_model_param_alg08()
         self.is_send_model_param = True
 
         self.next_send_model_param_time += self.send_model_param_interval
