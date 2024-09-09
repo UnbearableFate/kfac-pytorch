@@ -928,3 +928,6 @@ def shutdown_notification(from_rank):
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
         sys.exit(2)
+
+def send(correct_ct, total_ct, epoch):
+    global global_communicator
