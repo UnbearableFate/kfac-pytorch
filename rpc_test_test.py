@@ -55,26 +55,25 @@ recv_buffer_lock = threading.Lock()
 def recv_tensor(tensor_meta: TensorDataMeta, from_rank):
     global recv_buffer
     global recv_buffer_lock
-
     def get_tensor():
-        tensor = torch.zeros_like(tensor_meta.shape).to(device)
+        tensor = torch.zeros(tensor_meta.shape).to(device)
         dist.recv(tensor, from_rank)
         tensor_meta.tensor = tensor
-        print(f"recv tensor {tensor_meta} from {from_rank}")
+        print(f"recv tensor {tensor_meta} from {from_rank} to {dist.get_rank()}")
         with recv_buffer_lock:
             recv_buffer.append(tensor_meta)
 
     thread = threading.Thread(target=get_tensor)
     thread.start()
-
+    time.sleep(0.1)
 
 # type_name : factor_A  factor_G,
 def send_tensor(tensor_meta: TensorDataMeta, tensor, from_rank, to_rank):
-    res = rpc.rpc_async(rpc_work_name(to_rank),
+    rpc.rpc_sync(rpc_work_name(to_rank),
                         recv_tensor,
                         args=(tensor_meta, from_rank))
-    res.wait()
-    dist.send(tensor, from_rank)
+
+    dist.send(tensor,to_rank)
 
 if __name__ == '__main__':
     dmap = full_connection_device_map(ompi_world_size, ompi_world_rank)
@@ -97,20 +96,21 @@ if __name__ == '__main__':
                  rpc_backend_options=options)
     if dist.is_initialized() and rpc.is_available():
         print(f"Hello from {ompi_world_rank}")
-    """
     tensor1 = torch.rand(32).to(device)
     meta1 = TensorDataMeta(tensor1,"layer1","factor","a")
-    tensor2 = torch.rand(32).to(device) 
+    tensor2 = torch.rand(32).to(device)
     meta2 = TensorDataMeta(tensor2,"layer2","factor","g")
-
     send_tensor(meta1,tensor1,dist.get_rank(), (dist.get_rank()+1)% dist.get_world_size())
-    with recv_buffer_lock:
-        print(f"recv buffer {recv_buffer}")
     send_tensor(meta2,tensor2,dist.get_rank(), (dist.get_rank()+2)% dist.get_world_size())
     with recv_buffer_lock:
-        print(f"recv buffer {recv_buffer}")
-    """
+        print(f"recv buffer {' '.join(map(str,recv_buffer))}  at {dist.get_rank()}")
     time.sleep(1)
+    '''
+    for thread in threading.enumerate():
+        if thread == threading.main_thread():
+            continue
+        thread.join()
+    '''
     dist.barrier()
-    rpc.shutdown()
+    rpc.shutdown(timeout = 5)
     dist.destroy_process_group()
