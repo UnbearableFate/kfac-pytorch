@@ -97,7 +97,7 @@ class ModelAvgRPCCommunicator:
         self.neighbor_weight_store : Dict[int, float] = dict()
         #self.init_neighbor_model_store()
 
-        self.buffer_size = 3
+        self.buffer_size = 2
         self.model_recv_buffer :List[ModelStore]= self.creat_model_recv_buffer(self.buffer_size)
         self.is_aggregated = [False for _ in range(self.buffer_size)]
 

@@ -182,16 +182,15 @@ class KFacRPCCommunicator:
         self.send_rank_group, self.group_id= create_groups(world_size,rank)
         self.local_timer = 0
         self.send_ct = 0
-        self.send_max = 15
-        self.send_facter_interval = 17
+        self.send_facter_interval = 3
         self.next_send_factor_time = self.send_facter_interval + rank
         self.is_send_factor = False
 
-        self.send_eigen_interval = 37
+        self.send_eigen_interval = 5
         self.next_send_eigen_time = self.send_eigen_interval + rank
         self.is_send_eigen = False
 
-        self.send_model_param_interval = 15
+        self.send_model_param_interval = 7
         self.next_send_model_param_time = self.send_model_param_interval + rank
         self.is_send_model_param = False
 
@@ -217,8 +216,10 @@ class KFacRPCCommunicator:
                 num_worker_threads=20,
                 init_method=f"file://{share_file_path}/rpc_share{timestamp}",
                 rpc_timeout=30,
-                device_maps=local_full_connection_device_map(world_size,rank)
+                device_maps=full_connection_device_map(world_size,rank),
+                _channels=["cma", "mpt_uv", "basic", "cuda_xth", "cuda_ipc", "cuda_basic"]
             )
+            print(f"Rank {rank} use cuda device")
         self.device = device
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)
         self.origin_world_size = world_size

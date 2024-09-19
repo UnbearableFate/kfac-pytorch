@@ -7,10 +7,10 @@ import kfac
 from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
-import torch.distributed as dist
+from torchvision import transforms
 import logging
-
-logging.basicConfig(level=logging.NOTSET)
+import torch.distributed as dist
+import shutil
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -56,15 +56,24 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
 
-    model = MLP(num_hidden_layers=8,hidden_size=128)
-    device = torch.device("cuda:0")
+    model = ResNetForCIFAR10(layers=18)
+    device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003 ,inv_update_steps=13)
-    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,inv_update_steps=5)
+
+    transform = transforms.Compose([
+        transforms.Resize(224),  # 将图像大小调整为224x224
+        transforms.Grayscale(num_output_channels=3),  # 将灰度图像转换为3通道的RGB图像
+        transforms.ToTensor(),  # 将图像转换为张量，并且将像素值缩放到 [0, 1] 范围内
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],  # 对RGB通道进行标准化
+                             std=[0.229, 0.224, 0.225]),
+    ])
+
+    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=11, is_2nd_order=True, epochs=10,device=device,
-                         share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
+                         train_com_method='rpc', interval=7, is_2nd_order=True, epochs=50, device=device,
+                         share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
+                         transform_train=None, transform_test=None)
 
     mgr.rpc_train_and_test()
-    mgr.close_all()
     print("Done!")

@@ -168,7 +168,6 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                #rpc_distributed.global_communicator.print_rpc_state(f"start epoch {epoch} batch {batch_idx}")
                 rpc_distributed.global_communicator.update_self_t()
                 '''
                 mischief.update_iter()
@@ -176,44 +175,24 @@ class GeneralManager:
                     if mischief.is_sick_at(self.rank):
                         time.sleep(0.1)
                 '''
-                #rpc_distributed.global_communicator.print_rpc_state(f"load data epoch {epoch} batch {batch_idx}")
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
-                #lock = rpc_distributed.global_communicator.model_avg_rpc.lock
-
-                #rpc_distributed.global_communicator.print_rpc_state(f"forward epoch {epoch} batch {batch_idx}")
-                #if not lock.acquire(timeout=1):
-                #    raise Exception("lock acquire failed at train")
-                #rpc_distributed.global_communicator.print_rpc_state(f"forward data size{data.shape} epoch {epoch} batch {batch_idx}")
                 output = self.model(data)
-
-                #rpc_distributed.global_communicator.print_rpc_state(f"backward out size{output.shape} ,target size {target.shape} epoch {epoch} batch {batch_idx}")
                 loss = self.loss_func(output, target)
-
-                #rpc_distributed.global_communicator.print_rpc_state(f"backward end, loss {loss.item()} epoch {epoch} batch {batch_idx}")
                 loss.backward()
-                #rpc_distributed.global_communicator.print_rpc_state(f"backward ok,  epoch {epoch} batch {batch_idx}")
-                #lock.release()
 
-                #rpc_distributed.global_communicator.print_rpc_state(f"precondition epoch {epoch} batch {batch_idx}")
                 if self.preconditioner is not None:
                     self.preconditioner.step()
 
-                #rpc_distributed.global_communicator.print_rpc_state(f"grad update epoch {epoch} batch {batch_idx}")
-                #if not lock.acquire(timeout=1):
-                #    raise Exception("lock acquire failed at train2")
                 self.optimizer.step()
-                #lock.release()
 
-                #rpc_distributed.global_communicator.print_rpc_state(f"send model epoch {epoch} batch {batch_idx}")
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 rpc_distributed.global_communicator.send_model_param()
 
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
-                #rpc_distributed.global_communicator.print_rpc_state(f"other epoch {epoch} batch {batch_idx}")
                 """
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
