@@ -186,11 +186,11 @@ class KFacRPCCommunicator:
         self.next_send_factor_time = self.send_facter_interval + rank
         self.is_send_factor = False
 
-        self.send_eigen_interval = 5
+        self.send_eigen_interval = 7
         self.next_send_eigen_time = self.send_eigen_interval + rank
         self.is_send_eigen = False
 
-        self.send_model_param_interval = 7
+        self.send_model_param_interval = 5
         self.next_send_model_param_time = self.send_model_param_interval + rank
         self.is_send_model_param = False
 

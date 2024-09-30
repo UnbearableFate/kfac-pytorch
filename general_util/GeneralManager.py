@@ -144,8 +144,6 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
-                if self.train_com_method != 'ddp':
-                    self.train_communication_allreduce_avg()
                 t.update()
 
             if self.writer is not None:

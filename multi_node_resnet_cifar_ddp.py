@@ -4,7 +4,6 @@ import argparse
 import torch
 
 import kfac
-from kfac.enums import ComputeMethod
 from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
@@ -12,6 +11,9 @@ from torchvision import transforms
 import logging
 import torch.distributed as dist
 import shutil
+from kfac.enums import ComputeMethod
+
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -52,7 +54,7 @@ if __name__ == '__main__':
     print(f"timestamp: {timestamp}")
 
     timeout = datetime.timedelta(seconds=120)
-    dist.init_process_group("gloo", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
+    dist.init_process_group("nccl", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
@@ -60,7 +62,8 @@ if __name__ == '__main__':
     model = ResNetForCIFAR10(layers=18)
     device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.013,inv_update_steps=5,compute_method= ComputeMethod.INVERSE)
+    model = DDP(model)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.013,inv_update_steps=7, compute_method= ComputeMethod.INVERSE)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -72,9 +75,9 @@ if __name__ == '__main__':
 
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=7, is_2nd_order=True, epochs=100, device=device,
+                         train_com_method='ddp', interval=7, is_2nd_order=True, epochs=100, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
                          transform_train=None, transform_test=None)
 
-    mgr.rpc_train_and_test()
+    mgr.train_and_test()
     print("Done!")
