@@ -167,6 +167,7 @@ class GeneralManager:
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
                 rpc_distributed.global_communicator.update_self_t()
+                rpc_distributed.global_communicator.send_model_param()
                 '''
                 mischief.update_iter()
                 if self.is_fault:
@@ -186,7 +187,6 @@ class GeneralManager:
                 self.optimizer.step()
 
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
-                rpc_distributed.global_communicator.send_model_param()
 
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()

@@ -12,6 +12,7 @@ from typing import Dict, Optional, Tuple
 import logging
 import kfac.rpc_model_param_avg as model_param_avg_rpc
 import kfac.rpc_task_manager as task_manager
+from kfac.rpc_util.data_send_scheduler import DataSendScheduler
 
 from typing import TYPE_CHECKING ,List
 if TYPE_CHECKING:
@@ -23,25 +24,6 @@ if TYPE_CHECKING:
 # 创建日志记录器
 logger = logging.getLogger('my_logger')
 logger.setLevel(logging.DEBUG)  # 设置日志级别
-
-def normalized_l2_similarity(tensor1, tensor2):
-    """
-    计算两个任意维度 Tensor 之间的归一化 L2 范数相似度。
-
-    Args:
-        tensor1 (torch.Tensor): 第一个输入 Tensor
-        tensor2 (torch.Tensor): 第二个输入 Tensor
-
-    Returns:
-        float: 两个 Tensor 之间的归一化 L2 范数相似度，值范围在 [0, 1] 之间
-    """
-    if tensor1.shape != tensor2.shape:
-        raise ValueError("Both tensors must have the same shape")
-
-    l2_norm = torch.norm(tensor1 - tensor2)
-    max_norm = torch.norm(tensor1) + torch.norm(tensor2)
-    similarity = l2_norm / max_norm
-    return round(similarity.item(),5)
 
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
@@ -180,19 +162,9 @@ class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
         self.eigen_tensor_packages = None
         self.send_rank_group, self.group_id= create_groups(world_size,rank)
-        self.local_timer = 0
-        self.send_ct = 0
-        self.send_facter_interval = 3
-        self.next_send_factor_time = self.send_facter_interval + rank
-        self.is_send_factor = False
 
-        self.send_eigen_interval = 7
-        self.next_send_eigen_time = self.send_eigen_interval + rank
-        self.is_send_eigen = False
-
-        self.send_model_param_interval = 5
-        self.next_send_model_param_time = self.send_model_param_interval + rank
-        self.is_send_model_param = False
+        send_intervals = {'model_param': 2, 'factor': 2, 'eigen': 3}
+        self.data_send_scheduler = DataSendScheduler(send_intervals)
 
         self.preconditioner = preconditioner
         self.writer = None
@@ -356,11 +328,7 @@ class KFacRPCCommunicator:
 
     def update_self_t(self):
         self.loop_start_time = time.time()
-        self.local_timer += 1
-        self.send_ct = 0
-        self.is_send_factor = False
-        self.is_send_eigen = False
-        self.is_send_model_param = False
+        self.data_send_scheduler.update_loop_counter()
         if not self.node_state_lock.acquire(timeout=1):
             raise RuntimeError("Failed to acquire lock in update_self_t")
         self.node_states[self.rank].iter += 1
@@ -380,19 +348,12 @@ class KFacRPCCommunicator:
         self.node_state_lock.release()
 
     def compute_and_broadcast_inverse(self, preconditioner: 'BaseKFACPreconditioner'):
-        if self.is_send_factor:
-            self.next_send_factor_time += self.send_facter_interval
-            if (self.next_send_factor_time == self.next_send_eigen_time
-                or self.next_send_factor_time == self.next_send_model_param_time):
-                self.next_send_factor_time += max(self.next_send_factor_time,self.next_send_model_param_time)+1
-
-            if self.next_send_eigen_time == self.local_timer:
-                self.next_send_factor_time += 1
+        current_send_type = self.data_send_scheduler.get_next_send_type()
+        if current_send_type is None:
             return
-
-        if self.next_send_eigen_time != self.local_timer:
+        elif current_send_type != "eigen":
+            self.data_send_scheduler.update_next_send_time(current_send_type)
             return
-        self.is_send_eigen = True
         current_t = self.current_t()
         task_set = set()
         for layer_name in self.current_inverse_computation_layers:
@@ -422,15 +383,13 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
-        #if self.rank % 4 == 0:
-        #    self.package_send_eigen_tensor_balance()
 
-        self.next_send_eigen_time += self.send_eigen_interval
-        if (self.next_send_eigen_time == self.next_send_factor_time or
-            self.next_send_eigen_time == self.next_send_model_param_time):
-            self.next_send_eigen_time += max(self.next_send_factor_time,self.next_send_model_param_time)+1
+        self.data_send_scheduler.update_next_send_time("eigen")
 
     def compute_layer_split(self):
+        """
+           Deprecated
+        """
         eigen_tensor_packages = [[] for _ in range(4)]
         package_sizes = [0] * len(eigen_tensor_packages)  # 初始化每个包的总大小
 
@@ -475,6 +434,9 @@ class KFacRPCCommunicator:
         self.eigen_tensor_packages = filtered_eigen_tensor_packages
 
     def package_send_eigen_tensor_balance(self):
+        """
+            Deprecated
+        """
         if self.eigen_tensor_packages is None:
             self.compute_layer_split()
         filtered_eigen_tensor_packages = []
@@ -627,16 +589,11 @@ class KFacRPCCommunicator:
             target = self.rpc_layers[layer_name].assigned_worker['G']
         t = self.current_t()
         if target == self.rank:
-            #self.print_rpc_state(f"update local factor {factor_type} of {layer_name} in rank {self.rank}")
             self.rpc_layers[layer_name].update_local_factor(factor_tensor.clone(), t, t, factor_type, world_size=self.origin_world_size)
             return
 
-        if self.next_send_factor_time != self.local_timer:
-            return
-        else:
-            self.is_send_factor = True
-        #if target not in self.send_rank_group[self.group_id]:
-        #    return
+        if not self.data_send_scheduler.can_send("factor"):
+            return False
         try:
             rpc.rpc_async(
                 to=rpc_work_name(target),
@@ -645,6 +602,7 @@ class KFacRPCCommunicator:
             )
         except Exception as e:
             print(f"Failed to send factor to {target} from {self.rank}: {e}")
+
         return True
 
     def broadcast_kfac_eigen_tensor_a(self, layer_name,qa:torch.Tensor,da:torch.Tensor):
@@ -759,22 +717,9 @@ class KFacRPCCommunicator:
                         break
 
     def send_model_param(self):
-        if self.is_send_factor or self.is_send_eigen:
-            if self.next_send_model_param_time == self.local_timer:
-                self.next_send_model_param_time += 1
-            self.is_send_model_param = False
-            return
-
-        if self.next_send_model_param_time != self.local_timer:
-            return
-
-        self.model_avg_rpc.send_all_model_param_alg08()
-        self.is_send_model_param = True
-
-        self.next_send_model_param_time += self.send_model_param_interval
-        if (self.next_send_model_param_time == self.next_send_factor_time
-               or self.next_send_model_param_time == self.next_send_eigen_time):
-            self.next_send_model_param_time  = max(self.next_send_factor_time, self.next_send_eigen_time) + 1
+        if self.data_send_scheduler.can_send("model_param"):
+            self.model_avg_rpc.send_all_model_param_alg04()
+            self.data_send_scheduler.update_next_send_time("model_param")
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
         for i in range(self.origin_world_size):

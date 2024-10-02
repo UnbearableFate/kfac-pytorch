@@ -8,6 +8,92 @@ from torch.distributed import rpc
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
+import math
+
+def get_grid_dimensions(N):
+    """
+    Compute the grid dimensions (rows and cols) such that:
+    - The grid is as close to a square as possible.
+    - The difference between rows and cols is at most 1.
+    - The grid can accommodate all N nodes, possibly with some empty slots.
+    """
+    sqrt_N = math.sqrt(N)
+    # Possible rows: floor and ceil of sqrt(N)
+    possible_rows = [int(math.floor(sqrt_N)), int(math.ceil(sqrt_N))]
+    possible_rows = list(set(possible_rows))  # Ensure uniqueness
+
+    # Try to find the best grid dimensions
+    best_rows, best_cols = None, None
+    min_difference = None
+
+    for rows in possible_rows:
+        if rows <= 0:
+            continue
+        cols = int(math.ceil(N / rows))
+        if abs(rows - cols) <= 1:
+            if min_difference is None or abs(rows - cols) < min_difference:
+                min_difference = abs(rows - cols)
+                best_rows, best_cols = rows, cols
+
+    # If no acceptable grid found, increment rows until acceptable
+    if best_rows is None:
+        rows = int(math.floor(sqrt_N))
+        while True:
+            cols = int(math.ceil(N / rows))
+            if abs(rows - cols) <= 1:
+                best_rows, best_cols = rows, cols
+                break
+            rows += 1
+
+    return best_rows, best_cols
+
+def get_down_and_right_neighbors(origin_world_size, local_rank):
+    N = origin_world_size
+
+    # Step 1: Compute grid dimensions (rows and cols)
+    rows, cols = get_grid_dimensions(N)
+
+    # Step 2: Compute the current node's position in the grid
+    row = local_rank // cols
+    col = local_rank % cols
+
+    # Initialize down and right neighbor ranks
+    down_rank = None
+    right_rank = None
+
+    # Step 3: Compute the down neighbor with wrap-around
+    down_row = (row + 1) % rows
+    down_col = col
+    while True:
+        down_rank_candidate = down_row * cols + down_col
+        if down_rank_candidate < N:
+            down_rank = down_rank_candidate
+            break
+        else:
+            # Move to the next row (wrap-around)
+            down_row = (down_row + 1) % rows
+            if down_row == row:
+                # No valid neighbor found after a full loop
+                down_rank = local_rank  # Self-loop if necessary
+                break
+
+    # Step 4: Compute the right neighbor with wrap-around
+    right_row = row
+    right_col = (col + 1) % cols
+    while True:
+        right_rank_candidate = right_row * cols + right_col
+        if right_rank_candidate < N:
+            right_rank = right_rank_candidate
+            break
+        else:
+            # Move to the next column (wrap-around)
+            right_col = (right_col + 1) % cols
+            if right_col == col:
+                # No valid neighbor found after a full loop
+                right_rank = local_rank  # Self-loop if necessary
+                break
+
+    return down_rank, right_rank
 
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
@@ -92,7 +178,6 @@ class ModelAvgRPCCommunicator:
         self.skips = compute_skip(self.world_size())[:-1]
         self.skip_index = 0
 
-
         self.neighbor_model_store :Dict[int,Dict[str, LayerParameterStore]] = dict()
         self.neighbor_weight_store : Dict[int, float] = dict()
         #self.init_neighbor_model_store()
@@ -105,8 +190,44 @@ class ModelAvgRPCCommunicator:
         #    self.send_func = self.send_model_param_to_buffer
 
         self.index = 1
+
+        self.split_packages = self.initialize_layer_packages(send_targets_num= self.origin_world_size - 1)
+        self.down_neighbor, self.right_neighbor = get_down_and_right_neighbors(self.origin_world_size, self.rank)
+
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
+
+    def initialize_layer_packages(self, send_targets_num=None):
+        if send_targets_num is None:
+            send_targets_num = self.origin_world_size - 1
+
+        # Step 1: Compute sizes for each layer
+        layers = list(self.io_layers.keys())
+        layer_sizes = []
+        for layer_name in layers:
+            layer = self.io_layers[layer_name]
+            weight_size = layer.weight.numel() if layer.weight is not None else 0
+            bias_size = layer.bias.numel() if layer.bias is not None else 0
+            total_size = weight_size + bias_size
+            layer.size = total_size  # Update the size attribute
+            layer_sizes.append((layer_name, total_size))
+
+        # Step 2: Sort layers by size in descending order
+        layer_sizes.sort(key=lambda x: x[1], reverse=True)
+
+        # Step 3: Initialize packages using a greedy algorithm
+        num_packages = min(send_targets_num, len(layer_sizes))
+        packages = [[] for _ in range(num_packages)]
+        package_sizes = [0] * num_packages
+
+        for layer_name, size in layer_sizes:
+            # Assign the layer to the package with the smallest total size
+            min_package_idx = package_sizes.index(min(package_sizes))
+            packages[min_package_idx].append(layer_name)
+            package_sizes[min_package_idx] += size
+
+        # Step 4: Save the splitting plan
+        return packages
 
     def compute_layer_split(self):
         eigen_tensor_packages = [[] for _ in range(4)]
@@ -265,102 +386,65 @@ class ModelAvgRPCCommunicator:
                 self.send_model_param(target, layer_name,False)
 
     def send_all_model_param_alg01(self):
-        target = self.start_target
-        for layer_name, layer in self.io_layers.items():
-            if target == self.rank:
-                target = (target + 1) % self.world_size()
-            self.send_model_param(target, layer_name, False)
-            target = (target + 1) % self.world_size()
-        self.start_target = (self.start_target + 1) % self.world_size()
-
-    def send_all_model_param_alg02(self):
-        target_chioce_list = set([state.rank for state in self.rpc_communicator.get_health_node_state_list()])
-        if self.rank in target_chioce_list:
-            target_chioce_list.remove(self.rank)
-        target_chioce_list = list(target_chioce_list)
-        for layer_name, layer in self.io_layers.items():
-            target = random.choice(target_chioce_list)
-            self.send_model_param(target, layer_name,False)
-        #self.send_to_sick_nodes_sometimes()
-
-    def send_all_model_param_alg03(self):
-        target_chioce_list = [state.rank for state in self.rpc_communicator.get_health_node_state_list()]
-        for rank in target_chioce_list:
-            if rank == self.rank:
-                continue
-            self.send_model_param_dict_to_store(rank ,layer_names=None)
-
-        self.average_model_param_from_store()
-
-    def send_all_model_param_alg06(self):
-        target_chioce_list = [state.rank for state in self.rpc_communicator.get_health_node_state_list()]
-        for rank in target_chioce_list:
-            if rank == self.rank:
-                continue
-            self.send_model_param_dict_to_store(rank, layer_names=None)
-
-        #self.average_model_param_from_store2()
-
-    def send_all_model_param_alg07(self):
         target = (self.rank + self.index) % self.origin_world_size
         self.index = (self.index + 1) % self.origin_world_size
         if target == self.rank:
             target = (target + 1) % self.origin_world_size
             self.index = (self.index + 1) % self.origin_world_size
-        self.send_model_param_to_buffer(target, layer_names=None)
-        self.aggregate_model_from_buff()
-
-    def send_all_model_param_alg08(self):
-        target = (self.rank + self.index) % self.origin_world_size
-        self.index = (self.index + 1) % self.origin_world_size
-        if target == self.rank:
-            target = (target + 1) % self.origin_world_size
-            self.index = (self.index + 1) % self.origin_world_size
-        layers = random.choices(list(self.io_layers.keys()), k=12)
-        self.send_model_param_to_buffer(target, layer_names=layers)
-        self.aggregate_model_from_buff()
-
-    def send_all_model_param_alg09(self):
-        group_start_rank = self.rank // 4 * 4
-        target = group_start_rank + (self.rank + self.index) % 4
-        self.index = (self.index + 1) % 4
-        if target == self.rank:
-            target = group_start_rank+ (target + 1) % 4
-            self.index = (self.index + 1) % 4
         layers = random.choices(list(self.io_layers.keys()), k=1)
         self.send_model_param_to_buffer(target, layer_names=layers)
         self.aggregate_model_from_buff()
 
-    def send_all_model_param_alg10(self):
-        for target_rank in self.send_rank_group[self.group_id]:
-            if target_rank == self.rank:
-                continue
-            self.send_model_param_to_buffer(target_rank, layer_names=None)
+    def send_all_model_param_alg02(self):
+        # Step 1: Randomly shuffle the layer names
+        layers = list(self.io_layers.keys())
+        random.shuffle(layers)
 
+        # Step 2: Partition the layers into self.origin_world_size packages
+        num_packages = self.origin_world_size -1
+        packages = [[] for _ in range(num_packages)]
+
+        for idx, layer_name in enumerate(layers):
+            packages[idx % num_packages].append(layer_name)
+
+        # Step 3: Send each package to a random target (excluding self.rank)
+        for package in packages:
+            if not package:
+                continue  # Ignore empty packages
+            target_candidates = list(range(self.origin_world_size))
+            target_candidates.remove(self.rank)
+            target = random.choice(target_candidates)
+            self.send_model_param_to_buffer(target, layer_names=package)
+
+        # Step 4: Aggregate the models from buffer
         self.aggregate_model_from_buff()
 
-    def send_all_model_param_alg10_2(self):
-        offset = self.rank - self.rank // 4 * 4
-        if offset < len(self.model_send_packages):
-            self.index = (self.index + 1) % len(self.send_rank_group)
-            if self.index == self.group_id:
-                self.index = (self.index + 1) % len(self.send_rank_group)
+    def send_all_model_param_alg03(self):
+        # Get the number of packages to send
+        num_packages = len(self.split_packages)
 
-            target_rank = self.send_rank_group[self.index][offset]
-            print(f"send_all_model_param_alg10 part {offset} {self.rank} to {target_rank}")
-            layers = random.choices(list(self.io_layers.keys()), k=1)
-            self.send_model_param_to_buffer(target_rank, layer_names=layers)
-    def send_all_model_param_alg10_3(self):
-        offset = self.rank - self.rank // 4 * 4
-        if offset < len(self.model_send_packages):
-            self.index = (self.index + 1) % len(self.send_rank_group)
-            if self.index == self.group_id:
-                self.index = (self.index + 1) % len(self.send_rank_group)
+        # Get list of possible targets excluding self.rank
+        target_candidates = list(range(self.origin_world_size))
+        target_candidates.remove(self.rank)
 
-            target_rank = self.send_rank_group[self.index][offset]
-            print(f"send_all_model_param_alg10 part {offset} {self.rank} to {target_rank}")
-            #layers = random.choices(list(self.io_layers.keys()), k=1)
-            self.send_model_param_to_buffer(target_rank, layer_names=self.model_send_packages[offset])
+        # Randomly select targets for each package
+        random.shuffle(target_candidates)
+        targets = target_candidates[:num_packages]
+
+        # Map each package to a target
+        for package, target in zip(self.split_packages, targets):
+            # Send the package to the target
+            self.send_model_param_to_buffer(target, layer_names=package)
+
+        # Aggregate models from buffer
+        self.aggregate_model_from_buff()
+
+    def send_all_model_param_alg04(self):
+        if self.right_neighbor:
+            self.send_model_param_to_buffer(self.right_neighbor)
+        if self.down_neighbor:
+            self.send_model_param_to_buffer(self.down_neighbor)
+        self.aggregate_model_from_buff()
 
     def average_model_param_from_store(self):
         with torch.no_grad():
