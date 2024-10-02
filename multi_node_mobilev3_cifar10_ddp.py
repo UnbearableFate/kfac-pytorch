@@ -4,9 +4,8 @@ import argparse
 import torch
 
 import kfac
-from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
-from my_module.mobile_net import CustomMiniMobileNetV3Small, CustomMobileNetV3Small
+from my_module.mobile_net import CustomMobileNetV3Small
 from my_module.model_split import ModelSplitter
 from torchvision import transforms
 import logging
@@ -61,7 +60,7 @@ if __name__ == '__main__':
     model = CustomMobileNetV3Small(num_classes=10)
     model = model.to(device)
     model = DDP(model)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.007)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0", "block.1.0"],damping=0.003)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -71,12 +70,11 @@ if __name__ == '__main__':
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    data_path = DATA_DIR + str(ompi_world_rank)
-    mgr = GeneralManager(data_dir=data_path, dataset_name="FashionMNIST", model=model,
+    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='ddp', interval=5, is_2nd_order=True, epochs=50, device=device,
+                         train_com_method='ddp', interval=5, is_2nd_order=True, epochs=100, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
-                         transform_train=transform, transform_test=transform)
+                         transform_train=None, transform_test=None)
 
     mgr.train_and_test()
     print("Done!")

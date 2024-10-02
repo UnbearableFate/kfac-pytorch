@@ -163,7 +163,7 @@ class KFacRPCCommunicator:
         self.eigen_tensor_packages = None
         self.send_rank_group, self.group_id= create_groups(world_size,rank)
 
-        send_intervals = {'model_param': 5, 'factor': 3, 'eigen': 7}
+        send_intervals = {'model_param': 3, 'factor': 13, 'eigen': 21}
         self.data_send_scheduler = DataSendScheduler(send_intervals)
 
         self.preconditioner = preconditioner

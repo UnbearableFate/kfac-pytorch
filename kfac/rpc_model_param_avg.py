@@ -440,10 +440,36 @@ class ModelAvgRPCCommunicator:
         self.aggregate_model_from_buff()
 
     def send_all_model_param_alg04(self):
-        if self.right_neighbor:
-            self.send_model_param_to_buffer(self.right_neighbor)
-        if self.down_neighbor:
-            self.send_model_param_to_buffer(self.down_neighbor)
+        self.index += 1
+        if self.index % 2 == 0:
+            if self.right_neighbor:
+                layers = random.choices(list(self.io_layers.keys()), k=4)
+                self.send_model_param_to_buffer(self.right_neighbor) 
+        else:
+            if self.down_neighbor:
+                layers = random.choices(list(self.io_layers.keys()), k=4)
+                self.send_model_param_to_buffer(self.down_neighbor)
+        if self.index % 10 == 0:
+            self.aggregate_model_from_buff()
+
+    def send_all_model_param_alg05(self):
+        # Get the number of packages to send
+        send_targets_num = 3
+
+        # Get list of possible targets excluding self.rank
+        target_candidates = list(range(self.origin_world_size))
+        target_candidates.remove(self.rank)
+
+        # Randomly select targets for each package
+        random.shuffle(target_candidates)
+        targets = target_candidates[:send_targets_num]
+        
+        random.shuffle(self.split_packages)
+        for index, target in enumerate(targets):
+            # Send the package to the target
+            self.send_model_param_dict_to_store(target, layer_names=self.split_packages[index])
+
+        # Aggregate models from buffer
         self.aggregate_model_from_buff()
 
     def average_model_param_from_store(self):

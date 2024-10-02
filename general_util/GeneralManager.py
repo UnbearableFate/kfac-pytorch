@@ -47,7 +47,8 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=model.parameters(),momentum = 0.8) #torch.optim.Adam(model.parameters())
+        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.006, momentum = 0.8) #torch.optim.Adam(model.parameters())
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.1, steps_per_epoch=50, epochs=epochs)
         if is_2nd_order:
             if precondtioner is not None:
                 self.preconditioner = precondtioner
@@ -144,6 +145,7 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
+                self.scheduler.step()
                 t.update()
 
             if self.writer is not None:
@@ -185,6 +187,7 @@ class GeneralManager:
                     self.preconditioner.step()
 
                 self.optimizer.step()
+                self.scheduler.step()
 
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
 
