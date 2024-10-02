@@ -163,7 +163,7 @@ class KFacRPCCommunicator:
         self.eigen_tensor_packages = None
         self.send_rank_group, self.group_id= create_groups(world_size,rank)
 
-        send_intervals = {'model_param': 2, 'factor': 2, 'eigen': 3}
+        send_intervals = {'model_param': 5, 'factor': 3, 'eigen': 7}
         self.data_send_scheduler = DataSendScheduler(send_intervals)
 
         self.preconditioner = preconditioner
@@ -753,7 +753,7 @@ class KFacRPCCommunicator:
                 continue
             if self.model_accuracy_statistic[i]['recv_ct'] >= self.origin_world_size or epoch == max_epoch-1:
                 if self.writer is not None:
-                    self.writer.add_scalar("test/accuracy", self.model_accuracy_statistic[i]['correct_ct'] / self.model_accuracy_statistic[i]['total_ct'], i)
+                    self.writer.add_scalar('Accuracy/test', self.model_accuracy_statistic[i]['correct_ct'] / self.model_accuracy_statistic[i]['total_ct'], i)
                     self.model_accuracy_statistic[i]["written"] = True
 
     def restart_sick_node(self): # call by sick nodes

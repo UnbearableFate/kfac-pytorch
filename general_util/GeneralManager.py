@@ -47,7 +47,7 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.Adam(model.parameters())
+        self.optimizer = torch.optim.SGD(params=model.parameters(),momentum = 0.8) #torch.optim.Adam(model.parameters())
         if is_2nd_order:
             if precondtioner is not None:
                 self.preconditioner = precondtioner

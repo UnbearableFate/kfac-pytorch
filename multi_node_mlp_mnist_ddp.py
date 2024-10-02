@@ -9,6 +9,9 @@ from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
 import torch.distributed as dist
 import logging
+
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 from mpi4py import MPI
 
 logging.basicConfig(level=logging.NOTSET)
@@ -60,12 +63,13 @@ if __name__ == '__main__':
     model = MLP(num_hidden_layers=8,hidden_size=128)
     device = torch.device("cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layers.1"],inv_update_steps=7)
+    model = DDP(model)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003 ,inv_update_steps=7)
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
                          sampler_func= None,
                          train_com_method='rpc', interval=11, is_2nd_order=True, epochs=100,device=device,
                          share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
 
-    mgr.rpc_train_and_test()
+    mgr.train_and_test()
     mgr.close_all()
     print("Done!")
