@@ -60,7 +60,7 @@ if __name__ == '__main__':
     model = ResNetForCIFAR10(layers=18)
     device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.2)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -72,9 +72,14 @@ if __name__ == '__main__':
 
     mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc', interval=7, is_2nd_order=True, epochs=150, device=device,
+                         train_com_method='rpc', interval=7, is_2nd_order=True, epochs=200, device=device,
                          share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
                          transform_train=None, transform_test=None)
 
-    mgr.rpc_train_and_test()
+    #mgr.rpc_train_and_test()
     print("Done!")
+
+# cd /work/NBB/yu_mingzhe/kfac-pytorch
+# module load openmpi/4.1.6/nvhpc24.5-cuda12.4 
+# conda activate py311
+# mpirun -n 2 python ./multi_node_resnet_cifar.py

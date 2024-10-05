@@ -455,17 +455,18 @@ class BaseKFACPreconditioner:
         """Hook for saving the input during the forward pass of a module."""
         if not module.training:
             return
-        if self.steps % self.factor_update_steps == 0:
-            name, layer = self._layers[module]
-            layer.save_layer_input(input_)
-            # Update mini_step here because forward pass should always
-            # happen before backward pass
-            self._mini_steps[name] += 1
-            if (
-                self._update_factors_in_hook
-                and self._mini_steps[name] % self._accumulation_steps == 0
-            ):
-                layer.update_a_factor(alpha=self.factor_decay)
+        
+        name, layer = self._layers[module]
+        layer.save_layer_input(input_)
+        # Update mini_step here because forward pass should always
+        # happen before backward pass
+        self._mini_steps[name] += 1
+        if (
+            self._update_factors_in_hook
+            and self._mini_steps[name] % self._accumulation_steps == 0
+        ):
+            layer.update_a_factor(alpha=self.factor_decay)
+            if self.steps % self.factor_update_steps == 0 or rpc_dist.global_communicator is not None:
                 layer.reduce_a_factor(self._assignment.factor_group(name, 'A'))
 
     @torch.no_grad()
@@ -478,14 +479,15 @@ class BaseKFACPreconditioner:
         """Hook for saving the gradient w.r.t. output in the backward pass."""
         if not module.training:
             return
-        if self.steps % self.factor_update_steps == 0:
-            name, layer = self._layers[module]
-            if isinstance(grad_output, torch.Tensor):
-                grad_output = (grad_output,)
-            layer.save_layer_grad_output(grad_output)
-            if (
-                self._update_factors_in_hook
-                and self._mini_steps[name] % self._accumulation_steps == 0
-            ):
-                layer.update_g_factor(alpha=self.factor_decay)
+        
+        name, layer = self._layers[module]
+        if isinstance(grad_output, torch.Tensor):
+            grad_output = (grad_output,)
+        layer.save_layer_grad_output(grad_output)
+        if (
+            self._update_factors_in_hook
+            and self._mini_steps[name] % self._accumulation_steps == 0
+        ):
+            layer.update_g_factor(alpha=self.factor_decay)
+            if self.steps % self.factor_update_steps == 0 or rpc_dist.global_communicator is not None:
                 layer.reduce_g_factor(self._assignment.factor_group(name, 'G'))

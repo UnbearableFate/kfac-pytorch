@@ -196,6 +196,7 @@ class ModelAvgRPCCommunicator:
 
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
+        print(f"rank {self.rank} layers number {len(self.io_layers)}")
 
     def initialize_layer_packages(self, send_targets_num=None):
         if send_targets_num is None:
@@ -387,13 +388,14 @@ class ModelAvgRPCCommunicator:
 
     def send_all_model_param_alg01(self):
         target = (self.rank + self.index) % self.origin_world_size
-        self.index = (self.index + 1) % self.origin_world_size
+        self.index += 1
         if target == self.rank:
             target = (target + 1) % self.origin_world_size
-            self.index = (self.index + 1) % self.origin_world_size
-        layers = random.choices(list(self.io_layers.keys()), k=1)
+            self.index += 1
+        layers = random.choices(list(self.io_layers.keys()), k=5)
         self.send_model_param_to_buffer(target, layer_names=layers)
-        self.aggregate_model_from_buff()
+        if self.index % 5 == 0:
+            self.aggregate_model_from_buff()
 
     def send_all_model_param_alg02(self):
         # Step 1: Randomly shuffle the layer names
@@ -443,34 +445,46 @@ class ModelAvgRPCCommunicator:
         self.index += 1
         if self.index % 2 == 0:
             if self.right_neighbor:
-                layers = random.choices(list(self.io_layers.keys()), k=4)
+                layers = random.choices(list(self.io_layers.keys()), k=8)
                 self.send_model_param_to_buffer(self.right_neighbor) 
         else:
             if self.down_neighbor:
-                layers = random.choices(list(self.io_layers.keys()), k=4)
+                layers = random.choices(list(self.io_layers.keys()), k=8)
                 self.send_model_param_to_buffer(self.down_neighbor)
-        if self.index % 10 == 0:
+        if self.index % 4 == 0:
             self.aggregate_model_from_buff()
-
+    
     def send_all_model_param_alg05(self):
-        # Get the number of packages to send
-        send_targets_num = 3
+        self.index += 1
+        max_layer_num = 10
+        layers = random.choices(list(self.io_layers.keys()), k=2*max_layer_num)
+        random.shuffle(layers)
+        if self.right_neighbor:
+            self.send_model_param_to_buffer(self.right_neighbor ,layer_names=layers[:max_layer_num]) 
+        if self.down_neighbor:
+            self.send_model_param_to_buffer(self.down_neighbor, layer_names=layers[max_layer_num:])
+        if self.index % 4 == 0:
+            self.aggregate_model_from_buff()
+    
+    def send_all_model_param_alg06(self):
+        self.index += 1
+        send_layer_num = 5
+        target_num = 4
+        layers = random.choices(list(self.io_layers.keys()), k=target_num*send_layer_num)
+        random.shuffle(layers)
 
         # Get list of possible targets excluding self.rank
         target_candidates = list(range(self.origin_world_size))
         target_candidates.remove(self.rank)
-
         # Randomly select targets for each package
         random.shuffle(target_candidates)
-        targets = target_candidates[:send_targets_num]
-        
-        random.shuffle(self.split_packages)
-        for index, target in enumerate(targets):
-            # Send the package to the target
-            self.send_model_param_dict_to_store(target, layer_names=self.split_packages[index])
+        targets = target_candidates[:target_num]
 
-        # Aggregate models from buffer
-        self.aggregate_model_from_buff()
+        for i in range(target_num):
+            self.send_model_param_to_buffer(targets[i], layer_names=layers[i*send_layer_num: (i+1)*send_layer_num])
+
+        if self.index % 3 == 0:
+            self.aggregate_model_from_buff()
 
     def average_model_param_from_store(self):
         with torch.no_grad():

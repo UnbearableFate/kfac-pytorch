@@ -1,5 +1,6 @@
 import gc
 import math
+import random
 import time
 import datetime
 
@@ -111,8 +112,9 @@ class GeneralManager:
 
         for i in range(0, self.epochs):
             self.rpc_train(epoch=i)
-            self.test_by_rpc(epoch=i)
-            self.rpc_communicator.write_model_test_accuracy(i,self.epochs)
+            #self.test_by_rpc(epoch=i)
+            #self.rpc_communicator.write_model_test_accuracy(i,self.epochs)
+            self.test_local(epoch=i)
 
         self.writer.close()
         dist.barrier()
@@ -142,6 +144,10 @@ class GeneralManager:
                 output = self.model(data)
                 loss = self.loss_func(output, target)
                 loss.backward()
+                
+                if random.random() < 0.2:
+                    time.sleep(0.08)
+
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
@@ -182,6 +188,9 @@ class GeneralManager:
                 output = self.model(data)
                 loss = self.loss_func(output, target)
                 loss.backward()
+                
+                if random.random() < 0.2:
+                    time.sleep(0.08)
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
@@ -194,8 +203,8 @@ class GeneralManager:
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
-                """
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                """
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
 
@@ -266,6 +275,20 @@ class GeneralManager:
         for e in range(self.epochs):
             accuracy = rpc_distributed.global_communicator.wait_and_return_test_result(e)
             self.writer.add_scalar('Accuracy/test', accuracy, e)
+
+    def test_local(self, epoch):
+        self.model.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for data, target in self.data_manager.test_loader:
+                data, target = data.to(self.device), target.to(self.device)
+                output = self.model(data)
+                pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+                correct += pred.eq(target.view_as(pred)).sum().item()
+                total += target.size(0)
+        accuracy = correct / total
+        self.writer.add_scalar('Accuracy/test', accuracy, epoch)
 
     def average_health_nodes_param_tensor_fusion_async(self):
         model = self.model
