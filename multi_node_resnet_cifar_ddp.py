@@ -73,11 +73,11 @@ if __name__ == '__main__':
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="CIFAR10", model=model,
+    mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='ddp', interval=7, is_2nd_order=True, epochs=200, device=device,
-                         share_file_path=Share_DIR, timestamp=timestamp, log_dir = LOG_DIR, precondtioner=preconditioner,
-                         transform_train=None, transform_test=None)
+                         train_com_method='ddp', is_2nd_order=True, epochs=200, device=device,
+                         timestamp=timestamp,  precondtioner=preconditioner,
+                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10")
 
     mgr.train_and_test()
     print("Done!")

@@ -20,11 +20,30 @@ import kfac.rpc_distributed as rpc_distributed
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
+
+DATA_DIR = ""
+LOG_DIR = ""
+Share_DIR = ""
+check_point_path = ""
+today = datetime.date.today().strftime('%m%d')
+if os.path.exists("/home/yu"):
+    DATA_DIR = "/home/yu/data"
+    LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs/runs"+today
+    Share_DIR = "/home/yu/workspace/kfac-pytorch/share_files"
+    check_point_path = "/home/yu/workspace/kfac-pytorch/checkpoints"
+elif os.path.exists("/Users/unbearablefate"):
+    DATA_DIR = "/Users/unbearablefate/workspace/data"
+    LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs/runs"+today
+    Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
+    check_point_path = "/Users/unbearablefate/workspace/kfac-pytorch/checkpoints"
+elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
+    DATA_DIR = "/work/NBB/yu_mingzhe/data"
+    LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs/runs"+today
+    Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
+    check_point_path = "/work/NBB/yu_mingzhe/kfac-pytorch/checkpoints"
+
 class GeneralManager:
-    def __init__(self, data_dir, dataset_name, model, sampler_func = None, train_com_method="ddp", interval=10,
-                 is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), share_file_path=None, timestamp="", log_dir ='',
-                 transform_train=None, transform_test=None,
-                 precondtioner=None):
+    def __init__(self,experiment_name, dataset_name, model, sampler_func = None, train_com_method="ddp", is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",transform_train=None, transform_test=None, precondtioner=None):
         self.experiment_name_detail = None
         self.writer = None
         batch_size=batch_size
@@ -34,7 +53,7 @@ class GeneralManager:
         if hasattr(model, "model_name"):
             model_name = model.model_name
         log_detail = f"{dataset_name}/{model_name}/{timestamp}"
-        log_dir = os.path.join(log_dir,log_detail)
+        log_dir = os.path.join(LOG_DIR,log_detail)
         self.log_dir = log_dir
 
         try :
@@ -44,12 +63,12 @@ class GeneralManager:
         except Exception as e:
             raise RuntimeError(f"Unable to create log directory: {log_dir}")
 
-        self.data_manager = DataPreparer(data_path_root=data_dir, dataset_name=dataset_name, world_size=world_size, rank=rank,
+        self.data_manager = DataPreparer(data_path_root=DATA_DIR, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test)
 
         self.loss_func = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.006, momentum = 0.8) #torch.optim.Adam(model.parameters())
-        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.1, steps_per_epoch=50, epochs=epochs)
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.1, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
         if is_2nd_order:
             if precondtioner is not None:
                 self.preconditioner = precondtioner
@@ -58,10 +77,24 @@ class GeneralManager:
             if train_com_method == "rpc":
                 self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
                                                                             preconditioner=self.preconditioner,model=model ,
-                                                                            share_file_path=share_file_path, timestamp=timestamp ,
+                                                                            share_file_path=Share_DIR, timestamp=timestamp ,
                                                                             log_dir = log_dir, device=device)
         else:
             self.preconditioner = None
+
+        self.checkpoint_file_path = os.path.join(check_point_path, experiment_name, f"{rank}.pth")
+        current_checkpoint_path = os.path.join(check_point_path, experiment_name)
+        self.start_epoch = 0
+        if not os.path.exists(current_checkpoint_path):
+            if rank == 0:
+                os.makedirs(current_checkpoint_path)
+        elif os.path.exists(self.checkpoint_file_path):
+            checkpoint = torch.load(self.checkpoint_file_path)
+            model.load_state_dict(checkpoint["model"])
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            self.preconditioner.load_state_dict(checkpoint["preconditioner"], compute_inverses=False)
+            self.start_epoch = checkpoint["epoch"]
+            self.scheduler.load_state_dict(checkpoint["scheduler"])
 
         self.dataset_name = dataset_name
         self.device = device
@@ -69,7 +102,6 @@ class GeneralManager:
         self.epochs = epochs
         self.world_size = world_size
         self.rank = rank
-        self.model_avg_interval = interval
         self.train_com_method = train_com_method
         self.batch_size = batch_size
         self.is_fault = False
@@ -81,7 +113,7 @@ class GeneralManager:
                             max_disconnected_node_num=max_disconnected_node_num,
                            ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
         self.is_fault = True
-        self.experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{self.world_size}_avg{self.model_avg_interval}"
+        self.experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{self.world_size}"
         if self.train_com_method == "rpc":
             mischief.recover_func = self.rpc_communicator.restart_sick_node
 
@@ -110,10 +142,9 @@ class GeneralManager:
         dist.barrier()
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
 
-        for i in range(0, self.epochs):
+        for i in range(self.start_epoch + 1, self.epochs):
             self.rpc_train(epoch=i)
-            #self.test_by_rpc(epoch=i)
-            #self.rpc_communicator.write_model_test_accuracy(i,self.epochs)
+            self.save_checkpoint(epoch=i)
             self.test_local(epoch=i)
 
         self.writer.close()
@@ -229,11 +260,6 @@ class GeneralManager:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
 
-    def train_communication_allreduce_avg(self):
-        if mischief.ITER >= mischief.LAST_AVG_ITER + self.model_avg_interval :
-            fut_list = mischief.average_health_nodes_param_async(self.model)
-            torch.futures.wait_all(fut_list)
-
     def test_all(self, epoch):
         self.model.eval()
         correct = 0
@@ -309,3 +335,14 @@ class GeneralManager:
             result_list.append(dist.all_reduce(torch.zeros_like(flat_tensor), op=dist.ReduceOp.SUM,async_op=True).get_future())
             mischief.LAST_AVG_ITER = mischief.ITER
         return result_list
+
+    def save_checkpoint(self, epoch):
+        state = {
+            'model': self.model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'preconditioner': self.preconditioner.state_dict(),
+            'epoch': epoch,
+            'scheduler': self.scheduler.state_dict()
+        }
+        torch.save(state, self.checkpoint_file_path)
+        print(f"Model saved at epoch {epoch} in rank {self.rank}")

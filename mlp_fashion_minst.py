@@ -4,9 +4,8 @@ import argparse
 import torch
 
 import kfac
-from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
+from my_module.custom_resnet import MLP
 from general_util.GeneralManager import GeneralManager
-from my_module.model_split import ModelSplitter
 import torch.distributed as dist
 import logging
 
@@ -20,24 +19,29 @@ rpc_share_fie = "rpc_share"
 DATA_DIR = ""
 LOG_DIR = ""
 Share_DIR = ""
+check_point_path = ""
 if os.path.exists("/home/yu"):
     DATA_DIR = "/home/yu/data"
     LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs/runs"+today
     Share_DIR = "/home/yu/workspace/kfac-pytorch/share_files"
+    check_point_path = "/home/yu/workspace/kfac-pytorch/checkpoints"
 elif os.path.exists("/Users/unbearablefate"):
     DATA_DIR = "/Users/unbearablefate/workspace/data"
     LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs/runs"+today
     Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
+    check_point_path = "/Users/unbearablefate/workspace/kfac-pytorch/checkpoints"
 elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
     DATA_DIR = "/work/NBB/yu_mingzhe/data"
     LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs/runs"+today
     Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
+    check_point_path = "/work/NBB/yu_mingzhe/kfac-pytorch/checkpoints"
 
 if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
     raise RuntimeError("Unknown environment.")
 
-ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
-ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
+from mpi4py import MPI
+ompi_world_size = MPI.COMM_WORLD.Get_size()
+ompi_world_rank = MPI.COMM_WORLD.Get_rank()
 if ompi_world_rank == 0:
     logging.basicConfig(level=logging.NOTSET)
 
@@ -62,10 +66,9 @@ if __name__ == '__main__':
     device = torch.device(f"cpu")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003)
-    mgr = GeneralManager(data_dir=DATA_DIR, dataset_name="FashionMNIST", model=model,
-                         sampler_func= None,
-                         train_com_method='rpc', interval=11, is_2nd_order=True, epochs=1,batch_size=32,device=device,
-                         share_file_path=Share_DIR,timestamp=timestamp, log_dir = LOG_DIR ,precondtioner=preconditioner)
+    mgr = GeneralManager(experiment_name="mlp_mnist",dataset_name="FashionMNIST", model=model,
+                         train_com_method='rpc', is_2nd_order=True, epochs=8,batch_size=32,device=device,
+                         timestamp=timestamp,precondtioner=preconditioner)
 
     mgr.rpc_train_and_test()
     mgr.close_all()
