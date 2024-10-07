@@ -17,6 +17,7 @@ import os
 import kfac
 from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 import kfac.rpc_distributed as rpc_distributed
+from filelock import FileLock
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
@@ -82,12 +83,17 @@ class GeneralManager:
         else:
             self.preconditioner = None
 
-        self.checkpoint_file_path = os.path.join(check_point_path, experiment_name, f"{rank}.pth")
+        self.checkpoint_file_path = os.path.join(check_point_path, experiment_name, f"main_checkpoint.pth")
+        self.best_loss_file_path = os.path.join(check_point_path, experiment_name, f"best_loss_checkpoint.txt")
+        self.best_loss_lock = FileLock(self.best_loss_file_path + ".lock")
+        self.best_loss = float("inf")
         current_checkpoint_path = os.path.join(check_point_path, experiment_name)
         self.start_epoch = 0
         if not os.path.exists(current_checkpoint_path):
             if rank == 0:
                 os.makedirs(current_checkpoint_path)
+                with open(self.best_loss_file_path, "w") as f:
+                    f.write(str(self.best_loss))
         elif os.path.exists(self.checkpoint_file_path):
             checkpoint = torch.load(self.checkpoint_file_path)
             model.load_state_dict(checkpoint["model"])
@@ -143,8 +149,8 @@ class GeneralManager:
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
 
         for i in range(self.start_epoch + 1, self.epochs):
-            self.rpc_train(epoch=i)
-            self.save_checkpoint(epoch=i)
+            current_lost = self.rpc_train(epoch=i)
+            self.save_best_checkpoint(epoch=i,loss=current_lost)
             self.test_local(epoch=i)
 
         self.writer.close()
@@ -194,10 +200,7 @@ class GeneralManager:
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
-        #print(f"Total batches: {len(train_loader)} at rank {self.rank}")
-        data_iter = iter(train_loader)
-        data, target = next(data_iter)
-        #print(f"Data shape: {data.shape}, Target shape: {target.shape} at rank {self.rank}")
+        avg_loss = 0
         with (tqdm(
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
@@ -219,6 +222,7 @@ class GeneralManager:
                 output = self.model(data)
                 loss = self.loss_func(output, target)
                 loss.backward()
+                avg_loss += loss.item()
                 
                 if random.random() < 0.2:
                     time.sleep(0.08)
@@ -259,6 +263,8 @@ class GeneralManager:
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
+
+        return avg_loss / len(train_loader)
 
     def test_all(self, epoch):
         self.model.eval()
@@ -346,3 +352,25 @@ class GeneralManager:
         }
         torch.save(state, self.checkpoint_file_path)
         print(f"Model saved at epoch {epoch} in rank {self.rank}")
+
+    def save_best_checkpoint(self, epoch ,loss):
+        if self.best_loss < loss:
+            return
+        with self.best_loss_lock:
+            with open(self.best_loss_file_path, "r") as f:
+                best_loss = float(f.read())
+            if loss < best_loss:
+                state = {
+                    'model': self.model.state_dict(),
+                    'optimizer': self.optimizer.state_dict(),
+                    'preconditioner': self.preconditioner.state_dict(),
+                    'epoch': epoch,
+                    'scheduler': self.scheduler.state_dict()
+                }
+                torch.save(state, self.checkpoint_file_path)
+                with open(self.best_loss_file_path, "w") as f:
+                    f.write(str(loss))
+                self.best_loss = loss
+                print(f"Model saved at epoch {epoch} in rank {self.rank}")
+            else:
+                self.best_loss = best_loss
