@@ -148,3 +148,4 @@ runs*
 *.sh.o*
 share_files/
 core*
+checkpoints/
