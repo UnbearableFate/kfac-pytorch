@@ -44,7 +44,7 @@ elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
     check_point_path = "/work/NBB/yu_mingzhe/kfac-pytorch/checkpoints"
 
 class GeneralManager:
-    def __init__(self,experiment_name, dataset_name, model, sampler_func = None, train_com_method="ddp", is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",transform_train=None, transform_test=None, precondtioner=None):
+    def __init__(self,experiment_name:str, dataset_name, model, sampler_func = None, train_com_method="ddp", is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",transform_train=None, transform_test=None, precondtioner=None):
         self.experiment_name_detail = None
         self.writer = None
         batch_size=batch_size
@@ -53,7 +53,10 @@ class GeneralManager:
         model_name = type(model).__name__
         if hasattr(model, "model_name"):
             model_name = model.model_name
-        log_detail = f"{dataset_name}/{model_name}/{timestamp}"
+        if experiment_name.endswith("#"):
+            log_detail = f"{dataset_name}/{model_name}/{experiment_name}"
+        else:
+            log_detail = f"{dataset_name}/{model_name}/{experiment_name}_{timestamp}"
         log_dir = os.path.join(LOG_DIR,log_detail)
         self.log_dir = log_dir
 
@@ -68,8 +71,9 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.006, momentum = 0.8) #torch.optim.Adam(model.parameters())
-        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.1, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
+        #self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.006, momentum = 0.8) #torch.optim.Adam(model.parameters())
+        self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0005)
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.002, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
         if is_2nd_order:
             if precondtioner is not None:
                 self.preconditioner = precondtioner
@@ -82,13 +86,14 @@ class GeneralManager:
                                                                             log_dir = log_dir, device=device)
         else:
             self.preconditioner = None
+        self.start_epoch = 0
 
+        """
         self.checkpoint_file_path = os.path.join(check_point_path, experiment_name, f"main_checkpoint.pth")
         self.best_loss_file_path = os.path.join(check_point_path, experiment_name, f"best_loss_checkpoint.txt")
         self.best_loss_lock = FileLock(self.best_loss_file_path + ".lock")
         self.best_loss = float("inf")
         current_checkpoint_path = os.path.join(check_point_path, experiment_name)
-        self.start_epoch = 0
         if not os.path.exists(current_checkpoint_path):
             if rank == 0:
                 os.makedirs(current_checkpoint_path)
@@ -101,6 +106,7 @@ class GeneralManager:
             self.preconditioner.load_state_dict(checkpoint["preconditioner"], compute_inverses=False)
             self.start_epoch = checkpoint["epoch"]
             self.scheduler.load_state_dict(checkpoint["scheduler"])
+        """
 
         self.dataset_name = dataset_name
         self.device = device
@@ -149,8 +155,8 @@ class GeneralManager:
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
 
         for i in range(self.start_epoch + 1, self.epochs):
-            current_lost = self.rpc_train(epoch=i)
-            self.save_best_checkpoint(epoch=i,loss=current_lost)
+            self.rpc_train(epoch=i)
+            #self.save_best_checkpoint(epoch=i,loss=current_lost)
             self.test_local(epoch=i)
 
         self.writer.close()
@@ -200,7 +206,6 @@ class GeneralManager:
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
-        avg_loss = 0
         with (tqdm(
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
@@ -209,7 +214,7 @@ class GeneralManager:
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
                 rpc_distributed.global_communicator.update_self_t()
-                rpc_distributed.global_communicator.send_model_param()
+
                 '''
                 mischief.update_iter()
                 if self.is_fault:
@@ -222,7 +227,6 @@ class GeneralManager:
                 output = self.model(data)
                 loss = self.loss_func(output, target)
                 loss.backward()
-                avg_loss += loss.item()
                 
                 if random.random() < 0.2:
                     time.sleep(0.08)
@@ -239,6 +243,7 @@ class GeneralManager:
                     rpc_distributed.global_communicator.print_rpc_state()
 
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                rpc_distributed.global_communicator.send_model_param()
                 """
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
@@ -263,8 +268,6 @@ class GeneralManager:
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
-
-        return avg_loss / len(train_loader)
 
     def test_all(self, epoch):
         self.model.eval()

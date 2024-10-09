@@ -3,6 +3,7 @@ import threading
 from typing import Dict,List
 from typing import Callable
 import torch
+from networkx import neighbors
 from scipy.special import expit
 from torch.distributed import rpc
 from typing import TYPE_CHECKING
@@ -147,6 +148,7 @@ class ModelStore:
         self.loss_value = 0
         self.lock = threading.Lock()
         self.resurrection_flag = False
+        self.avg_weight = 0
         if io_layers is not None:
             for layer_name in io_layers.keys():
                 self.layer_store[layer_name] = LayerParameterStore()
@@ -178,25 +180,26 @@ class ModelAvgRPCCommunicator:
         self.skips = compute_skip(self.world_size())[:-1]
         self.skip_index = 0
 
-        self.neighbor_model_store :Dict[int,Dict[str, LayerParameterStore]] = dict()
-        self.neighbor_weight_store : Dict[int, float] = dict()
-        #self.init_neighbor_model_store()
+        self.neighbor_model_store :Dict[int,ModelStore] = dict()
+        self.init_neighbor_model_store()
+        self.avg_weight = 0
 
+        '''
         self.buffer_size = 2
         self.model_recv_buffer :List[ModelStore]= self.creat_model_recv_buffer(self.buffer_size)
         self.is_aggregated = [False for _ in range(self.buffer_size)]
+        '''
 
         #if style == 'buffer':
         #    self.send_func = self.send_model_param_to_buffer
 
         self.index = 1
 
-        self.split_packages = self.initialize_layer_packages(send_targets_num= self.origin_world_size - 1)
+        #self.split_packages = self.initialize_layer_packages(send_targets_num= self.origin_world_size - 1)
         self.down_neighbor, self.right_neighbor = get_down_and_right_neighbors(self.origin_world_size, self.rank)
 
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
-        print(f"rank {self.rank} layers number {len(self.io_layers)}")
 
     def initialize_layer_packages(self, send_targets_num=None):
         if send_targets_num is None:
@@ -276,10 +279,12 @@ class ModelAvgRPCCommunicator:
                         io_layers[layer_name].bias = param
         return io_layers
 
-    def init_neighbor_model_store(self):
-        for node in self.send_rank_group[self.group_id]:
-            if node == self.rank:
-                continue
+    def init_neighbor_model_store(self,topology_type = "ring"):
+        neighbors_node_ranks = []
+        if topology_type == "ring":
+            neighbors_node_ranks.append((self.rank + 1) % self.origin_world_size)
+            neighbors_node_ranks.append((self.rank - 1) % self.origin_world_size)
+        for node in neighbors_node_ranks:
             self.neighbor_model_store[node] = dict()
             for layer_name in self.io_layers.keys():
                 self.neighbor_model_store[node][layer_name] = LayerParameterStore()
@@ -486,30 +491,42 @@ class ModelAvgRPCCommunicator:
         if self.index % 3 == 0:
             self.aggregate_model_from_buff()
 
-    def average_model_param_from_store(self):
+    def send_all_model_param_to_neighbor_alg1(self):
+        for node in self.neighbor_model_store.keys():
+            self.send_model_param_dict_to_store(node)
+
+        self.average_model_param_with_neighbors()
+
+    def average_model_param_with_neighbors(self):
+        node_num = len(self.neighbor_model_store.keys())+1
+        invesre_loss_sum = 1/self.loss_value
+        for neighbor_node, model_store in self.neighbor_model_store.items():
+            if model_store.loss_value == 0:
+                return
+            invesre_loss_sum += 1/model_store.loss_value
+
+        self.avg_weight = (1 / self.loss_value) / invesre_loss_sum
+        for model_store in self.neighbor_model_store.values():
+            model_store.avg_weight = (1 / model_store.loss_value) / invesre_loss_sum
+
         with torch.no_grad():
-            if not model_avg_rpc_communicator.lock.acquire(timeout= 3):
-                raise Exception("lock acquire failed at average_model_param_from_store")
             for layer_name, layer in self.io_layers.items():
-                weight = torch.zeros_like(layer.weight)
-                bias = torch.zeros_like(layer.bias)
-                local_w = self.origin_world_size
-                for node, layer_dict in self.neighbor_model_store.items():
-                    sigmoid_param = 0
-                    if model_avg_rpc_communicator.loss_value != 0:
-                        sigmoid_param = ModelAvgRPCCommunicator.loss_weight * (
-                    self.loss_value - layer_dict[layer_name].loss_value) / self.loss_value
-                    recv_w = expit(sigmoid_param)
-                    local_w -= recv_w
-                    weight += layer_dict[layer_name].weight * recv_w
-                    bias += layer_dict[layer_name].bias * recv_w
-                weight += layer.weight * local_w
-                bias += layer.bias * local_w
-                weight /= self.origin_world_size
-                bias /= self.origin_world_size
-                layer.weight = weight
-                layer.bias = bias
-            #model_avg_rpc_communicator.lock.release()
+                if layer.weight is not None:
+                    layer.weight.mul_(self.avg_weight)
+                if layer.bias is not None:
+                    layer.bias.mul_(self.avg_weight)
+
+        for neighbor_node, model_store in self.neighbor_model_store.items():
+            if not model_store.lock.acquire(timeout= 3):
+                raise Exception("lock acquire failed at average_model_param_with_neighbors")
+            for layer_name, layer in model_store.layer_store.items():
+                if layer_name in self.io_layers.keys():
+                    if layer.weight is not None and layer_name in self.io_layers.keys():
+                        self.io_layers[layer_name].weight = layer.weight * model_store.avg_weight
+                    if layer.bias is not None:
+                        self.io_layers[layer_name].bias = layer.bias * model_store.avg_weight
+            model_store.lock.release()
+
 
     def average_model_param_from_store2(self):
         if self.loss_value == 0:
@@ -637,10 +654,11 @@ def receive_model_param_dict_to_neighbor_store(from_rank, from_rank_iter, from_l
     global model_avg_rpc_communicator
     model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter ,speed= speed)
     for layer_name, model_weight, model_bias in data:
-        model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].weight = model_weight
-        model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].bias = model_bias
-        model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].term = from_rank_iter
-        model_avg_rpc_communicator.neighbor_model_store[from_rank][layer_name].loss_value = from_loss
+        with model_avg_rpc_communicator.neighbor_model_store[from_rank].lock:
+            model_avg_rpc_communicator.neighbor_model_store[from_rank].layer_store[layer_name].weight = model_weight
+            model_avg_rpc_communicator.neighbor_model_store[from_rank].layer_store[layer_name].bias = model_bias
+            model_avg_rpc_communicator.neighbor_model_store[from_rank].layer_store[layer_name].term = from_rank_iter
+            model_avg_rpc_communicator.neighbor_model_store[from_rank].layer_store[layer_name].loss_value = from_loss
 
 def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, data, speed = 0, resurrection_flag = False):
     global model_avg_rpc_communicator

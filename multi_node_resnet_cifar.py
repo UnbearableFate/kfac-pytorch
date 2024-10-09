@@ -76,7 +76,7 @@ if __name__ == '__main__':
                          timestamp=timestamp,  precondtioner=preconditioner,
                          transform_train=None, transform_test=None,experiment_name="resnet18_cifar10")
 
-    #mgr.rpc_train_and_test()
+    mgr.rpc_train_and_test()
     print("Done!")
 
 # cd /work/NBB/yu_mingzhe/kfac-pytorch

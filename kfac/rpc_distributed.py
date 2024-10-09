@@ -718,7 +718,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.send_all_model_param_alg06()
+            self.model_avg_rpc.send_all_model_param_to_neighbor_alg1()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
