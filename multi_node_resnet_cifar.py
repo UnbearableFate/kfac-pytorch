@@ -74,7 +74,8 @@ if __name__ == '__main__':
                          sampler_func= None,
                          train_com_method='rpc',  is_2nd_order=True, epochs=200, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10")
+                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10",
+                         recover=False)
 
     mgr.rpc_train_and_test()
     print("Done!")
@@ -82,4 +83,4 @@ if __name__ == '__main__':
 # cd /work/NBB/yu_mingzhe/kfac-pytorch
 # module load openmpi/4.1.6/nvhpc24.5-cuda12.4 
 # conda activate py311
-# mpirun -n 2 python ./multi_node_resnet_cifar.py
+# mpirun -n 4 python ./multi_node_resnet_cifar.py

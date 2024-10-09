@@ -13,56 +13,50 @@ import math
 
 def get_grid_dimensions(N):
     """
-    Compute the grid dimensions (rows and cols) such that:
-    - The grid is as close to a square as possible.
-    - The difference between rows and cols is at most 1.
-    - The grid can accommodate all N nodes, possibly with some empty slots.
+    给定节点总数N，计算网格的行和列数。
+
+    参数:
+        N (int): 总节点数量。
+
+    返回:
+        rows (int): 网格的行数。
+        cols (int): 网格的列数。
     """
-    sqrt_N = math.sqrt(N)
-    # Possible rows: floor and ceil of sqrt(N)
-    possible_rows = [int(math.floor(sqrt_N)), int(math.ceil(sqrt_N))]
-    possible_rows = list(set(possible_rows))  # Ensure uniqueness
+    import math
+    # 假设网格接近正方形（行数与列数尽量相等）
+    rows = int(math.sqrt(N))
+    cols = rows
+    while rows * cols < N:
+        cols += 1
+    return rows, cols
 
-    # Try to find the best grid dimensions
-    best_rows, best_cols = None, None
-    min_difference = None
+def get_neighbors(origin_world_size, local_rank):
+    """
+    计算给定节点的上下左右邻居。
 
-    for rows in possible_rows:
-        if rows <= 0:
-            continue
-        cols = int(math.ceil(N / rows))
-        if abs(rows - cols) <= 1:
-            if min_difference is None or abs(rows - cols) < min_difference:
-                min_difference = abs(rows - cols)
-                best_rows, best_cols = rows, cols
+    参数:
+        origin_world_size (int): 总节点数量。
+        local_rank (int): 当前节点的编号。
 
-    # If no acceptable grid found, increment rows until acceptable
-    if best_rows is None:
-        rows = int(math.floor(sqrt_N))
-        while True:
-            cols = int(math.ceil(N / rows))
-            if abs(rows - cols) <= 1:
-                best_rows, best_cols = rows, cols
-                break
-            rows += 1
-
-    return best_rows, best_cols
-
-def get_down_and_right_neighbors(origin_world_size, local_rank):
+    返回:
+        up_rank (int): 上邻居节点编号。
+        down_rank (int): 下邻居节点编号。
+        left_rank (int): 左邻居节点编号。
+        right_rank (int): 右邻居节点编号。
+    """
     N = origin_world_size
 
-    # Step 1: Compute grid dimensions (rows and cols)
+    # Step 1: 计算网格的行和列数量
     rows, cols = get_grid_dimensions(N)
 
-    # Step 2: Compute the current node's position in the grid
+    # Step 2: 计算当前节点在网格中的位置
     row = local_rank // cols
     col = local_rank % cols
 
-    # Initialize down and right neighbor ranks
-    down_rank = None
-    right_rank = None
+    # 初始化上下左右邻居
+    up_rank, down_rank, left_rank, right_rank = None, None, None, None
 
-    # Step 3: Compute the down neighbor with wrap-around
+    # Step 3: 计算下邻居（具有环绕功能）
     down_row = (row + 1) % rows
     down_col = col
     while True:
@@ -71,14 +65,26 @@ def get_down_and_right_neighbors(origin_world_size, local_rank):
             down_rank = down_rank_candidate
             break
         else:
-            # Move to the next row (wrap-around)
             down_row = (down_row + 1) % rows
             if down_row == row:
-                # No valid neighbor found after a full loop
-                down_rank = local_rank  # Self-loop if necessary
+                down_rank = local_rank  # 自循环
                 break
 
-    # Step 4: Compute the right neighbor with wrap-around
+    # Step 4: 计算上邻居（具有环绕功能）
+    up_row = (row - 1 + rows) % rows
+    up_col = col
+    while True:
+        up_rank_candidate = up_row * cols + up_col
+        if up_rank_candidate < N:
+            up_rank = up_rank_candidate
+            break
+        else:
+            up_row = (up_row - 1 + rows) % rows
+            if up_row == row:
+                up_rank = local_rank  # 自循环
+                break
+
+    # Step 5: 计算右邻居（具有环绕功能）
     right_row = row
     right_col = (col + 1) % cols
     while True:
@@ -87,14 +93,26 @@ def get_down_and_right_neighbors(origin_world_size, local_rank):
             right_rank = right_rank_candidate
             break
         else:
-            # Move to the next column (wrap-around)
             right_col = (right_col + 1) % cols
             if right_col == col:
-                # No valid neighbor found after a full loop
-                right_rank = local_rank  # Self-loop if necessary
+                right_rank = local_rank  # 自循环
                 break
 
-    return down_rank, right_rank
+    # Step 6: 计算左邻居（具有环绕功能）
+    left_row = row
+    left_col = (col - 1 + cols) % cols
+    while True:
+        left_rank_candidate = left_row * cols + left_col
+        if left_rank_candidate < N:
+            left_rank = left_rank_candidate
+            break
+        else:
+            left_col = (left_col - 1 + cols) % cols
+            if left_col == col:
+                left_rank = local_rank  # 自循环
+                break
+
+    return up_rank, down_rank, left_rank, right_rank
 
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
@@ -177,11 +195,13 @@ class ModelAvgRPCCommunicator:
         self.loss_value = 0
         self.lock = threading.Lock()
         random.seed((rank+13)*17)
-        self.skips = compute_skip(self.world_size())[:-1]
-        self.skip_index = 0
+        #self.skips = compute_skip(self.world_size())[:-1]
+        #self.skip_index = 0
+
+        self.grid_neighbors = get_neighbors(self.origin_world_size, self.rank)
 
         self.neighbor_model_store :Dict[int,ModelStore] = dict()
-        self.init_neighbor_model_store()
+        self.init_neighbor_model_store([self.grid_neighbors[0],self.grid_neighbors[2]])
         self.avg_weight = 0
 
         '''
@@ -196,7 +216,7 @@ class ModelAvgRPCCommunicator:
         self.index = 1
 
         #self.split_packages = self.initialize_layer_packages(send_targets_num= self.origin_world_size - 1)
-        self.down_neighbor, self.right_neighbor = get_down_and_right_neighbors(self.origin_world_size, self.rank)
+        
 
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
@@ -279,9 +299,8 @@ class ModelAvgRPCCommunicator:
                         io_layers[layer_name].bias = param
         return io_layers
 
-    def init_neighbor_model_store(self,topology_type = "ring"):
-        neighbors_node_ranks = []
-        if topology_type == "ring":
+    def init_neighbor_model_store(self,neighbors_node_ranks=[]):
+        if neighbors_node_ranks == []:
             neighbors_node_ranks.append((self.rank + 1) % self.origin_world_size)
             neighbors_node_ranks.append((self.rank - 1) % self.origin_world_size)
         for node in neighbors_node_ranks:
@@ -494,8 +513,19 @@ class ModelAvgRPCCommunicator:
     def send_all_model_param_to_neighbor_alg1(self):
         for node in self.neighbor_model_store.keys():
             self.send_model_param_dict_to_store(node)
+        self.average_model_param_with_neighbors()
+
+    def send_all_model_param_to_neighbor_alg2(self):
+        self.send_model_param_dict_to_store(self.grid_neighbors[1])
+        self.send_model_param_dict_to_store(self.grid_neighbors[3])
+        self.average_model_param_with_neighbors()
+    
+    def send_all_model_param_to_neighbor_alg3(self):
+        for node in self.neighbor_model_store.keys():
+            self.send_model_param_dict_to_store(node)
 
         self.average_model_param_with_neighbors()
+        
 
     def average_model_param_with_neighbors(self):
         node_num = len(self.neighbor_model_store.keys())+1
@@ -522,9 +552,10 @@ class ModelAvgRPCCommunicator:
             for layer_name, layer in model_store.layer_store.items():
                 if layer_name in self.io_layers.keys():
                     if layer.weight is not None and layer_name in self.io_layers.keys():
-                        self.io_layers[layer_name].weight = layer.weight * model_store.avg_weight
+                        self.io_layers[layer_name].weight += layer.weight * model_store.avg_weight
                     if layer.bias is not None:
-                        self.io_layers[layer_name].bias = layer.bias * model_store.avg_weight
+                        self.io_layers[layer_name].bias += layer.bias * model_store.avg_weight
+            model_store.loss_value = 0 #means it has been aggregated
             model_store.lock.release()
 
 

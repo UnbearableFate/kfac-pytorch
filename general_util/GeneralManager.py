@@ -44,7 +44,7 @@ elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
     check_point_path = "/work/NBB/yu_mingzhe/kfac-pytorch/checkpoints"
 
 class GeneralManager:
-    def __init__(self,experiment_name:str, dataset_name, model, sampler_func = None, train_com_method="ddp", is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",transform_train=None, transform_test=None, precondtioner=None):
+    def __init__(self,experiment_name:str, dataset_name, model, sampler_func = None, train_com_method="ddp", is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",transform_train=None, transform_test=None, precondtioner=None ,recover = False):
         self.experiment_name_detail = None
         self.writer = None
         batch_size=batch_size
@@ -53,8 +53,8 @@ class GeneralManager:
         model_name = type(model).__name__
         if hasattr(model, "model_name"):
             model_name = model.model_name
-        if experiment_name.endswith("#"):
-            log_detail = f"{dataset_name}/{model_name}/{experiment_name}"
+        if recover:
+            log_detail = f"{dataset_name}/{model_name}/{experiment_name}_re"
         else:
             log_detail = f"{dataset_name}/{model_name}/{experiment_name}_{timestamp}"
         log_dir = os.path.join(LOG_DIR,log_detail)
@@ -72,8 +72,8 @@ class GeneralManager:
 
         self.loss_func = nn.CrossEntropyLoss()
         #self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.006, momentum = 0.8) #torch.optim.Adam(model.parameters())
-        self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0005)
-        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.002, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
+        self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0008)
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.005, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
         if is_2nd_order:
             if precondtioner is not None:
                 self.preconditioner = precondtioner
@@ -88,26 +88,20 @@ class GeneralManager:
             self.preconditioner = None
         self.start_epoch = 0
 
-        """
-        self.checkpoint_file_path = os.path.join(check_point_path, experiment_name, f"main_checkpoint.pth")
-        self.best_loss_file_path = os.path.join(check_point_path, experiment_name, f"best_loss_checkpoint.txt")
-        self.best_loss_lock = FileLock(self.best_loss_file_path + ".lock")
-        self.best_loss = float("inf")
+        self.checkpoint_file_path = os.path.join(check_point_path, experiment_name, f"{rank}.pth")
         current_checkpoint_path = os.path.join(check_point_path, experiment_name)
         if not os.path.exists(current_checkpoint_path):
             if rank == 0:
                 os.makedirs(current_checkpoint_path)
-                with open(self.best_loss_file_path, "w") as f:
-                    f.write(str(self.best_loss))
         elif os.path.exists(self.checkpoint_file_path):
             checkpoint = torch.load(self.checkpoint_file_path)
             model.load_state_dict(checkpoint["model"])
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.preconditioner.load_state_dict(checkpoint["preconditioner"], compute_inverses=False)
-            self.start_epoch = checkpoint["epoch"]
+            self.start_epoch = checkpoint["epoch"] + 1
             self.scheduler.load_state_dict(checkpoint["scheduler"])
-        """
-
+            print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
+        dist.barrier()
         self.dataset_name = dataset_name
         self.device = device
         self.model = model
@@ -139,7 +133,8 @@ class GeneralManager:
 
         for i in range(0, self.epochs):
             self.train(epoch=i)
-            self.test_all(epoch=i)
+            self.test_all_top_1_and_top_n(epoch=i)
+            self.save_checkpoint(epoch=i)
 
         self.writer.close()
 
@@ -154,10 +149,10 @@ class GeneralManager:
         dist.barrier()
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
 
-        for i in range(self.start_epoch + 1, self.epochs):
+        for i in range(self.start_epoch, self.epochs):
             self.rpc_train(epoch=i)
-            #self.save_best_checkpoint(epoch=i,loss=current_lost)
-            self.test_local(epoch=i)
+            self.test_local_top(epoch=i, topk=(1, 3))
+            self.save_checkpoint(epoch=i)
 
         self.writer.close()
         dist.barrier()
@@ -293,6 +288,51 @@ class GeneralManager:
             accuracy = correct_sum.item() / total_sum.item()
             self.writer.add_scalar('Accuracy/test', accuracy, epoch)
 
+    def test_all_top_1_and_top_n(self, epoch, top_n=3):
+        self.model.eval()
+        
+        # 初始化 Top-1 和 Top-N 精度的计数
+        correct_top_1 = 0
+        correct_top_n = 0
+        total = 0
+
+        with torch.no_grad():
+            for data, target in self.data_manager.test_loader:
+                data, target = data.to(self.device), target.to(self.device)
+                output = self.model(data)
+
+                # Top-1 精度：获取预测的最大值的索引
+                pred_top_1 = output.argmax(dim=1, keepdim=True)  # 获取最大值索引
+                correct_top_1 += pred_top_1.eq(target.view_as(pred_top_1)).sum().item()
+                
+                # Top-N 精度：获取前 top_n 个预测的索引
+                _, pred_top_n = output.topk(top_n, dim=1, largest=True, sorted=True)
+                
+                # 将 target 从 [batch_size] 形状扩展为 [batch_size, 1] 以便与 top_n 的预测比较
+                target_expanded = target.view(-1, 1)
+
+                # 检查前 top_n 个预测是否包含目标类别
+                correct_top_n += pred_top_n.eq(target_expanded).sum().item()
+
+                # 累加总样本数
+                total += target.size(0)
+
+        # 把 correct_top_1, correct_top_n 和 total 转换成 tensor 以便进行分布式计算
+        correct_total_tensor = torch.tensor([correct_top_1, correct_top_n, total]).to(self.device)
+
+        # 使用 dist.all_reduce 把所有节点的 correct_top_1, correct_top_n 和 total 累加到 rank 0 节点
+        dist.all_reduce(correct_total_tensor)
+
+        # 只在 rank 0 上计算最终的 Top-1 和 Top-N 精度并记录
+        if self.writer is not None and self.rank == 0:  # 假设 self.rank 存储了当前进程的 rank
+            correct_top_1_sum, correct_top_n_sum, total_sum = correct_total_tensor.unbind()
+            top_1_accuracy = correct_top_1_sum.item() / total_sum.item()
+            top_n_accuracy = correct_top_n_sum.item() / total_sum.item()
+            
+            # 记录 Top-1 和 Top-N 精度到 TensorBoard
+            self.writer.add_scalar('Top-1 Accuracy/test', top_1_accuracy, epoch)
+            self.writer.add_scalar(f'Top-{top_n} Accuracy/test', top_n_accuracy, epoch)
+
     def test_by_rpc(self, epoch):
         self.model.eval()
         correct = 0
@@ -325,6 +365,35 @@ class GeneralManager:
         accuracy = correct / total
         self.writer.add_scalar('Accuracy/test', accuracy, epoch)
 
+    def test_local_top(self, epoch, topk=(1,)):  # 添加 topk 参数，支持多种 Top-N 精度
+        self.model.eval()
+        topk_correct = {k: 0 for k in topk}  # 初始化每个 Top-N 精度的正确计数
+        total = 0
+        with torch.no_grad():
+            for data, target in self.data_manager.test_loader:
+                data, target = data.to(self.device), target.to(self.device)
+                output = self.model(data)
+                
+                # 获取前 topk 个类别及其对应的索引
+                _, pred = output.topk(max(topk), dim=1, largest=True, sorted=True)  # pred 形状为 (batch_size, max(topk))
+                pred = pred.t()  # 转置使 pred 的形状为 (max(topk), batch_size)
+                
+                # target shape: (batch_size), pred shape: (max(topk), batch_size)
+                correct = pred.eq(target.view(1, -1).expand_as(pred))  # shape: (max(topk), batch_size)
+                
+                for k in topk:
+                    topk_correct[k] += correct[:k].reshape(-1).float().sum(0).item()  # 计算 Top-k 精度的正确数
+                
+                total += target.size(0)
+
+        # 计算每个 Top-k 精度
+        topk_accuracies = {f'Top-{k} Accuracy': topk_correct[k] / total for k in topk}
+        
+        # 将 Top-N 精度输出到日志
+        for k, acc in topk_accuracies.items():
+            self.writer.add_scalar(f'{k}/test', acc, epoch)
+        
+
     def average_health_nodes_param_tensor_fusion_async(self):
         model = self.model
         health_nodes = mischief.get_health_nodes()
@@ -353,27 +422,9 @@ class GeneralManager:
             'epoch': epoch,
             'scheduler': self.scheduler.state_dict()
         }
-        torch.save(state, self.checkpoint_file_path)
-        print(f"Model saved at epoch {epoch} in rank {self.rank}")
-
-    def save_best_checkpoint(self, epoch ,loss):
-        if self.best_loss < loss:
-            return
-        with self.best_loss_lock:
-            with open(self.best_loss_file_path, "r") as f:
-                best_loss = float(f.read())
-            if loss < best_loss:
-                state = {
-                    'model': self.model.state_dict(),
-                    'optimizer': self.optimizer.state_dict(),
-                    'preconditioner': self.preconditioner.state_dict(),
-                    'epoch': epoch,
-                    'scheduler': self.scheduler.state_dict()
-                }
-                torch.save(state, self.checkpoint_file_path)
-                with open(self.best_loss_file_path, "w") as f:
-                    f.write(str(loss))
-                self.best_loss = loss
-                print(f"Model saved at epoch {epoch} in rank {self.rank}")
-            else:
-                self.best_loss = best_loss
+        try:
+            temp_path = self.checkpoint_file_path + ".temp"
+            torch.save(state, temp_path)
+            os.rename(temp_path,self.checkpoint_file_path)   
+        except Exception as e:
+            print(f"Save checkpoint error: {e} in rank {self.rank} at epoch {epoch} file path {self.checkpoint_file_path}")
