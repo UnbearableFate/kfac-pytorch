@@ -199,16 +199,16 @@ class ModelAvgRPCCommunicator:
         #self.skip_index = 0
 
         self.grid_neighbors = get_neighbors(self.origin_world_size, self.rank)
-
+        """
         self.neighbor_model_store :Dict[int,ModelStore] = dict()
         self.init_neighbor_model_store([self.grid_neighbors[0],self.grid_neighbors[2]])
         self.avg_weight = 0
+        """
 
-        '''
-        self.buffer_size = 2
+        
+        self.buffer_size = 4
         self.model_recv_buffer :List[ModelStore]= self.creat_model_recv_buffer(self.buffer_size)
         self.is_aggregated = [False for _ in range(self.buffer_size)]
-        '''
 
         #if style == 'buffer':
         #    self.send_func = self.send_model_param_to_buffer
@@ -508,6 +508,29 @@ class ModelAvgRPCCommunicator:
             self.send_model_param_to_buffer(targets[i], layer_names=layers[i*send_layer_num: (i+1)*send_layer_num])
 
         if self.index % 3 == 0:
+            self.aggregate_model_from_buff()
+    
+    def send_all_model_param_alg07(self):
+        self.index += 1
+        self.send_model_param_to_buffer(self.grid_neighbors[1])
+        self.send_model_param_to_buffer(self.grid_neighbors[3])
+        if self.index % 3 == 0:
+            self.aggregate_model_from_buff()
+    
+    def send_all_model_param_alg08(self):
+        self.index += 1
+        for node in self.grid_neighbors:
+            self.send_model_param_to_buffer(node)
+        if self.index % 2 == 0:
+            self.aggregate_model_from_buff()
+    
+    def send_all_model_param_alg09(self):
+        self.index += 1
+        for node in range(self.origin_world_size):
+            if node == self.rank:
+                continue
+            self.send_model_param_to_buffer(node)
+        if self.index % 2 == 0:
             self.aggregate_model_from_buff()
 
     def send_all_model_param_to_neighbor_alg1(self):

@@ -93,11 +93,11 @@ class GeneralManager:
         if not os.path.exists(current_checkpoint_path):
             if rank == 0:
                 os.makedirs(current_checkpoint_path)
-        elif os.path.exists(self.checkpoint_file_path):
+        elif os.path.exists(self.checkpoint_file_path) and recover:
             checkpoint = torch.load(self.checkpoint_file_path)
             model.load_state_dict(checkpoint["model"])
             self.optimizer.load_state_dict(checkpoint["optimizer"])
-            self.preconditioner.load_state_dict(checkpoint["preconditioner"], compute_inverses=False)
+            self.preconditioner.load_state_dict(checkpoint["preconditioner"])
             self.start_epoch = checkpoint["epoch"] + 1
             self.scheduler.load_state_dict(checkpoint["scheduler"])
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
@@ -183,8 +183,10 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
                 
-                if random.random() < 0.2:
-                    time.sleep(0.08)
+                
+                if random.random() < 0.6:
+                    time.sleep(0.04)
+                
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
@@ -223,13 +225,20 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
                 
-                if random.random() < 0.2:
-                    time.sleep(0.08)
+                #if (self.rank == 2 or self.rank == 13):
+                #    time.sleep(0.04)
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
 
                 self.optimizer.step()
+
+                with torch.no_grad():
+                    for param in self.model.parameters():
+                        if param.requires_grad:
+                            noise_std_factor = math.sqrt(2*self.scheduler.get_last_lr()[0])
+                            noise = torch.randn_like(param) * noise_std_factor * torch.sqrt(torch.tensor(self.scheduler.get_last_lr()[0]))
+                            param.add_(noise)
                 self.scheduler.step()
 
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
@@ -239,9 +248,9 @@ class GeneralManager:
 
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.send_model_param()
-                """
+                
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
-                self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
+                #self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
 
                 if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
                     self.rpc_communicator.task_reassign_rpc.reassign_task_callback()
@@ -250,15 +259,14 @@ class GeneralManager:
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
 
-                if self.writer is not None and batch_idx % 20 == 0:
+                if self.writer is not None and batch_idx % 30 == 0:
                     process = psutil.Process(os.getpid())
                     self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
-                    allocated_memory = torch.cuda.memory_allocated(self.rank%4)  # 0 表示 GPU 0
-                    cached_memory = torch.cuda.memory_reserved(self.rank%4)  # 0 表示 GPU 0
+                    allocated_memory = torch.cuda.memory_allocated(0)  # 0 表示 GPU 0
+                    cached_memory = torch.cuda.memory_reserved(0)  # 0 表示 GPU 0
                     self.writer.add_scalar('Memory/GPU_Allocated', allocated_memory / 1024**3, (epoch+1)*batch_idx)
                     self.writer.add_scalar('Memory/GPU_Cached', cached_memory / 1024**3, (epoch+1)*batch_idx)
-                """
-                #rpc_distributed.global_communicator.print_rpc_state(f"end epoch {epoch} batch {batch_idx}")
+                
                 t.update()
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
