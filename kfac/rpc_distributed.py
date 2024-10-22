@@ -13,6 +13,7 @@ import logging
 import kfac.rpc_model_param_avg as model_param_avg_rpc
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.data_send_scheduler import DataSendScheduler
+import numpy as np
 
 from typing import TYPE_CHECKING ,List
 if TYPE_CHECKING:
@@ -163,7 +164,7 @@ class KFacRPCCommunicator:
         self.eigen_tensor_packages = None
         self.send_rank_group, self.group_id= create_groups(world_size,rank)
 
-        send_intervals = {'model_param': 3, 'factor': 13, 'eigen': 21}
+        send_intervals = {'model_param': 3, 'factor': 7, 'eigen': 13}
         self.data_send_scheduler = DataSendScheduler(send_intervals)
 
         self.preconditioner = preconditioner
@@ -246,6 +247,14 @@ class KFacRPCCommunicator:
         global_communicator = self
 
         self.gradient_computation_start = False
+
+    def compute_iter_variance(self):
+    # 提取所有节点的iter值
+        iter_values = [node_state.iter for node_state in self.node_states.values()]
+    
+    # 计算方差
+        variance = np.std(iter_values)
+        return variance
 
     def close_rpc(self):
         rpc.shutdown()
@@ -517,9 +526,13 @@ class KFacRPCCommunicator:
         avg = summ / ct
 
         for state in self.get_health_node_state_list():
-            if state.rank not in computational_efficiency:
+            if avg == 0:
+                computational_efficiency[state.rank] = 1000
+                continue
+            if state.rank not in computational_efficiency or computational_efficiency[state.rank] == 0:
                 computational_efficiency[state.rank] = avg
         self.print_rpc_state(f"computation efficiency: {computational_efficiency}")
+            
         return computational_efficiency
 
     def update_node_state_list(self, new_health_node_list):
@@ -669,15 +682,15 @@ class KFacRPCCommunicator:
     def computation_volume_statistic(self):
         current_t = self.current_t()
         if current_t % 100 == 0:
-            self.computation_volume_accumulation = 0
-            self.time_cost_accumulation = 0
+            self.computation_volume_accumulation /= 1000
+            self.time_cost_accumulation /= 1000
 
         loop_time_cost = time.time() - self.loop_start_time
         self.time_cost_accumulation += loop_time_cost
         for layer_name in self.current_inverse_computation_layers:
-            self.computation_volume_accumulation += self.layers_workload[layer_name]["A"]*1.1  +self.layers_workload[layer_name]["G"]
+            self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]*1.1  +self.layers_workload[layer_name]["G"]) #* 0.001
         for layer_name in self.participate_factor_computation_layers:
-            self.computation_volume_accumulation += self.layers_workload[layer_name]["A"]*0.1
+            self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]*0.1) #* 0.001
 
         self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
 
@@ -718,7 +731,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.send_all_model_param_alg08()
+            self.model_avg_rpc.send_all_model_param_alg09()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):

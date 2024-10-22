@@ -63,7 +63,7 @@ if __name__ == '__main__':
     device = torch.device(f"cuda:0")
     model = model.to(device)
     model = DDP(model)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,factor_update_steps=13 ,inv_update_steps=21,lr=0.1)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,factor_update_steps=7,inv_update_steps=13,lr=0.1)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -75,9 +75,9 @@ if __name__ == '__main__':
 
     mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='ddp', is_2nd_order=True, epochs=250, device=device,
+                         train_com_method='ddp', is_2nd_order=True, epochs=180, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10",
+                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_max_one_show",
                          recover=False)
 
     mgr.train_and_test()

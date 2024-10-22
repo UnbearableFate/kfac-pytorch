@@ -131,7 +131,7 @@ def compute_skip(world_size):
 
 def compute_recv_weight_by_loss(local_loss, recv_loss):
     sigmoid_param = local_loss - recv_loss / local_loss
-    return expit(sigmoid_param*0.3)
+    return expit(sigmoid_param*0.7)
 
 class LayerParameterStore:
     def __init__(self):
@@ -199,13 +199,12 @@ class ModelAvgRPCCommunicator:
         #self.skip_index = 0
 
         self.grid_neighbors = get_neighbors(self.origin_world_size, self.rank)
+
         """
         self.neighbor_model_store :Dict[int,ModelStore] = dict()
-        self.init_neighbor_model_store([self.grid_neighbors[0],self.grid_neighbors[2]])
+        self.init_neighbor_model_store(self.grid_neighbors)
         self.avg_weight = 0
         """
-
-        
         self.buffer_size = 4
         self.model_recv_buffer :List[ModelStore]= self.creat_model_recv_buffer(self.buffer_size)
         self.is_aggregated = [False for _ in range(self.buffer_size)]
@@ -518,11 +517,23 @@ class ModelAvgRPCCommunicator:
             self.aggregate_model_from_buff()
     
     def send_all_model_param_alg08(self):
-        self.index += 1
         for node in self.grid_neighbors:
             self.send_model_param_to_buffer(node)
-        if self.index % 2 == 0:
-            self.aggregate_model_from_buff()
+        self.aggregate_model_from_buff()
+
+    def send_all_model_param_alg09(self):
+         # Get list of possible targets excluding self.rank
+        target_candidates = list(range(self.origin_world_size))
+        target_candidates.remove(self.rank)
+
+        # Randomly select targets for each package
+        random.shuffle(target_candidates)
+        targets = target_candidates[:3]
+
+        for target in targets:
+            self.send_model_param_to_buffer(target)
+        
+        self.aggregate_model_from_buff()
     
     def send_all_model_param_alg09(self):
         self.index += 1
@@ -558,9 +569,9 @@ class ModelAvgRPCCommunicator:
                 return
             invesre_loss_sum += 1/model_store.loss_value
 
-        self.avg_weight = (1 / self.loss_value) / invesre_loss_sum
+        self.avg_weight = 1.0/ node_num # (1 / self.loss_value) / invesre_loss_sum
         for model_store in self.neighbor_model_store.values():
-            model_store.avg_weight = (1 / model_store.loss_value) / invesre_loss_sum
+            model_store.avg_weight = 1.0 / node_num # (1 / model_store.loss_value) / invesre_loss_sum
 
         with torch.no_grad():
             for layer_name, layer in self.io_layers.items():

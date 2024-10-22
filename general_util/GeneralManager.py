@@ -43,6 +43,14 @@ elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
     Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
     check_point_path = "/work/NBB/yu_mingzhe/kfac-pytorch/checkpoints"
 
+delay_list_dict = [
+    [0.0071, 0.0046, 0.0043, 0.0119, 0.0049, 0.0121, 0.0097, 0.0029, 0.0238, 0.0069, 0.0062, 0.0008, 0.0148, 0.0114, 0.0098, 0.0006],
+    [0.0009, 0.0031, 0.0159, 0.0018, 0.015, 0.0603, 0.0068, 0.0025, 0.0033, 0.0138, 0.0321, 0.0184, 0.0112, 0.0149, 0.0013, 0.0605],
+    [0.0016, 0.0311, 0.0176, 0.0288, 0.0139, 0.0399, 0.016, 0.0082, 0.1098, 0.0273, 0.0048, 0.0105, 0.0076, 0.0638, 0.0028, 0.0155],
+    [0.0063, 0.0216, 0.1123, 0.0504, 0.0433, 0.0345, 0.0113, 0.0069, 0.0411, 0.0138, 0.0422, 0.0527, 0.0197, 0.0156, 0.0114, 0.0788],
+    [0.004, 0.0055, 0.0506, 0.1451, 0.0862, 0.0365, 0.0095, 0.046, 0.116, 0.0207, 0.0056, 0.0395, 0.0476, 0.0403, 0.0086, 0.0179]
+]
+
 class GeneralManager:
     def __init__(self,experiment_name:str, dataset_name, model, sampler_func = None, train_com_method="ddp", is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",transform_train=None, transform_test=None, precondtioner=None ,recover = False):
         self.experiment_name_detail = None
@@ -68,10 +76,10 @@ class GeneralManager:
             raise RuntimeError(f"Unable to create log directory: {log_dir}")
 
         self.data_manager = DataPreparer(data_path_root=DATA_DIR, dataset_name=dataset_name, world_size=world_size, rank=rank,
-                                         sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test)
+                                         sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        #self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.006, momentum = 0.8) #torch.optim.Adam(model.parameters())
+        #self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.001, momentum = 0.9) #torch.optim.Adam(model.parameters())
         self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0008)
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.005, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
         if is_2nd_order:
@@ -90,6 +98,8 @@ class GeneralManager:
 
         self.checkpoint_file_path = os.path.join(check_point_path, experiment_name, f"{rank}.pth")
         current_checkpoint_path = os.path.join(check_point_path, experiment_name)
+
+        self.train_totoal_time = 0
         if not os.path.exists(current_checkpoint_path):
             if rank == 0:
                 os.makedirs(current_checkpoint_path)
@@ -100,6 +110,7 @@ class GeneralManager:
             self.preconditioner.load_state_dict(checkpoint["preconditioner"])
             self.start_epoch = checkpoint["epoch"] + 1
             self.scheduler.load_state_dict(checkpoint["scheduler"])
+            self.train_totoal_time = checkpoint["train_totoal_time"]
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
         dist.barrier()
         self.dataset_name = dataset_name
@@ -182,18 +193,15 @@ class GeneralManager:
                 output = self.model(data)
                 loss = self.loss_func(output, target)
                 loss.backward()
-                
-                
-                if random.random() < 0.6:
-                    time.sleep(0.04)
-                
+
+                time.sleep(delay_list_dict[4][self.rank])
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
                 self.scheduler.step()
                 t.update()
-
+            self.train_totoal_time += time.time() - start_time
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
@@ -225,20 +233,22 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
                 
-                #if (self.rank == 2 or self.rank == 13):
-                #    time.sleep(0.04)
+                if self.rank == 3:
+                    time.sleep(max(delay_list_dict[0]))
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
 
                 self.optimizer.step()
 
+                """
                 with torch.no_grad():
                     for param in self.model.parameters():
                         if param.requires_grad:
                             noise_std_factor = math.sqrt(2*self.scheduler.get_last_lr()[0])
                             noise = torch.randn_like(param) * noise_std_factor * torch.sqrt(torch.tensor(self.scheduler.get_last_lr()[0]))
                             param.add_(noise)
+                """
                 self.scheduler.step()
 
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
@@ -259,6 +269,7 @@ class GeneralManager:
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
 
+                '''
                 if self.writer is not None and batch_idx % 30 == 0:
                     process = psutil.Process(os.getpid())
                     self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
@@ -266,9 +277,12 @@ class GeneralManager:
                     cached_memory = torch.cuda.memory_reserved(0)  # 0 表示 GPU 0
                     self.writer.add_scalar('Memory/GPU_Allocated', allocated_memory / 1024**3, (epoch+1)*batch_idx)
                     self.writer.add_scalar('Memory/GPU_Cached', cached_memory / 1024**3, (epoch+1)*batch_idx)
-                
+                '''
+
                 t.update()
+            self.train_totoal_time += time.time() - start_time
             if self.writer is not None:
+                self.writer.add_scalar('Iteration Variance', rpc_distributed.global_communicator.compute_iter_variance(), self.train_totoal_time)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
 
@@ -338,8 +352,9 @@ class GeneralManager:
             top_n_accuracy = correct_top_n_sum.item() / total_sum.item()
             
             # 记录 Top-1 和 Top-N 精度到 TensorBoard
-            self.writer.add_scalar('Top-1 Accuracy/test', top_1_accuracy, epoch)
-            self.writer.add_scalar(f'Top-{top_n} Accuracy/test', top_n_accuracy, epoch)
+            time_as_step = round(self.train_totoal_time*1000)  # 使用训练迭代次数作为 x 轴
+            self.writer.add_scalar('Top-1 Accuracy/test', top_1_accuracy, time_as_step)
+            self.writer.add_scalar(f'Top-{top_n} Accuracy/test', top_n_accuracy, time_as_step)
 
     def test_by_rpc(self, epoch):
         self.model.eval()
@@ -398,9 +413,9 @@ class GeneralManager:
         topk_accuracies = {f'Top-{k} Accuracy': topk_correct[k] / total for k in topk}
         
         # 将 Top-N 精度输出到日志
+        time_as_step = round(self.train_totoal_time*1000)  # 使用训练time作为 x 轴
         for k, acc in topk_accuracies.items():
-            self.writer.add_scalar(f'{k}/test', acc, epoch)
-        
+            self.writer.add_scalar(f'{k}/test', acc, time_as_step)
 
     def average_health_nodes_param_tensor_fusion_async(self):
         model = self.model
@@ -428,6 +443,7 @@ class GeneralManager:
             'optimizer': self.optimizer.state_dict(),
             'preconditioner': self.preconditioner.state_dict(),
             'epoch': epoch,
+            'train_totoal_time': self.train_totoal_time,
             'scheduler': self.scheduler.state_dict()
         }
         try:

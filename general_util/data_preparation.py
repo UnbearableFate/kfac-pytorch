@@ -96,7 +96,7 @@ class DataPreparer:
         "CIFAR10": datasets.CIFAR10,
     }
 
-    def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None, train_transform =None,test_transform=None):
+    def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None, train_transform =None,test_transform=None,train_com_method='ddp'):
         self.data_path = os.path.join(data_path_root, dataset_name)
         if train_transform is not None:
             self.train_transform = train_transform
@@ -119,7 +119,10 @@ class DataPreparer:
         else:
             self.train_sampler = sampler(self.train_dataset,world_size,rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
 
-        self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
+        if train_com_method == 'ddp':
+            self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
+        else:
+            self.test_sampler = None
 
         self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=(self.train_sampler is None),
                                        sampler=self.train_sampler, num_workers=2, persistent_workers =False)
