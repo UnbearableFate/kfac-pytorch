@@ -410,6 +410,8 @@ class KFACBaseLayer:
             self._a_batch = (1 / self._a_count) * self._a_batch
         a_new = self._a_batch
         self._a_batch = None
+        if rpc_distributed.global_communicator.rpc_layers[self.name].factor["A"] is not None:
+            rpc_distributed.global_communicator.load_factor(self,"A")
         if self.a_factor is None:
             self.a_factor = torch.diag(a_new.new(a_new.shape[0]).fill_(1))
         self.a_factor = (alpha * self.a_factor) + ((1 - alpha) * a_new)
@@ -430,6 +432,8 @@ class KFACBaseLayer:
             self._g_batch = (1 / self._g_count) * self._g_batch
         g_new = self._g_batch
         self._g_batch = None
+        if rpc_distributed.global_communicator.rpc_layers[self.name].factor["G"] is not None:
+            rpc_distributed.global_communicator.load_factor(self,"G")
         if self.g_factor is None:
             self.g_factor = torch.diag(g_new.new(g_new.shape[0]).fill_(1))
         self.g_factor = (alpha * self.g_factor) + ((1 - alpha) * g_new)

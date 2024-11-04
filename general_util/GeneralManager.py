@@ -44,10 +44,10 @@ elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
     check_point_path = "/work/NBB/yu_mingzhe/kfac-pytorch/checkpoints"
 
 delay_list_dict = [
-    [0.0071, 0.0046, 0.0043, 0.0119, 0.0049, 0.0121, 0.0097, 0.0029, 0.0238, 0.0069, 0.0062, 0.0008, 0.0148, 0.0114, 0.0098, 0.0006],
+    [0.0006, 0.0071, 0.0046, 0.0043, 0.0119, 0.0049, 0.0121, 0.0097, 0.0029, 0.0238, 0.0069, 0.0062, 0.0008, 0.0148, 0.0114, 0.0098],
     [0.0009, 0.0031, 0.0159, 0.0018, 0.015, 0.0603, 0.0068, 0.0025, 0.0033, 0.0138, 0.0321, 0.0184, 0.0112, 0.0149, 0.0013, 0.0605],
     [0.0016, 0.0311, 0.0176, 0.0288, 0.0139, 0.0399, 0.016, 0.0082, 0.1098, 0.0273, 0.0048, 0.0105, 0.0076, 0.0638, 0.0028, 0.0155],
-    [0.0063, 0.0216, 0.1123, 0.0504, 0.0433, 0.0345, 0.0113, 0.0069, 0.0411, 0.0138, 0.0422, 0.0527, 0.0197, 0.0156, 0.0114, 0.0788],
+    [0.0345, 0.0063, 0.0216, 0.1123, 0.0504, 0.0433, 0.0113, 0.0069, 0.0411, 0.0138, 0.0422, 0.0527, 0.0197, 0.0156, 0.0114, 0.0788],
     [0.004, 0.0055, 0.0506, 0.1451, 0.0862, 0.0365, 0.0095, 0.046, 0.116, 0.0207, 0.0056, 0.0395, 0.0476, 0.0403, 0.0086, 0.0179]
 ]
 
@@ -194,7 +194,9 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
 
-                time.sleep(delay_list_dict[4][self.rank])
+                #if self.rank not in [0,6,9,15]:
+                #    time.sleep(0.5)
+                time.sleep(delay_list_dict[0][self.rank])
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
@@ -233,8 +235,7 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
                 
-                if self.rank == 3:
-                    time.sleep(max(delay_list_dict[0]))
+                time.sleep(delay_list_dict[3][self.rank])
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
@@ -256,11 +257,12 @@ class GeneralManager:
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
-                rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 rpc_distributed.global_communicator.send_model_param()
+                """
+                rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
-                #self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
+                self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
 
                 if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
                     self.rpc_communicator.task_reassign_rpc.reassign_task_callback()
@@ -268,7 +270,7 @@ class GeneralManager:
                     self.rpc_communicator.update_assignment_callback()
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
-
+                """
                 '''
                 if self.writer is not None and batch_idx % 30 == 0:
                     process = psutil.Process(os.getpid())

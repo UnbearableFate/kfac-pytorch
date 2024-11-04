@@ -11,6 +11,26 @@ if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 import math
 
+def exponential_topology_neighbors(world_size, rank):
+    """
+    Generate a list of neighbor ranks in an exponential topology.
+
+    Args:
+        world_size (int): Total number of nodes in the topology.
+        rank (int): The rank of the current node (0 <= rank < world_size).
+
+    Returns:
+        list: A list of neighbor ranks.
+    """
+    max_dimension = int(math.ceil(math.log2(world_size)))
+    neighbors = []
+    for k in range(max_dimension):
+        offset = 1 << k  # Calculate 2^k
+        neighbor = (rank + offset) % world_size
+        if neighbor != rank:
+            neighbors.append(neighbor)
+    return neighbors
+
 def get_grid_dimensions(N):
     """
     给定节点总数N，计算网格的行和列数。
@@ -198,8 +218,8 @@ class ModelAvgRPCCommunicator:
         #self.skips = compute_skip(self.world_size())[:-1]
         #self.skip_index = 0
 
-        self.grid_neighbors = get_neighbors(self.origin_world_size, self.rank)
-
+        #self.grid_neighbors = get_neighbors(self.origin_world_size, self.rank)
+        self.neighbors = exponential_topology_neighbors(self.origin_world_size, self.rank)
         """
         self.neighbor_model_store :Dict[int,ModelStore] = dict()
         self.init_neighbor_model_store(self.grid_neighbors)
@@ -513,13 +533,15 @@ class ModelAvgRPCCommunicator:
         self.index += 1
         self.send_model_param_to_buffer(self.grid_neighbors[1])
         self.send_model_param_to_buffer(self.grid_neighbors[3])
-        if self.index % 3 == 0:
+        if self.index % 2 == 0:
             self.aggregate_model_from_buff()
     
     def send_all_model_param_alg08(self):
+        self.index += 1
         for node in self.grid_neighbors:
             self.send_model_param_to_buffer(node)
-        self.aggregate_model_from_buff()
+        if self.index % 2 == 0:
+            self.aggregate_model_from_buff()
 
     def send_all_model_param_alg09(self):
          # Get list of possible targets excluding self.rank
@@ -535,11 +557,9 @@ class ModelAvgRPCCommunicator:
         
         self.aggregate_model_from_buff()
     
-    def send_all_model_param_alg09(self):
+    def send_all_model_param_alg10(self):
         self.index += 1
-        for node in range(self.origin_world_size):
-            if node == self.rank:
-                continue
+        for node in self.neighbors:
             self.send_model_param_to_buffer(node)
         if self.index % 2 == 0:
             self.aggregate_model_from_buff()
@@ -727,6 +747,8 @@ def receive_model_param_dict_to_neighbor_store(from_rank, from_rank_iter, from_l
 
 def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, data, speed = 0, resurrection_flag = False):
     global model_avg_rpc_communicator
+    if model_avg_rpc_communicator.current_t() - from_rank_iter > 80 :
+        return
     model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank, from_rank_iter, speed=speed)
     selected_list =[]
     for i in range(model_avg_rpc_communicator.buffer_size):

@@ -77,7 +77,7 @@ if __name__ == '__main__':
                          sampler_func= None,
                          train_com_method='ddp', is_2nd_order=True, epochs=180, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_max_one_show",
+                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_with_delay",
                          recover=False)
 
     mgr.train_and_test()

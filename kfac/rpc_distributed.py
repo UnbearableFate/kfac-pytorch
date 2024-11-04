@@ -360,8 +360,8 @@ class KFacRPCCommunicator:
         current_send_type = self.data_send_scheduler.get_next_send_type()
         if current_send_type is None:
             return
-        elif current_send_type != "eigen":
-            self.data_send_scheduler.update_next_send_time(current_send_type)
+        elif current_send_type == "factor":
+            self.data_send_scheduler.update_next_send_time("factor")
             return
         current_t = self.current_t()
         task_set = set()
@@ -731,7 +731,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.send_all_model_param_alg09()
+            self.model_avg_rpc.send_all_model_param_alg10()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
@@ -834,6 +834,9 @@ def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, t):
     global_communicator.update_node_iter(from_rank, t)
 
 def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
+    """
+    deprecated
+    """
     if len(eigen_tensor_package) == 0:
         return
     global global_communicator
