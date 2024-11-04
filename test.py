@@ -9,15 +9,7 @@ from torchvision.models import alexnet
 from my_module.custom_resnet import ResNetForCIFAR10 ,SimpleCNN
 import os
 from torch.utils.data import DataLoader
-from torchsummary import summary
-
-import kfac
-from my_module.mobile_net import CustomMobileNetV3Small ,CustomMiniMobileNetV3Small ,cifar10_transform_test ,cifar10_transform_train
-import logging
-
 from my_module.model_split import ModelSplitter
-
-logging.basicConfig(level=logging.NOTSET)
 
 today = "0923"
 DATA_DIR = ""
@@ -121,7 +113,28 @@ def test(model, testloader, device):
 
 # 训练和测试
 
+import math
+
+def exponential_topology_neighbors(world_size, rank):
+    """
+    Generate a list of neighbor ranks in an exponential topology.
+
+    Args:
+        world_size (int): Total number of nodes in the topology.
+        rank (int): The rank of the current node (0 <= rank < world_size).
+
+    Returns:
+        list: A list of neighbor ranks.
+    """
+    max_dimension = int(math.ceil(math.log2(world_size)))
+    neighbors = []
+    for k in range(max_dimension):
+        offset = 1 << k  # Calculate 2^k
+        neighbor = (rank + offset) % world_size
+        if neighbor != rank:
+            neighbors.append(neighbor)
+    return neighbors
+
 if __name__ == '__main__':
-    train(model, trainloader, criterion, optimizer, device)
-    #test(model, testloader, device)
+    exponential_topology_neighbors(16, 3)
     

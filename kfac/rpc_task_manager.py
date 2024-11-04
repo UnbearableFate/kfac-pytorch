@@ -205,6 +205,7 @@ class RPCTaskManager:
             self.election_period += 1
 
     def resurrection_declaration(self):  # call by sick node
+        print(f"resurrection declaration from {self.rank}")
         for rank in self.rpc_communicator.node_states.keys():
             if rank == self.rank:
                 continue
@@ -256,7 +257,7 @@ def recv_reassign_task(new_health_node_list, new_assignment, assignment_generati
     global rpc_task_manager
     if from_term < rpc_task_manager.currentTerm:
         return
-    if not rpc_task_manager.reassign_lock.acquire(timeout=1):
+    if not rpc_task_manager.reassign_lock.acquire(timeout=3):
         raise Exception("can not acquire reassign task lock in recv_reassign_task")
     rpc_task_manager.update_follwer_state(from_rank, from_term)
     rpc_task_manager.rpc_communicator.update_node_state_list(new_health_node_list)
@@ -277,7 +278,7 @@ def accept_regression_request(from_rank, from_term):
             f"resurrection declaration from {from_rank} accepted ,but already in health nodes")
         return
     rpc_task_manager.rpc_communicator.print_rpc_state(f"resurrection declaration from {from_rank} accepted")
-    if rpc_task_manager.reassign_lock.acquire(timeout=1):
+    if not rpc_task_manager.reassign_lock.acquire(timeout=3):
         raise Exception("can not acquire reassign task lock in accept_regression_request")
     rpc_task_manager.resurrection_nodes.add(from_rank)
     if rpc_task_manager.reassign_task_callback is None:

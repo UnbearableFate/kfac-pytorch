@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 import math
 
+from kfac.rpc_util.fault_sim import fault_simulator
+
 def exponential_topology_neighbors(world_size, rank):
     """
     Generate a list of neighbor ranks in an exponential topology.
@@ -746,6 +748,8 @@ def receive_model_param_dict_to_neighbor_store(from_rank, from_rank_iter, from_l
             model_avg_rpc_communicator.neighbor_model_store[from_rank].layer_store[layer_name].loss_value = from_loss
 
 def receive_model_param_dict_to_buffer(from_rank, from_rank_iter, from_loss, data, speed = 0, resurrection_flag = False):
+    if fault_simulator.is_fault():
+        return
     global model_avg_rpc_communicator
     if model_avg_rpc_communicator.current_t() - from_rank_iter > 80 :
         return

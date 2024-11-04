@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from kfac.assignment import KAISAAssignment
     from kfac.base_preconditioner import BaseKFACPreconditioner, KFACPreconditioner
     from general_util.GeneralManager import GeneralManager
+from kfac.rpc_util.fault_sim import fault_simulator
 
 # 创建日志记录器
 logger = logging.getLogger('my_logger')
@@ -807,6 +808,8 @@ class KFacRPCCommunicator:
 global_communicator: KFacRPCCommunicator = None
 
 def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
+    if fault_simulator.is_fault():
+        return
     global global_communicator
     self = global_communicator
 
@@ -819,6 +822,8 @@ def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
     self.update_node_iter(from_rank, from_iter)
 
 def receive_eigen_tensor_a(from_rank, layer_name, qa, da, t):
+    if fault_simulator.is_fault():
+        return
     global global_communicator
     if t < global_communicator.rpc_layers[layer_name].recv_handled_a_version:
         return
@@ -826,6 +831,8 @@ def receive_eigen_tensor_a(from_rank, layer_name, qa, da, t):
     global_communicator.update_node_iter(from_rank, t)
 
 def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, t):
+    if fault_simulator.is_fault():
+        return
     global global_communicator
     #with global_communicator.lock:
     if t < global_communicator.rpc_layers[layer_name].recv_handled_g_version:

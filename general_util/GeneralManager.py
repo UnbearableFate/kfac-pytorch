@@ -18,6 +18,7 @@ import kfac
 from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 import kfac.rpc_distributed as rpc_distributed
 from filelock import FileLock
+from  kfac.rpc_util.fault_sim import fault_simulator
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
@@ -123,6 +124,9 @@ class GeneralManager:
         self.batch_size = batch_size
         self.is_fault = False
 
+        if fault_simulator is not None:
+            fault_simulator.train_total_time_cb = self.get_total_training_time
+
     def init_mischief(self,disconnect_ratio=0,max_sick_iter_ratio=0.2,max_disconnected_node_num = 2, possible_disconnect_node = None):
         max_disconnect_iter = int(len(self.data_manager.train_dataset) / self.batch_size / self.world_size * max_sick_iter_ratio)
         mischief.mischief_init(world_size=self.world_size, possible_disconnect_node=possible_disconnect_node,
@@ -221,7 +225,13 @@ class GeneralManager:
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
                 rpc_distributed.global_communicator.update_self_t()
-
+                if epoch > 0:
+                    fault_simulator.update_fault_status()
+                    if fault_simulator.is_fault():
+                        time.sleep(fault_simulator.fault_over_time - time.time())
+                    elif fault_simulator.recover_flg:
+                        rpc_distributed.global_communicator.task_reassign_rpc.resurrection_declaration()
+                        fault_simulator.recover_flg = False
                 '''
                 mischief.update_iter()
                 if self.is_fault:
@@ -234,8 +244,6 @@ class GeneralManager:
                 output = self.model(data)
                 loss = self.loss_func(output, target)
                 loss.backward()
-                
-                time.sleep(delay_list_dict[3][self.rank])
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
@@ -258,7 +266,7 @@ class GeneralManager:
                     rpc_distributed.global_communicator.print_rpc_state()
 
                 rpc_distributed.global_communicator.send_model_param()
-                """
+
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
@@ -270,7 +278,7 @@ class GeneralManager:
                     self.rpc_communicator.update_assignment_callback()
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
-                """
+
                 '''
                 if self.writer is not None and batch_idx % 30 == 0:
                     process = psutil.Process(os.getpid())
@@ -454,3 +462,6 @@ class GeneralManager:
             os.rename(temp_path,self.checkpoint_file_path)   
         except Exception as e:
             print(f"Save checkpoint error: {e} in rank {self.rank} at epoch {epoch} file path {self.checkpoint_file_path}")
+
+    def get_total_training_time(self):
+        return self.train_totoal_time
