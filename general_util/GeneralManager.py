@@ -170,6 +170,7 @@ class GeneralManager:
             self.save_checkpoint(epoch=i)
 
         self.writer.close()
+        print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_totoal_time}")
         dist.barrier()
 
     def close_all(self):

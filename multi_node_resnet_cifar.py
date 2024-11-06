@@ -74,7 +74,7 @@ if __name__ == '__main__':
                          sampler_func= None,
                          train_com_method='rpc',  is_2nd_order=True, epochs=250, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_with_delay",
+                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_with_fault",
                          recover=False)
 
     mgr.rpc_train_and_test()
