@@ -89,7 +89,7 @@ class GeneralManager:
             else:
                 self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
             if train_com_method == "rpc":
-                self.rpc_communicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
+                self.rpc_communicator:rpc_distributed.KFacRPCCommunicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
                                                                             preconditioner=self.preconditioner,model=model ,
                                                                             share_file_path=Share_DIR, timestamp=timestamp ,
                                                                             log_dir = log_dir, device=device)
@@ -225,6 +225,8 @@ class GeneralManager:
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
                 rpc_distributed.global_communicator.update_self_t()
+
+                """
                 if epoch > 0:
                     fault_simulator.update_fault_status()
                     if fault_simulator.is_fault():
@@ -232,6 +234,7 @@ class GeneralManager:
                     elif fault_simulator.recover_flg:
                         rpc_distributed.global_communicator.task_reassign_rpc.resurrection_declaration()
                         fault_simulator.recover_flg = False
+                """
                 '''
                 mischief.update_iter()
                 if self.is_fault:
@@ -245,8 +248,11 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
 
-                if self.preconditioner is not None:
-                    self.preconditioner.step()
+                self.rpc_communicator.model_avg_rpc.broadcast_model()
+                self.rpc_communicator.model_avg_rpc.avg_model_with_neighbors()
+
+                #if self.preconditioner is not None:
+                #    self.preconditioner.step()
 
                 self.optimizer.step()
 
@@ -265,8 +271,7 @@ class GeneralManager:
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
-                rpc_distributed.global_communicator.send_model_param()
-
+                """
                 rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 
                 rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
@@ -278,6 +283,7 @@ class GeneralManager:
                     self.rpc_communicator.update_assignment_callback()
                 if self.rpc_communicator.send_model_param_callback is not None:
                     self.rpc_communicator.send_model_param_callback()
+                """
 
                 '''
                 if self.writer is not None and batch_idx % 30 == 0:

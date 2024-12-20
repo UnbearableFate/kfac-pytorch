@@ -11,6 +11,7 @@ import threading
 from typing import Dict, Optional, Tuple
 import logging
 import kfac.rpc_model_param_avg as model_param_avg_rpc
+import kfac.simple_rpc_model_param_avg as simple_rpc_model_param_avg
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.data_send_scheduler import DataSendScheduler
 import numpy as np
@@ -229,7 +230,7 @@ class KFacRPCCommunicator:
             raise RuntimeError(f"RPC initialization failed for rank {rank}")
 
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = model_param_avg_rpc.ModelAvgRPCCommunicator(rank, model ,self)
+        self.model_avg_rpc = simple_rpc_model_param_avg.SimpleModelAvgRPCCommunicator(rank, model, self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment ,slow_tolerance_value=self.slow_tolerance_value, max_election_period=self.max_election_period)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
