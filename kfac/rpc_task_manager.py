@@ -205,7 +205,6 @@ class RPCTaskManager:
             self.election_period += 1
 
     def resurrection_declaration(self):  # call by sick node
-        print(f"resurrection declaration from {self.rank}")
         for rank in self.rpc_communicator.node_states.keys():
             if rank == self.rank:
                 continue

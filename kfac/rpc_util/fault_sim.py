@@ -24,4 +24,4 @@ class FaultSimulator:
     def is_fault(self):
         return self.fault_over_time is not None
 
-fault_simulator = FaultSimulator(fault_rate=0.2, fault_continue_time=2)
+fault_simulator = FaultSimulator(fault_rate=0.5, fault_continue_time=2.5)
