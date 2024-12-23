@@ -1,7 +1,7 @@
 import numpy as np
 import networkx as nx
 from mpi4py import MPI
-
+import torch.distributed as dist
 
 class GraphConstruct:
 
@@ -188,4 +188,11 @@ class GraphConstruct:
             neighbors[node2].append(node1)
             
         return neighbors[rank]
-    
+
+
+if __name__ == "__main__":
+    rank = MPI.COMM_WORLD.Get_rank()
+    size = MPI.COMM_WORLD.Get_size()
+    ga = GraphConstruct(rank,size, MPI.COMM_WORLD, 'erdos-renyi', 'swift', p = 0.20)
+    print(f"Rank {rank} has neighbors {ga.neighbor_list}")
+    print(f"Rank {rank} has weights {ga.neighbor_weights}") 

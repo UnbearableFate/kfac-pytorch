@@ -72,9 +72,9 @@ if __name__ == '__main__':
 
     mgr = GeneralManager( dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc',  is_2nd_order=True, epochs=250, device=device,
+                         train_com_method='rpc',  is_2nd_order=True, epochs=100, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_with_fault",
+                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_swift",
                          recover=False)
 
     mgr.rpc_train_and_test()

@@ -29,7 +29,7 @@ class SimpleModelAvgRPCCommunicator:
 
         self.local_avg_flat_model = ModelStore(model2flatten_tensor(self.model))
 
-        self.graph = GraphConstruct.GraphConstruct(rank, self.origin_world_size, MPI.COMM_WORLD, 'erdos-renyi', 'swift', p = 0.25)
+        self.graph = GraphConstruct.GraphConstruct(rank,self.origin_world_size, MPI.COMM_WORLD, 'clique-ring', 'swift', p = 0.15, num_c=4) 
         self.sw = 1 - sum(self.graph.neighbor_weights)
         print(f"Rank {rank} has neighbors {self.graph.neighbor_list}")
         print(f"Rank {rank} has weights {self.graph.neighbor_weights}")

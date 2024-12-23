@@ -80,9 +80,9 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        #self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.001, momentum = 0.9) #torch.optim.Adam(model.parameters())
-        self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0008)
-        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.005, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
+        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.001, momentum = 0.9) #torch.optim.Adam(model.parameters())
+        #self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0008)
+        #self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.005, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
         if is_2nd_order:
             if precondtioner is not None:
                 self.preconditioner = precondtioner
@@ -110,7 +110,7 @@ class GeneralManager:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.preconditioner.load_state_dict(checkpoint["preconditioner"])
             self.start_epoch = checkpoint["epoch"] + 1
-            self.scheduler.load_state_dict(checkpoint["scheduler"])
+            #self.scheduler.load_state_dict(checkpoint["scheduler"])
             self.train_totoal_time = checkpoint["train_totoal_time"]
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
         dist.barrier()
@@ -206,7 +206,7 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
-                self.scheduler.step()
+                #self.scheduler.step()
                 t.update()
             self.train_totoal_time += time.time() - start_time
             if self.writer is not None:
@@ -249,6 +249,7 @@ class GeneralManager:
                 loss = self.loss_func(output, target)
                 loss.backward()
 
+                self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 self.rpc_communicator.model_avg_rpc.broadcast_model()
                 self.rpc_communicator.model_avg_rpc.avg_model_with_neighbors()
 
@@ -256,18 +257,7 @@ class GeneralManager:
                 #    self.preconditioner.step()
 
                 self.optimizer.step()
-
-                """
-                with torch.no_grad():
-                    for param in self.model.parameters():
-                        if param.requires_grad:
-                            noise_std_factor = math.sqrt(2*self.scheduler.get_last_lr()[0])
-                            noise = torch.randn_like(param) * noise_std_factor * torch.sqrt(torch.tensor(self.scheduler.get_last_lr()[0]))
-                            param.add_(noise)
-                """
-                self.scheduler.step()
-
-                self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
+                #self.scheduler.step()
 
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
@@ -461,7 +451,7 @@ class GeneralManager:
             'preconditioner': self.preconditioner.state_dict(),
             'epoch': epoch,
             'train_totoal_time': self.train_totoal_time,
-            'scheduler': self.scheduler.state_dict()
+            #'scheduler': self.scheduler.state_dict()
         }
         try:
             temp_path = self.checkpoint_file_path + ".temp"
