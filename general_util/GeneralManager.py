@@ -82,7 +82,7 @@ class GeneralManager:
         self.loss_func = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.001, momentum = 0.9) #torch.optim.Adam(model.parameters())
         #self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0008)
-        #self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.005, steps_per_epoch=len(self.data_manager.train_loader), epochs=epochs)
+
         if is_2nd_order:
             if precondtioner is not None:
                 self.preconditioner = precondtioner
@@ -110,7 +110,6 @@ class GeneralManager:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.preconditioner.load_state_dict(checkpoint["preconditioner"])
             self.start_epoch = checkpoint["epoch"] + 1
-            #self.scheduler.load_state_dict(checkpoint["scheduler"])
             self.train_totoal_time = checkpoint["train_totoal_time"]
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
         dist.barrier()
@@ -201,10 +200,10 @@ class GeneralManager:
 
                 #if self.rank not in [0,6,9,15]:
                 #    time.sleep(0.5)
-                time.sleep(delay_list_dict[0][self.rank])
+                #time.sleep(delay_list_dict[0][self.rank])
 
-                if self.preconditioner is not None:
-                    self.preconditioner.step()
+                #if self.preconditioner is not None:
+                #    self.preconditioner.step()
                 self.optimizer.step()
                 #self.scheduler.step()
                 t.update()
@@ -448,10 +447,9 @@ class GeneralManager:
         state = {
             'model': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
-            'preconditioner': self.preconditioner.state_dict(),
+            'preconditioner': self.preconditioner.state_dict() if self.preconditioner is not None else None,
             'epoch': epoch,
             'train_totoal_time': self.train_totoal_time,
-            #'scheduler': self.scheduler.state_dict()
         }
         try:
             temp_path = self.checkpoint_file_path + ".temp"
