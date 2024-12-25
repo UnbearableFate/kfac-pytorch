@@ -1,10 +1,12 @@
 import threading
 import torch
+from sympy.core.random import random
 from torch.distributed import rpc
 from typing import TYPE_CHECKING
 from mpi4py import MPI
 import kfac.rpc_util.GraphConstruct as GraphConstruct
 from kfac.rpc_util.common_util import model2flatten_tensor, flatten_tensor2model
+import random
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 
@@ -17,6 +19,19 @@ class ModelStore:
         self.loss_value = 0
         self.lock = threading.Lock()
         self.flatten_tensor = flatten_tensor.clone()
+
+    def getData(self):
+        return self.flatten_tensor,self.term,self.loss_value
+
+    def setData(self,data,term,loss_value):
+        self.flatten_tensor = data
+        self.term = term
+        self.loss_value = loss_value
+    def setDataWithLock(self,data,term,loss_value):
+        with self.lock:
+            self.flatten_tensor = data
+            self.term = term
+            self.loss_value = loss_value
 
 class SimpleModelAvgRPCCommunicator:
     def __init__(self, rank, model: torch.nn.Module ,rpc_communicator: 'KFacRPCCommunicator'):
@@ -78,6 +93,27 @@ class SimpleModelAvgRPCCommunicator:
             self.broadcast_model()
             self.update_model()
 
+    def update_local_flat_model(self):
+        with self.local_avg_flat_model.lock:
+            self.local_avg_flat_model.flatten_tensor = model2flatten_tensor(self.model)
+            self.local_avg_flat_model.term = self.current_t_cb()
+
+    def adsgd_exchange_model(self):
+        self.update_local_flat_model()
+
+        target_neighbor = random.choice(self.graph.neighbor_list)
+        res = rpc.rpc_sync(
+            to=rpc_work_name(target_neighbor),
+            func= exchange_model_param,
+            args=(*self.local_avg_flat_model.getData(), self.get_local_node_speed())
+        )
+        if res is not None and len(res) == 3:
+            self.neighbors_model_buffer[target_neighbor].setDataWithLock(*res)
+
+        # average local flat tensor with the target neighbor
+        self.local_avg_flat_model.flatten_tensor.mul_(0.5).add_(self.neighbors_model_buffer[target_neighbor].flatten_tensor * 0.5)
+        flatten_tensor2model(self.local_avg_flat_model.flatten_tensor, self.model)
+
 model_avg_rpc_communicator: SimpleModelAvgRPCCommunicator
 
 def receive_model_param(from_rank,data,from_rank_term,from_loss, from_speed = 0):
@@ -89,3 +125,14 @@ def receive_model_param(from_rank,data,from_rank_term,from_loss, from_speed = 0)
         model_avg_rpc_communicator.neighbors_model_buffer[from_rank].flatten_tensor = data
         model_avg_rpc_communicator.neighbors_model_buffer[from_rank].term = from_rank_term
         model_avg_rpc_communicator.neighbors_model_buffer[from_rank].loss_value = from_loss
+
+def exchange_model_param(data, from_rank, from_term, from_loss, from_speed = 0):
+    global model_avg_rpc_communicator
+    if (from_rank not in model_avg_rpc_communicator.graph.neighbor_list or
+        from_term <= model_avg_rpc_communicator.neighbors_model_buffer[from_rank].term):
+        return
+    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank,from_term, from_speed)
+    model_avg_rpc_communicator.local_avg_flat_model.setDataWithLock(data, from_term, from_loss)
+    if model_avg_rpc_communicator.local_avg_flat_model.term < model_avg_rpc_communicator.current_t_cb():
+        model_avg_rpc_communicator.update_local_flat_model()
+    return model_avg_rpc_communicator.local_avg_flat_model.getData()

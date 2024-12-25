@@ -165,7 +165,7 @@ class GeneralManager:
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
 
         for i in range(self.start_epoch, self.epochs):
-            self.rpc_train(epoch=i)
+            self.simple_rpc_train(epoch=i)
             self.test_local_top(epoch=i, topk=(1, 3))
             self.save_checkpoint(epoch=i)
 
@@ -212,6 +212,43 @@ class GeneralManager:
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
+
+    def simple_rpc_train(self, epoch):
+        start_time = time.time()
+        self.model.train()
+        self.data_manager.set_epoch(epoch)
+        train_loader = self.data_manager.train_loader
+        with (tqdm(
+                total=math.ceil(len(train_loader)),
+                bar_format='{l_bar}{bar:6}{r_bar}',
+                desc=f'Epoch {epoch:3d}/{self.epochs:3d}',
+                disable=(self.rank != 0)
+        ) as t):
+            for batch_idx, (data, target) in enumerate(train_loader):
+                rpc_distributed.global_communicator.update_self_t()
+
+                data = data.to(self.device)
+                target = target.to(self.device)
+                self.optimizer.zero_grad()
+                output = self.model(data)
+                loss = self.loss_func(output, target)
+                loss.backward()
+                self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
+
+                if rpc_distributed.global_communicator.current_t() % 5 == 0:
+                    self.rpc_communicator.model_avg_rpc.adsgd_exchange_model()
+
+                self.optimizer.step()
+                if batch_idx % 50 == 0:
+                    rpc_distributed.global_communicator.print_rpc_state()
+                t.update()
+            self.train_totoal_time += time.time() - start_time
+            if self.writer is not None:
+                self.writer.add_scalar('Iteration Variance',
+                                       rpc_distributed.global_communicator.compute_iter_variance(),
+                                       self.train_totoal_time)
+                self.writer.add_scalar('Loss/train', loss.item(), epoch)
+                self.writer.add_scalar('Time/train', time.time() - start_time, epoch)
 
     def rpc_train(self, epoch):
         start_time = time.time()
