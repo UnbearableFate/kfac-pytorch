@@ -21,6 +21,26 @@ def model2flatten_tensor(model: torch.nn.Module) -> torch.Tensor:
 
         return torch.cat(params, dim=0)
 
+def gradient2flatten_tensor(model: torch.nn.Module) -> torch.Tensor:
+    """
+    Flatten all gradients from a given model into a single 1D tensor.
+
+    This function extracts each parameter's gradient from the model, detaches it from the
+    computation graph, and concatenates them into a single flattened tensor.
+
+    Args:
+        model (torch.nn.Module): The model whose gradients are to be flattened.
+
+    Returns:
+        torch.Tensor: A single flattened tensor containing all the model's gradients.
+    """
+    with torch.no_grad():
+        # 使用列表推导式提取所有参数，并通过 clone() 和 detach()
+        # 确保获得独立的、不追踪梯度的张量副本
+        grads = [p.grad.detach().clone().view(-1) for p in model.parameters() if p.grad is not None]
+        # 将所有参数拼接到一个张量中
+        return torch.cat(grads, dim=0)
+
 
 def flatten_tensor2model(flat: torch.Tensor, model: torch.nn.Module):
     """

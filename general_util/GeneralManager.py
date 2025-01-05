@@ -1,10 +1,5 @@
-import gc
 import math
-import random
 import time
-import datetime
-
-import psutil
 import torch
 from tqdm import tqdm
 import kfac.mischief as mischief
@@ -17,40 +12,9 @@ import os
 import kfac
 from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 import kfac.rpc_distributed as rpc_distributed
-from filelock import FileLock
 from  kfac.rpc_util.fault_sim import fault_simulator
+from general_util.consts import CHECK_POINT_PATH, DATA_DIR, LOG_DIR, SHARE_FILES_DIR
 
-ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
-ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
-
-DATA_DIR = ""
-LOG_DIR = ""
-Share_DIR = ""
-check_point_path = ""
-today = datetime.date.today().strftime('%m%d')
-if os.path.exists("/home/yu"):
-    DATA_DIR = "/home/yu/data"
-    LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/home/yu/workspace/kfac-pytorch/share_files"
-    check_point_path = "/home/yu/workspace/kfac-pytorch/checkpoints"
-elif os.path.exists("/Users/unbearablefate"):
-    DATA_DIR = "/Users/unbearablefate/workspace/data"
-    LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
-    check_point_path = "/Users/unbearablefate/workspace/kfac-pytorch/checkpoints"
-elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
-    DATA_DIR = "/work/NBB/yu_mingzhe/data"
-    LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
-    check_point_path = "/work/NBB/yu_mingzhe/kfac-pytorch/checkpoints"
-
-delay_list_dict = [
-    [0.0006, 0.0071, 0.0046, 0.0043, 0.0119, 0.0049, 0.0121, 0.0097, 0.0029, 0.0238, 0.0069, 0.0062, 0.0008, 0.0148, 0.0114, 0.0098],
-    [0.0009, 0.0031, 0.0159, 0.0018, 0.015, 0.0603, 0.0068, 0.0025, 0.0033, 0.0138, 0.0321, 0.0184, 0.0112, 0.0149, 0.0013, 0.0605],
-    [0.0016, 0.0311, 0.0176, 0.0288, 0.0139, 0.0399, 0.016, 0.0082, 0.1098, 0.0273, 0.0048, 0.0105, 0.0076, 0.0638, 0.0028, 0.0155],
-    [0.0345, 0.0063, 0.0216, 0.1123, 0.0504, 0.0433, 0.0113, 0.0069, 0.0411, 0.0138, 0.0422, 0.0527, 0.0197, 0.0156, 0.0114, 0.0788],
-    [0.004, 0.0055, 0.0506, 0.1451, 0.0862, 0.0365, 0.0095, 0.046, 0.116, 0.0207, 0.0056, 0.0395, 0.0476, 0.0403, 0.0086, 0.0179]
-]
 
 class GeneralManager:
     def __init__(self,experiment_name:str, dataset_name, model, sampler_func = None, train_com_method="ddp", is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",transform_train=None, transform_test=None, precondtioner=None ,recover = False):
@@ -90,17 +54,17 @@ class GeneralManager:
                 self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
             if train_com_method == "rpc":
                 self.rpc_communicator:rpc_distributed.KFacRPCCommunicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
-                                                                            preconditioner=self.preconditioner,model=model ,
-                                                                            share_file_path=Share_DIR, timestamp=timestamp ,
-                                                                            log_dir = log_dir, device=device)
+                                                                                                                preconditioner=self.preconditioner, model=model,
+                                                                                                                share_file_path=SHARE_FILES_DIR, timestamp=timestamp,
+                                                                                                                log_dir = log_dir, device=device)
         else:
             self.preconditioner = None
+
         self.start_epoch = 0
+        self.checkpoint_file_path = os.path.join(CHECK_POINT_PATH, experiment_name, f"{rank}.pth")
+        current_checkpoint_path = os.path.join(CHECK_POINT_PATH, experiment_name)
 
-        self.checkpoint_file_path = os.path.join(check_point_path, experiment_name, f"{rank}.pth")
-        current_checkpoint_path = os.path.join(check_point_path, experiment_name)
-
-        self.train_totoal_time = 0
+        self.train_total_time = 0
         if not os.path.exists(current_checkpoint_path):
             if rank == 0:
                 os.makedirs(current_checkpoint_path)
@@ -110,9 +74,10 @@ class GeneralManager:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.preconditioner.load_state_dict(checkpoint["preconditioner"])
             self.start_epoch = checkpoint["epoch"] + 1
-            self.train_totoal_time = checkpoint["train_totoal_time"]
+            self.train_total_time = checkpoint["train_total_time"]
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
         dist.barrier()
+
         self.dataset_name = dataset_name
         self.device = device
         self.model = model
@@ -126,6 +91,11 @@ class GeneralManager:
         if fault_simulator is not None:
             fault_simulator.train_total_time_cb = self.get_total_training_time
 
+    """"
+    '''
+    Departure from the original code
+    '''
+    
     def init_mischief(self,disconnect_ratio=0,max_sick_iter_ratio=0.2,max_disconnected_node_num = 2, possible_disconnect_node = None):
         max_disconnect_iter = int(len(self.data_manager.train_dataset) / self.batch_size / self.world_size * max_sick_iter_ratio)
         mischief.mischief_init(world_size=self.world_size, possible_disconnect_node=possible_disconnect_node,
@@ -136,6 +106,7 @@ class GeneralManager:
         self.experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{self.world_size}"
         if self.train_com_method == "rpc":
             mischief.recover_func = self.rpc_communicator.restart_sick_node
+    """
 
     def train_and_test(self):
         writer_path = self.log_dir
@@ -169,7 +140,7 @@ class GeneralManager:
             self.save_checkpoint(epoch=i)
 
         self.writer.close()
-        print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_totoal_time}")
+        print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_total_time}")
         dist.barrier()
 
     def close_all(self):
@@ -207,7 +178,7 @@ class GeneralManager:
                 self.optimizer.step()
                 #self.scheduler.step()
                 t.update()
-            self.train_totoal_time += time.time() - start_time
+            self.train_total_time += time.time() - start_time
             if self.writer is not None:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
@@ -234,18 +205,17 @@ class GeneralManager:
                 loss.backward()
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
 
-                if rpc_distributed.global_communicator.current_t() % 5 == 0:
-                    self.rpc_communicator.model_avg_rpc.adsgd_exchange_model()
+                self.rpc_communicator.model_avg_rpc.adsgd_exchange_model()
 
                 self.optimizer.step()
                 if batch_idx % 50 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
                 t.update()
-            self.train_totoal_time += time.time() - start_time
+            self.train_total_time += time.time() - start_time
             if self.writer is not None:
                 self.writer.add_scalar('Iteration Variance',
                                        rpc_distributed.global_communicator.compute_iter_variance(),
-                                       self.train_totoal_time)
+                                       self.train_total_time)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train', time.time() - start_time, epoch)
 
@@ -323,9 +293,9 @@ class GeneralManager:
                 '''
 
                 t.update()
-            self.train_totoal_time += time.time() - start_time
+            self.train_total_time += time.time() - start_time
             if self.writer is not None:
-                self.writer.add_scalar('Iteration Variance', rpc_distributed.global_communicator.compute_iter_variance(), self.train_totoal_time)
+                self.writer.add_scalar('Iteration Variance', rpc_distributed.global_communicator.compute_iter_variance(), self.train_total_time)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
 
@@ -395,7 +365,7 @@ class GeneralManager:
             top_n_accuracy = correct_top_n_sum.item() / total_sum.item()
             
             # 记录 Top-1 和 Top-N 精度到 TensorBoard
-            time_as_step = round(self.train_totoal_time*1000)  # 使用训练迭代次数作为 x 轴
+            time_as_step = round(self.train_total_time * 1000)  # 使用训练迭代次数作为 x 轴
             self.writer.add_scalar('Top-1 Accuracy/test', top_1_accuracy, time_as_step)
             self.writer.add_scalar(f'Top-{top_n} Accuracy/test', top_n_accuracy, time_as_step)
 
@@ -456,7 +426,7 @@ class GeneralManager:
         topk_accuracies = {f'Top-{k} Accuracy': topk_correct[k] / total for k in topk}
         
         # 将 Top-N 精度输出到日志
-        time_as_step = round(self.train_totoal_time*1000)  # 使用训练time作为 x 轴
+        time_as_step = round(self.train_total_time * 1000)  # 使用训练time作为 x 轴
         for k, acc in topk_accuracies.items():
             self.writer.add_scalar(f'{k}/test', acc, time_as_step)
 
@@ -486,7 +456,7 @@ class GeneralManager:
             'optimizer': self.optimizer.state_dict(),
             'preconditioner': self.preconditioner.state_dict() if self.preconditioner is not None else None,
             'epoch': epoch,
-            'train_totoal_time': self.train_totoal_time,
+            'train_total_time': self.train_total_time,
         }
         try:
             temp_path = self.checkpoint_file_path + ".temp"
@@ -496,4 +466,4 @@ class GeneralManager:
             print(f"Save checkpoint error: {e} in rank {self.rank} at epoch {epoch} file path {self.checkpoint_file_path}")
 
     def get_total_training_time(self):
-        return self.train_totoal_time
+        return self.train_total_time

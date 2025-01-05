@@ -10,8 +10,7 @@ import torch.distributed.rpc as rpc
 import threading
 from typing import Dict, Optional, Tuple
 import logging
-import kfac.rpc_model_param_avg as model_param_avg_rpc
-import kfac.simple_rpc_model_param_avg as simple_rpc_model_param_avg
+from kfac.adsgds.adpsgd import AdpsgdManager
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.data_send_scheduler import DataSendScheduler
 import numpy as np
@@ -19,9 +18,7 @@ import numpy as np
 from typing import TYPE_CHECKING ,List
 if TYPE_CHECKING:
     from kfac.layers.eigen import KFACEigenLayer,KFACBaseLayer
-    from kfac.assignment import KAISAAssignment
-    from kfac.base_preconditioner import BaseKFACPreconditioner, KFACPreconditioner
-    from general_util.GeneralManager import GeneralManager
+    from kfac.base_preconditioner import BaseKFACPreconditioner
 from kfac.rpc_util.fault_sim import fault_simulator
 
 # 创建日志记录器
@@ -230,7 +227,7 @@ class KFacRPCCommunicator:
             raise RuntimeError(f"RPC initialization failed for rank {rank}")
 
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = simple_rpc_model_param_avg.SimpleModelAvgRPCCommunicator(rank, model, self)
+        self.model_avg_rpc = AdpsgdManager(rank, model, self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment ,slow_tolerance_value=self.slow_tolerance_value, max_election_period=self.max_election_period)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
