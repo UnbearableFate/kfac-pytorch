@@ -4,15 +4,12 @@ import argparse
 import torch
 
 import kfac
-from kfac.enums import ComputeMethod
-from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from my_module.mobile_net import CustomMiniMobileNetV3ForCIFAR10
 from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
 from torchvision import transforms
 import logging
 import torch.distributed as dist
-import shutil
 
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
@@ -62,7 +59,7 @@ if __name__ == '__main__':
     model = CustomMiniMobileNetV3ForCIFAR10()
     device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1)
+    #preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -75,7 +72,7 @@ if __name__ == '__main__':
     mgr = GeneralManager( dataset_name="CIFAR10", model=model,
                          sampler_func= None,
                          train_com_method='rpc',  is_2nd_order=True, epochs=100, device=device,
-                         timestamp=timestamp,  precondtioner=preconditioner,
+                         timestamp=timestamp,  precondtioner=None,
                          transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_swift_mn3",
                          recover=False)
 
