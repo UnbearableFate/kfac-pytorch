@@ -194,5 +194,4 @@ if __name__ == "__main__":
     rank = MPI.COMM_WORLD.Get_rank()
     size = MPI.COMM_WORLD.Get_size()
     ga = GraphConstruct(rank,size, MPI.COMM_WORLD, 'erdos-renyi', 'swift', p = 0.20)
-    print(f"Rank {rank} has neighbors {ga.neighbor_list}")
-    print(f"Rank {rank} has weights {ga.neighbor_weights}") 
+    print(ga.graph)

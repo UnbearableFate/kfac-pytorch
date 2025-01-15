@@ -7,6 +7,7 @@ from mpi4py import MPI
 import kfac.rpc_util.GraphConstruct as GraphConstruct
 from kfac.rpc_util.common_util import model2flatten_tensor, flatten_tensor2model
 import random
+from scipy.special import expit
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 
@@ -18,10 +19,10 @@ class ModelStore:
         self.term = 0
         self.loss_value = 0
         self.lock = threading.Lock()
-        self.flatten_tensor = flatten_tensor.clone()
+        self.flatten_tensor = torch.zeros_like(flatten_tensor)
 
     def getData(self):
-        return self.flatten_tensor,self.term,self.loss_value
+        return [self.flatten_tensor,self.term,self.loss_value]
 
     def setData(self,data,term,loss_value):
         self.flatten_tensor = data
@@ -59,3 +60,7 @@ class RootModelAvgRPCCommunicator:
         with self.local_model_store.lock:
             self.local_model_store.flatten_tensor = model2flatten_tensor(self.model)
             self.local_model_store.term = self.current_t_cb()
+
+def compute_recv_weight_by_loss(local_loss, recv_loss):
+    sigmoid_param = (local_loss - recv_loss) / local_loss
+    return expit(sigmoid_param*0.7)

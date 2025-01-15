@@ -63,11 +63,11 @@ if __name__ == '__main__':
     model = MLP(num_hidden_layers=4,hidden_size=32)
     rank = dist.get_rank()
     #device = torch.device(f"cuda:{rank%4}")
-    device = torch.device(f"cpu")
+    device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layer.1"], damping= 0.003)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layers.1"], damping= 0.003)
     mgr = GeneralManager(experiment_name="mlp_mnist",dataset_name="FashionMNIST", model=model,
-                         train_com_method='rpc', is_2nd_order=True, epochs=8,batch_size=32,device=device,
+                         train_com_method='rpc', is_2nd_order=True, epochs=2,batch_size=32,device=device,
                          timestamp=timestamp,precondtioner=preconditioner)
 
     mgr.rpc_train_and_test()

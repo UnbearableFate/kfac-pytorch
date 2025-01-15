@@ -13,6 +13,7 @@ import kfac
 from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 import kfac.rpc_distributed as rpc_distributed
 from  kfac.rpc_util.fault_sim import fault_simulator
+from kfac.rpc_util.common_util import get_model_total_l2_norm
 from general_util.consts import CHECK_POINT_PATH, DATA_DIR, LOG_DIR, SHARE_FILES_DIR
 
 
@@ -44,7 +45,7 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.001, momentum = 0.9) #torch.optim.Adam(model.parameters())
+        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.002, momentum = 0.9) #torch.optim.Adam(model.parameters())
         #self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0008)
 
         if is_2nd_order:
@@ -200,15 +201,22 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
-                output = self.model(data)
-                loss = self.loss_func(output, target)
-                loss.backward()
+                
+                with self.rpc_communicator.model_avg_rpc.local_model_store.lock:
+                    output = self.model(data)
+                    loss = self.loss_func(output, target)
+                    loss.backward()
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
+                
+                #if self.preconditioner is not None:
+                #    self.preconditioner.step()
+                
+                with self.rpc_communicator.model_avg_rpc.local_model_store.lock:
+                    self.optimizer.step()
 
-                self.rpc_communicator.model_avg_rpc.adsgd_exchange_model()
+                self.rpc_communicator.model_avg_rpc.process()
 
-                self.optimizer.step()
-                if batch_idx % 50 == 0:
+                if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
                 t.update()
             self.train_total_time += time.time() - start_time
@@ -259,8 +267,8 @@ class GeneralManager:
                 self.rpc_communicator.model_avg_rpc.broadcast_model()
                 self.rpc_communicator.model_avg_rpc.avg_model_with_neighbors()
 
-                #if self.preconditioner is not None:
-                #    self.preconditioner.step()
+                if self.preconditioner is not None:
+                    self.preconditioner.step()
 
                 self.optimizer.step()
                 #self.scheduler.step()

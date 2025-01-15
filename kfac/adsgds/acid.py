@@ -11,8 +11,8 @@ from torch.onnx.symbolic_opset9 import tensor
 import kfac.rpc_util.GraphConstruct as GraphConstruct
 from kfac.rpc_util.common_util import model2flatten_tensor, flatten_tensor2model ,gradient2flatten_tensor
 import random
-from kfac.adsgds.common import ModelStore, rpc_work_name
-from general_util.consts import SHARED_MODEL_ROOT
+from kfac.adsgds.common import ModelStore, rpc_work_name, RootModelAvgRPCCommunicator , compute_recv_weight_by_loss
+
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 

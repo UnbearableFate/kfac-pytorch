@@ -11,6 +11,7 @@ import threading
 from typing import Dict, Optional, Tuple
 import logging
 from kfac.adsgds.adpsgd import AdpsgdManager
+from kfac.adsgds.swift import SwiftManager
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.data_send_scheduler import DataSendScheduler
 import numpy as np
@@ -163,7 +164,7 @@ class KFacRPCCommunicator:
         self.eigen_tensor_packages = None
         self.send_rank_group, self.group_id= create_groups(world_size,rank)
 
-        send_intervals = {'model_param': 3, 'factor': 7, 'eigen': 13}
+        send_intervals = {'model_param': 3, 'factor': 5, 'eigen': 23}
         self.data_send_scheduler = DataSendScheduler(send_intervals)
 
         self.preconditioner = preconditioner
@@ -227,7 +228,7 @@ class KFacRPCCommunicator:
             raise RuntimeError(f"RPC initialization failed for rank {rank}")
 
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = AdpsgdManager(rank, model, self)
+        self.model_avg_rpc = SwiftManager(rank, model, self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment ,slow_tolerance_value=self.slow_tolerance_value, max_election_period=self.max_election_period)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
