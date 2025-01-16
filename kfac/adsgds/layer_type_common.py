@@ -11,6 +11,7 @@ def rpc_work_name(rank:int) -> str:
 class LayerwiseModelStore:
     def __init__(self, model: torch.nn.Module = None):
         self.term = 0
+        self.aggration_weight = 0
         self.loss_value = 0
         self.lock = threading.Lock()
         self.layer_parameters : Dict[str, torch.Tensor]= {}
@@ -30,6 +31,11 @@ class LayerwiseModelStore:
     def getData(self):
         return self.layer_parameters,self.term,self.loss_value
     
+    def setData(self,layer_parameters,term,loss_value):
+        self.layer_parameters = layer_parameters
+        self.term = term
+        self.loss_value = loss_value
+
     def setDataWithLock(self,layer_parameters,term,loss_value):
         with self.lock:
             self.layer_parameters = layer_parameters

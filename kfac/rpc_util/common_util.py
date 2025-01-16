@@ -59,6 +59,7 @@ def flatten_tensor2model(flat: torch.Tensor, model: torch.nn.Module):
 
     # Unflatten and load parameters
     offset = 0
+    flat = flat.to(model.parameters().__next__().device)
     with torch.no_grad():
         for param in model.parameters():
             numel = param.numel()
@@ -98,24 +99,3 @@ def get_model_total_l2_norm(model):
     total_l2_norm = torch.sqrt(sum(torch.sum(param**2) for param in model.parameters() if param.requires_grad))
     return total_l2_norm.item()
 
-from my_module.mobile_net import CustomMobileNetV3Small
-
-def initialize_weights(m):
-    if isinstance(m, nn.Linear):
-        init.kaiming_uniform_(m.weight)  # 使用 He 初始化
-        if m.bias is not None:
-            init.zeros_(m.bias)
-
-if __name__ == '__main__':
-    model = CustomMobileNetV3Small()
-    model.apply(initialize_weights)
-    for name, param in model.named_parameters():
-        print(name, param.size())
-    flat = model2flatten_tensor(model)
-    print(compute_l2_norm(flat))
-    flat.mul_(2)
-    flatten_tensor2model(flat, model)
-    flat = model2flatten_tensor(model)
-    print(compute_l2_norm(flat))
-    for name, param in model.named_parameters():
-        print(name, param.size())

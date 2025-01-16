@@ -4,7 +4,6 @@ from torch.distributed import rpc
 from typing import TYPE_CHECKING
 from mpi4py import MPI
 import kfac.rpc_util.GraphConstruct as GraphConstruct
-from kfac.rpc_util.common_util import flatten_tensor2model, model2flatten_tensor
 import random
 from kfac.adsgds.layer_type_common import LayerwiseModelStore, RootModelAvgRPCCommunicator, rpc_work_name
 if TYPE_CHECKING:

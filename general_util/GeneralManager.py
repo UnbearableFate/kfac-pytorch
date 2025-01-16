@@ -45,7 +45,7 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.002, momentum = 0.9) #torch.optim.Adam(model.parameters())
+        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.001, momentum = 0.9) #torch.optim.Adam(model.parameters())
         #self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0008)
 
         if is_2nd_order:
@@ -206,15 +206,14 @@ class GeneralManager:
                     output = self.model(data)
                     loss = self.loss_func(output, target)
                     loss.backward()
+                    self.optimizer.step()
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 
-                #if self.preconditioner is not None:
-                #    self.preconditioner.step()
-                
-                with self.rpc_communicator.model_avg_rpc.local_model_store.lock:
-                    self.optimizer.step()
+                if self.preconditioner is not None:
+                    self.preconditioner.step()
 
-                self.rpc_communicator.model_avg_rpc.process()
+                if batch_idx % 10 == 9:
+                    self.rpc_communicator.model_avg_rpc.process1()
 
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
