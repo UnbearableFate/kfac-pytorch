@@ -20,6 +20,7 @@ class ModelStore:
         self.weight = 0
         self.lock = threading.Lock()
         self.flatten_tensor = torch.zeros_like(flatten_tensor)
+        self.recv_flatten_tensor = torch.zeros_like(flatten_tensor)
 
     def getData(self):
         return [self.flatten_tensor,self.term,self.loss_value]
@@ -32,7 +33,7 @@ class ModelStore:
     @torch.no_grad()
     def setDataWithLock(self,data,term,loss_value):
         with self.lock:
-            self.flatten_tensor = data
+            self.flatten_tensor.copy_(data)
             self.term = term
             self.loss_value = loss_value
 class RootModelAvgRPCCommunicator:

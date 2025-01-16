@@ -20,7 +20,7 @@ class SwiftManager(RootModelAvgRPCCommunicator):
         super().__init__(rank, model, rpc_communicator)
         self.graph = GraphConstruct.GraphConstruct(rank,self.origin_world_size, MPI.COMM_WORLD, 'clique-ring', 'swift', p = 0.15, num_c=3)
         self.sw = 1 - sum(self.graph.neighbor_weights)
-        self.neighbor_model_buffers : Dict[str, ModelStore] = {}
+        self.neighbor_model_buffers : Dict[int, ModelStore] = {}
         for index,neighbor in enumerate(self.graph.neighbor_list):
             self.neighbor_model_buffers[neighbor] = ModelStore(self.local_model_store.flatten_tensor)
             self.neighbor_model_buffers[neighbor].weight = self.graph.neighbor_weights[index]
@@ -71,9 +71,43 @@ class SwiftManager(RootModelAvgRPCCommunicator):
 
         with torch.no_grad():
             vector_to_parameters(send_tensor, self.model.parameters())
+    
+    def process1_5(self): # OK ?
+        send_tensor = parameters_to_vector(self.model.parameters())
+        send_to = {}
+        recv_from = {}
+        for send_rank, recv_rank in self.graph.graph:
+            if self.rank == send_rank and recv_rank in self.graph.neighbor_list:
+                work = dist.isend(tensor=send_tensor, dst=recv_rank)
+                send_to[recv_rank] = work
+            elif self.rank == recv_rank and send_rank in self.graph.neighbor_list:
+                work = dist.irecv(tensor=self.neighbor_model_buffers[send_rank].flatten_tensor, src=send_rank)
+                recv_from[send_rank] = work
+    
+        for recv_rank, send_rank in self.graph.graph:
+            if self.rank == send_rank and recv_rank in self.graph.neighbor_list:
+                work = dist.isend(tensor=send_tensor, dst=recv_rank)
+                send_to[recv_rank] = work
+            elif self.rank == recv_rank and send_rank in self.graph.neighbor_list:
+                work = dist.irecv(tensor=self.neighbor_model_buffers[send_rank].flatten_tensor, src=send_rank)
+                recv_from[send_rank] = work
+        
+        if self.index < 10:
+            for work in send_to.values():
+                work.wait()
+            for work in recv_from.values():
+                work.wait()
+
+        send_tensor.mul_(self.sw)
+        for neighbor_store in self.neighbor_model_buffers.values():
+            send_tensor.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
+
+        with torch.no_grad():
+            vector_to_parameters(send_tensor, self.model.parameters())
         
     def process2(self):
-        send_tensor = parameters_to_vector(self.model.parameters())
+        with torch.no_grad() and self.local_model_store.lock:
+            send_tensor = parameters_to_vector(self.model.parameters())
         term = self.current_t_cb()
         loss = self.local_model_store.loss_value
         for neighbor in self.graph.neighbor_list:
@@ -82,16 +116,38 @@ class SwiftManager(RootModelAvgRPCCommunicator):
                 func= recv_model_param,
                 args=(send_tensor,term,loss,self.rank)
             )
+        
         for neighbor_store in self.neighbor_model_buffers.values():
             if neighbor_store.loss_value == 0 or self.local_model_store.loss_value == 0:
                 return
-        
-        send_tensor.mul_(self.sw)
+        result = send_tensor* self.sw
         for neighbor_store in self.neighbor_model_buffers.values():
-            send_tensor.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
+            with neighbor_store.lock:
+                result.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
 
-        with torch.no_grad():
-            vector_to_parameters(send_tensor, self.model.parameters())
+        with torch.no_grad() and self.local_model_store.lock:
+            vector_to_parameters(result, self.model.parameters())
+    
+    def process2_5(self):
+        self.update_local_flat_model()
+        for neighbor in self.graph.neighbor_list:
+            rpc.rpc_async(
+                to=rpc_work_name(neighbor),
+                func= recv_model_param,
+                args=(*self.local_model_store.getData(),self.rank)
+            )
+        
+        for neighbor_store in self.neighbor_model_buffers.values():
+            if neighbor_store.loss_value == 0:
+                return
+
+        result = self.local_model_store.flatten_tensor * self.sw
+        for neighbor_store in self.neighbor_model_buffers.values():
+            with neighbor_store.lock:
+                result.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
+
+        with torch.no_grad() and self.local_model_store.lock:
+            vector_to_parameters(result, self.model.parameters())
 
 model_avg_rpc_communicator: SwiftManager
 
@@ -99,5 +155,7 @@ def recv_model_param(data, term, loss_value,from_rank):
     global model_avg_rpc_communicator
     if from_rank not in model_avg_rpc_communicator.graph.neighbor_list:
         return None
-    model_avg_rpc_communicator.neighbor_model_buffers[from_rank].setData(data, term, loss_value)
-    
+    with model_avg_rpc_communicator.neighbor_model_buffers[from_rank].lock:
+        model_avg_rpc_communicator.neighbor_model_buffers[from_rank].flatten_tensor = data
+        model_avg_rpc_communicator.neighbor_model_buffers[from_rank].term = term
+        model_avg_rpc_communicator.neighbor_model_buffers[from_rank].loss_value = loss_value

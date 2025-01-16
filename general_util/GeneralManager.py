@@ -213,7 +213,7 @@ class GeneralManager:
                     self.preconditioner.step()
 
                 if batch_idx % 10 == 9:
-                    self.rpc_communicator.model_avg_rpc.process1()
+                    self.rpc_communicator.model_avg_rpc.process2_5()
 
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
