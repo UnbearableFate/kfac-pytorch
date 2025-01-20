@@ -10,7 +10,7 @@ import torch.distributed.rpc as rpc
 import threading
 from typing import Dict, Optional, Tuple
 import logging
-from kfac.adsgds.layer_wised_swift import LWSwiftManager
+from kfac.rpc_model_param_avg import ModelAvgRPCCommunicator
 from kfac.adsgds.swift import SwiftManager
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.data_send_scheduler import DataSendScheduler

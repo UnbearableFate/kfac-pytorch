@@ -164,20 +164,13 @@ class GeneralManager:
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.to(self.device)
                 target = target.to(self.device)
-                #mischief.update_iter()
                 self.optimizer.zero_grad()
+                print(f"rank {self.rank} : {data.size()}")
                 output = self.model(data)
                 loss = self.loss_func(output, target)
                 loss.backward()
-
-                #if self.rank not in [0,6,9,15]:
-                #    time.sleep(0.5)
-                #time.sleep(delay_list_dict[0][self.rank])
-
-                #if self.preconditioner is not None:
-                #    self.preconditioner.step()
+                self.preconditioner.step()
                 self.optimizer.step()
-                #self.scheduler.step()
                 t.update()
             self.train_total_time += time.time() - start_time
             if self.writer is not None:
@@ -213,7 +206,7 @@ class GeneralManager:
                     self.preconditioner.step()
 
                 if batch_idx % 10 == 9:
-                    self.rpc_communicator.model_avg_rpc.process2_5()
+                    self.rpc_communicator.model_avg_rpc.process()
 
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
