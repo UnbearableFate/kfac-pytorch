@@ -120,7 +120,7 @@ class DataPreparer:
             self.train_sampler = sampler(self.train_dataset,world_size,rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
 
         if train_com_method == 'ddp':
-            self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
+            self.test_sampler = None #DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
         else:
             self.test_sampler = None
 

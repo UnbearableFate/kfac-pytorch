@@ -8,7 +8,7 @@ from my_module.custom_resnet import MLP
 from general_util.GeneralManager import GeneralManager
 import torch.distributed as dist
 import logging
-
+from torch.nn.parallel import DistributedDataParallel as DDP
 logging.basicConfig(level=logging.NOTSET)
 
 gpu = torch.device("cuda:0")
@@ -61,15 +61,15 @@ if __name__ == '__main__':
         raise RuntimeError("Unable to initialize process group.")
 
     model = MLP(num_hidden_layers=4,hidden_size=128)
-    rank = dist.get_rank()
-    #device = torch.device(f"cuda:{rank%4}")
-    device = torch.device(f"cpu")
+    device = torch.device(f"cuda:0")
     model = model.to(device)
+    model = DDP(model)
+    rank = dist.get_rank()
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layers.1"], damping= 0.003)
     mgr = GeneralManager(experiment_name="mlp_mnist",dataset_name="FashionMNIST", model=model,
-                         train_com_method='rpc', is_2nd_order=True, epochs=30,batch_size=32,device=device,
+                         train_com_method='ddp', is_2nd_order=True, epochs=30,batch_size=32,device=device,
                          timestamp=timestamp,precondtioner=preconditioner)
 
-    mgr.rpc_train_and_test()
+    mgr.train_and_test()
     mgr.close_all()
     print("Done!")

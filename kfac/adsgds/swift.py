@@ -149,6 +149,28 @@ class SwiftManager(RootModelAvgRPCCommunicator):
         with torch.no_grad() and self.local_model_store.lock:
             vector_to_parameters(result, self.model.parameters())
 
+    def process2_5(self):
+        self.update_local_flat_model()
+        for neighbor in self.graph.neighbor_list:
+            rpc.rpc_async(
+                to=rpc_work_name(neighbor),
+                func= recv_model_param,
+                args=(*self.local_model_store.getData(),self.rank)
+            )
+        
+        for neighbor_store in self.neighbor_model_buffers.values():
+            if neighbor_store.loss_value == 0:
+                return
+
+        result = self.local_model_store.flatten_tensor * self.sw
+        for neighbor_store in self.neighbor_model_buffers.values():
+            with neighbor_store.lock:
+                result.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
+
+        with torch.no_grad() and self.local_model_store.lock:
+            vector_to_parameters(result, self.model.parameters())
+    
+
 model_avg_rpc_communicator: SwiftManager
 
 def recv_model_param(data, term, loss_value,from_rank):
