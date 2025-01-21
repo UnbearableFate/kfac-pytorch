@@ -164,7 +164,7 @@ class KFacRPCCommunicator:
         self.eigen_tensor_packages = None
         self.send_rank_group, self.group_id= create_groups(world_size,rank)
 
-        send_intervals = {'model_param': 3, 'factor': 5, 'eigen': 23}
+        send_intervals = {'model_param': 9, 'factor': 5, 'eigen': 17}
         self.data_send_scheduler = DataSendScheduler(send_intervals)
 
         self.preconditioner = preconditioner
@@ -731,7 +731,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.send_all_model_param_alg10()
+            self.model_avg_rpc.process2_5()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):

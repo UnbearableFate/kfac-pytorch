@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 class SwiftManager(RootModelAvgRPCCommunicator):
     def __init__(self, rank: int, model: torch.nn.Module, rpc_communicator: 'KFacRPCCommunicator'):
         super().__init__(rank, model, rpc_communicator)
-        self.graph = GraphConstruct.GraphConstruct(rank,self.origin_world_size, MPI.COMM_WORLD, 'clique-ring', 'swift', p = 0.15, num_c=3)
+        self.graph = GraphConstruct.GraphConstruct(rank,self.origin_world_size, MPI.COMM_WORLD, 'ring', 'swift', p = 0.15, num_c=8)
         self.sw = 1 - sum(self.graph.neighbor_weights)
         self.neighbor_model_buffers : Dict[int, ModelStore] = {}
         for index,neighbor in enumerate(self.graph.neighbor_list):

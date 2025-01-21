@@ -174,15 +174,15 @@ class GeneralManager:
                 #    time.sleep(0.5)
                 #time.sleep(delay_list_dict[0][self.rank])
 
-                #if self.preconditioner is not None:
-                #    self.preconditioner.step()
+                if self.preconditioner is not None:
+                    self.preconditioner.step()
                 self.optimizer.step()
                 #self.scheduler.step()
                 t.update()
-            self.train_total_time += time.time() - start_time
-            if self.writer is not None:
-                self.writer.add_scalar('Loss/train', loss.item(), epoch)
-                self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
+        self.train_total_time += time.time() - start_time
+        if self.writer is not None:
+            self.writer.add_scalar('Loss/train', loss.item(), epoch)
+            self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
 
     def simple_rpc_train(self, epoch):
         start_time = time.time()
@@ -212,8 +212,9 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
 
-                if batch_idx % 10 == 9:
-                    self.rpc_communicator.model_avg_rpc.process2_5()
+                #if batch_idx % 10 == 9:
+                #    self.rpc_communicator.model_avg_rpc.process2_5()
+                self.rpc_communicator.send_model_param()
 
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
@@ -224,7 +225,6 @@ class GeneralManager:
                                        rpc_distributed.global_communicator.compute_iter_variance(),
                                        self.train_total_time)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
-                self.writer.add_scalar('Time/train', time.time() - start_time, epoch)
 
     def rpc_train(self, epoch):
         start_time = time.time()
