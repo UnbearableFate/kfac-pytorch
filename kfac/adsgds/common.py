@@ -33,7 +33,7 @@ class ModelStore:
     @torch.no_grad()
     def setDataWithLock(self,data,term,loss_value):
         with self.lock:
-            self.flatten_tensor.copy_(data)
+            self.flatten_tensor = data
             self.term = term
             self.loss_value = loss_value
 class RootModelAvgRPCCommunicator:

@@ -5,6 +5,7 @@ import statistics
 import sys
 import time
 
+import psutil
 import torch
 import torch.distributed.rpc as rpc
 import threading
@@ -58,20 +59,6 @@ class NodeState():
     def __str__(self):
         return f"R{self.rank} :t{self.iter}, h{self.health}"
 
-class KfacTaskState:
-    def __init__(self, layer_name, layer):
-        self.layer_name = layer_name
-        self.kfac_layer = layer
-        self.inverse_comp_ready_iter = {"A":-1, "G":-1}
-        self.inverse_comp_ok_iter = {"A":-1, "G":-1}
-        self.grad_comp_iter = {"A":-1, "G":-1}
-        self.grad_comp_ok_iter = -1
-
-    def __str__(self):
-        return f"{self.layer_name} :t{self.t}, A{self.A}, G{self.G}"
-
-    def __repr__(self):
-        return self.__str__()
 
 class KfacRPCLayer:
     def __init__(self,a_handler,g_handler ,name , prediv_eigenvalues ,kfac_layer):
@@ -126,9 +113,6 @@ class KfacRPCLayer:
             self.dgda = dgda
             self.recv_handled_g_version = t
 
-    def clear_count_dict(self,local_t):
-        self.factor_recv_ct : Dict[str:Dict[int, int]] = {"A" : {}, "G": {} }
-
     def load_eigen_tensor(self):
         assert self.name == self.kfac_layer.name
         assert self.recv_handled_a_version >=0 and self.recv_handled_g_version >= 0
@@ -144,46 +128,21 @@ class KfacRPCLayer:
                     self.kfac_layer.dg = self.dg
                     self.kfac_layer.da = self.da
 
-def create_groups(world_size, rank, local_device_num = 4)-> Tuple[List[List[int]], int]:
-    send_rank_group = []
-    rank_group_number = -1
-
-    for i in range(0, world_size, local_device_num):
-        group = list(range(i, min(i + local_device_num, world_size)))
-
-        if rank in group:
-            group.remove(rank)
-            rank_group_number = len(send_rank_group)
-
-        send_rank_group.append(group)
-
-    return send_rank_group, rank_group_number
-
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
         self.eigen_tensor_packages = None
-        self.send_rank_group, self.group_id= create_groups(world_size,rank)
 
         send_intervals = {'model_param': 9, 'factor': 5, 'eigen': 17}
         self.data_send_scheduler = DataSendScheduler(send_intervals)
 
-        self.preconditioner = preconditioner
         self.writer = None
         self.node_state_lock = threading.Lock()
 
-        self.skip_inverse_computation_ct = 0
         self.slow_tolerance_value = 150
         self.max_election_period = 20
 
         self.request_regression_record = set()
 
-        self.io_layers = None
-
-        options = rpc.TensorPipeRpcBackendOptions(
-            num_worker_threads=16,
-            init_method=f"file://{share_file_path}/rpc_share{timestamp}",
-            rpc_timeout=30,
-        )
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
                 num_worker_threads=20,
@@ -192,13 +151,19 @@ class KFacRPCCommunicator:
                 device_maps=full_connection_device_map(world_size,rank),
                 _channels=["cma", "mpt_uv", "basic", "cuda_xth", "cuda_ipc", "cuda_basic"]
             )
-            print(f"Rank {rank} use cuda device")
+            self.total_memory = torch.cuda.get_device_properties(0).total_memory
+        else:
+            options = rpc.TensorPipeRpcBackendOptions(
+            num_worker_threads=16,
+            init_method=f"file://{share_file_path}/rpc_share{timestamp}",
+            rpc_timeout=30,
+        )
+
         self.device = device
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)
         self.origin_world_size = world_size
         self.rank = rank
         self.rpc_layers: Dict[str:KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
-        self.computer_type = "" #eigen / inverse
         self.assigned_layers = []
         self.candidate_participate_factor_computation_layers = []
         self.participate_factor_computation_layers = []
@@ -217,7 +182,7 @@ class KFacRPCCommunicator:
         self.node_states: Dict[int, NodeState] = {}
         for i in range(world_size):
             self.node_states[i] = NodeState(i)
-        self.lock = threading.Lock()
+        self.node_state_lock = threading.Lock()
 
         # hyperparameters
         self.necessary_ct = 1
@@ -294,6 +259,12 @@ class KFacRPCCommunicator:
 
         logger.propagate = False
 
+    def get_memory_usage_percent(self):
+        if self.device == "cuda" or self.device.type == "cuda":
+            return torch.cuda.memory_allocated() / self.total_memory
+        else:
+            return psutil.virtual_memory().percent / 100
+
     def print_rpc_state(self, text = ""):
         global logger
         log_txt = ""
@@ -303,10 +274,8 @@ class KFacRPCCommunicator:
         logger.debug(f"Rank {self.rank}: {log_txt} , {text}")
 
     def debug_print(self, text):
-        pass
         global logger
-        if self.min_iter_in_health_nodes() == self.current_t():
-            logger.debug(f"current iter {self.current_t()} in rank {self.rank}, {text}")
+        logger.debug(f"{self.current_t()} iter in R{self.rank}, {text}")
 
     def __repr__(self):
         log = f"Rank {self.rank} : iter {self.current_t()}\n"
@@ -342,6 +311,9 @@ class KFacRPCCommunicator:
             raise RuntimeError("Failed to acquire lock in update_self_t")
         self.node_states[self.rank].iter += 1
         self.node_state_lock.release()
+        # debug print
+        if self.data_send_scheduler.get_next_send_type() is not None:
+            self.debug_print(f"do {self.data_send_scheduler.get_next_send_type()}, current memory usage: {self.get_memory_usage_percent()}")
 
     def current_t(self):
         return self.node_states[self.rank].iter
@@ -363,7 +335,6 @@ class KFacRPCCommunicator:
         elif current_send_type == "factor":
             self.data_send_scheduler.update_next_send_time("factor")
             return
-        current_t = self.current_t()
         task_set = set()
         for layer_name in self.current_inverse_computation_layers:
             task_set.add(layer_name + "#A")
@@ -395,91 +366,7 @@ class KFacRPCCommunicator:
 
         self.data_send_scheduler.update_next_send_time("eigen")
 
-    def compute_layer_split(self):
-        """
-           Deprecated
-        """
-        eigen_tensor_packages = [[] for _ in range(4)]
-        package_sizes = [0] * len(eigen_tensor_packages)  # 初始化每个包的总大小
-
-        def calculate_tensor_size(tensor):
-            if not isinstance(tensor, torch.Tensor):
-                print(f"tensor is not a tensor: {tensor} type {type(tensor)}")
-                raise ValueError("tensor is not a tensor")
-            if tensor is None:
-                return 0
-            return tensor.numel()  # 返回tensor的元素数量，可以根据需要改成字节数 tensor.element_size() * tensor.numel()
-
-        send_layers = []
-        for layer_name in self.rpc_layers.keys():
-            if (self.rpc_layers[layer_name].assigned_worker['A'] == self.rank or
-                    self.rpc_layers[layer_name].assigned_worker['G'] == self.rank
-                    or self.rpc_layers[layer_name].assigned_worker['A'] in self.send_rank_group[self.group_id]
-                    or self.rpc_layers[layer_name].assigned_worker['G'] in self.send_rank_group[self.group_id]):
-                if self.is_eigen_tensor_ready(layer_name):
-                    send_layers.append(layer_name)
-
-        # 逐层放入包中，使用贪心算法
-        for layer_name in send_layers:
-            rpc_layer = self.rpc_layers[layer_name]
-
-            # 计算这个layer的总大小
-            package_size = (
-                    calculate_tensor_size(rpc_layer.qa) +
-                    calculate_tensor_size(rpc_layer.da) +
-                    calculate_tensor_size(rpc_layer.qg) +
-                    calculate_tensor_size(rpc_layer.dgda)
-            )
-
-            # 找到当前最小的包
-            min_index = package_sizes.index(min(package_sizes))
-
-            # 将当前layer放入最小的包中
-            eigen_tensor_packages[min_index].append(layer_name)
-            package_sizes[min_index] += package_size
-
-        filtered_eigen_tensor_packages = [sublist for sublist in eigen_tensor_packages if sublist]
-
-        self.eigen_tensor_packages = filtered_eigen_tensor_packages
-
-    def package_send_eigen_tensor_balance(self):
-        """
-            Deprecated
-        """
-        if self.eigen_tensor_packages is None:
-            self.compute_layer_split()
-        filtered_eigen_tensor_packages = []
-        for tensor_package in self.eigen_tensor_packages:
-            package = []
-            for layer_name in tensor_package:
-                rpc_layer = self.rpc_layers[layer_name]
-                package.append({
-                    "layer_name": layer_name,
-                    "A": (rpc_layer.qa, rpc_layer.da),
-                    "G": (rpc_layer.qg, rpc_layer.dg, rpc_layer.dgda)
-                })
-            filtered_eigen_tensor_packages.append(package)
-
-        # 获取目标组并排除自身所在的组
-        for grp in range(len(self.send_rank_group)):
-            if grp == self.group_id:
-                continue
-
-            target_ranks = random.choices(self.send_rank_group[grp], k=len(filtered_eigen_tensor_packages))
-
-            # 将每个包发送给不同的目标节点
-            for i, target_rank in enumerate(target_ranks):
-                try:
-                    rpc.rpc_async(
-                        to=rpc_work_name(target_rank),
-                        func=receive_eigen_tensor_package,
-                        args=(self.rank, self.current_t(), filtered_eigen_tensor_packages[i])
-                    )
-                except Exception as e:
-                    print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
-
     def compute_preconditioned_gradients(self,damping):
-        current_t = self.current_t()
         all_layer = set(self.rpc_layers.keys())
         if not self.gradient_computation_start:
             for layer_name ,layer in self.rpc_layers.items():
@@ -590,6 +477,9 @@ class KFacRPCCommunicator:
         return True
 
     def assigned_worker(self, layer_name, factor_type):
+        """
+        Return the rank of the worker assigned to compute the decomp of the factor.
+        """
         return self.rpc_layers[layer_name].assigned_worker[factor_type]
 
     def send_kfac_factor(self,layer_name:str,factor_tensor :torch.Tensor, factor_type:str):
@@ -656,10 +546,7 @@ class KFacRPCCommunicator:
                 'has not computed inv yet.',
             )
 
-        if self.rpc_layers[layer_name].prediv_eigenvalues:
-            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
-        else:
-            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
+        self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
 
         #for target_rank in self.send_rank_group[self.group_id]:
         for target_rank in range(self.origin_world_size):
@@ -675,7 +562,10 @@ class KFacRPCCommunicator:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
 
     def is_factor_computation_skipped(self, layer_name):
-        if layer_name not in self.participate_factor_computation_layers and layer_name not in self.current_inverse_computation_layers:
+        """
+        既不需要帮其他人算
+        """
+        if layer_name not in self.current_participate_factor_computation_layers and layer_name not in self.current_inverse_computation_layers:
             return True
         return False
 
@@ -833,7 +723,6 @@ def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, t):
     if fault_simulator.is_fault():
         return
     global global_communicator
-    #with global_communicator.lock:
     if t < global_communicator.rpc_layers[layer_name].recv_handled_g_version:
         return
     global_communicator.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)

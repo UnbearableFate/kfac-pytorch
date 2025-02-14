@@ -32,7 +32,7 @@ class SwiftManager(RootModelAvgRPCCommunicator):
     """
     call this func after backward propagation
     """
-    def process(self): # OK?
+    def process_sync(self): # OK?
         self.index += 1
         send_tensor = parameters_to_vector(self.model.parameters())
         recv_tensor = send_tensor.clone()
@@ -49,115 +49,17 @@ class SwiftManager(RootModelAvgRPCCommunicator):
 
         vector_to_parameters(recv_tensor.add_(send_tensor).mul_(0.5), self.model.parameters())
     
-    def process1(self): # OK !
-        self.index += 1
-        send_tensor = parameters_to_vector(self.model.parameters())
-        
-        for send_rank, recv_rank in self.graph.graph:
-            if self.rank == send_rank and recv_rank in self.graph.neighbor_list:
-                dist.send(tensor=send_tensor, dst=recv_rank)
-            elif self.rank == recv_rank and send_rank in self.graph.neighbor_list:
-                dist.recv(tensor=self.neighbor_model_buffers[send_rank].flatten_tensor, src=send_rank)
-    
-        for recv_rank, send_rank in self.graph.graph:
-            if self.rank == send_rank and recv_rank in self.graph.neighbor_list:
-                dist.send(tensor=send_tensor, dst=recv_rank)
-            elif self.rank == recv_rank and send_rank in self.graph.neighbor_list:
-                dist.recv(tensor=self.neighbor_model_buffers[send_rank].flatten_tensor, src=send_rank)
-        
-        send_tensor.mul_(self.sw)
-        for neighbor_store in self.neighbor_model_buffers.values():
-            send_tensor.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
-
-        with torch.no_grad():
-            vector_to_parameters(send_tensor, self.model.parameters())
-    
-    def process1_5(self): # OK ?
-        send_tensor = parameters_to_vector(self.model.parameters())
-        send_to = {}
-        recv_from = {}
-        for send_rank, recv_rank in self.graph.graph:
-            if self.rank == send_rank and recv_rank in self.graph.neighbor_list:
-                work = dist.isend(tensor=send_tensor, dst=recv_rank)
-                send_to[recv_rank] = work
-            elif self.rank == recv_rank and send_rank in self.graph.neighbor_list:
-                work = dist.irecv(tensor=self.neighbor_model_buffers[send_rank].flatten_tensor, src=send_rank)
-                recv_from[send_rank] = work
-    
-        for recv_rank, send_rank in self.graph.graph:
-            if self.rank == send_rank and recv_rank in self.graph.neighbor_list:
-                work = dist.isend(tensor=send_tensor, dst=recv_rank)
-                send_to[recv_rank] = work
-            elif self.rank == recv_rank and send_rank in self.graph.neighbor_list:
-                work = dist.irecv(tensor=self.neighbor_model_buffers[send_rank].flatten_tensor, src=send_rank)
-                recv_from[send_rank] = work
-        
-        if self.index < 10:
-            for work in send_to.values():
-                work.wait()
-            for work in recv_from.values():
-                work.wait()
-
-        send_tensor.mul_(self.sw)
-        for neighbor_store in self.neighbor_model_buffers.values():
-            send_tensor.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
-
-        with torch.no_grad():
-            vector_to_parameters(send_tensor, self.model.parameters())
-        
-    def process2(self):
-        with torch.no_grad() and self.local_model_store.lock:
-            send_tensor = parameters_to_vector(self.model.parameters())
-        term = self.current_t_cb()
-        loss = self.local_model_store.loss_value
-        for neighbor in self.graph.neighbor_list:
-            rpc.rpc_async(
-                to=rpc_work_name(neighbor),
-                func= recv_model_param,
-                args=(send_tensor,term,loss,self.rank)
-            )
-        
-        for neighbor_store in self.neighbor_model_buffers.values():
-            if neighbor_store.loss_value == 0 or self.local_model_store.loss_value == 0:
-                return
-        result = send_tensor* self.sw
-        for neighbor_store in self.neighbor_model_buffers.values():
-            with neighbor_store.lock:
-                result.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
-
-        with torch.no_grad() and self.local_model_store.lock:
-            vector_to_parameters(result, self.model.parameters())
-    
-    def process2_5(self):
+    def process(self):
         self.update_local_flat_model()
+        send_work_list = []
         for neighbor in self.graph.neighbor_list:
-            rpc.rpc_async(
+            work = rpc.rpc_async(
                 to=rpc_work_name(neighbor),
                 func= recv_model_param,
                 args=(*self.local_model_store.getData(),self.rank)
             )
-        
-        for neighbor_store in self.neighbor_model_buffers.values():
-            if neighbor_store.loss_value == 0:
-                return
+            send_work_list.append(work)
 
-        result = self.local_model_store.flatten_tensor * self.sw
-        for neighbor_store in self.neighbor_model_buffers.values():
-            with neighbor_store.lock:
-                result.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
-
-        with torch.no_grad() and self.local_model_store.lock:
-            vector_to_parameters(result, self.model.parameters())
-
-    def process2_5(self):
-        self.update_local_flat_model()
-        for neighbor in self.graph.neighbor_list:
-            rpc.rpc_async(
-                to=rpc_work_name(neighbor),
-                func= recv_model_param,
-                args=(*self.local_model_store.getData(),self.rank)
-            )
-        
         for neighbor_store in self.neighbor_model_buffers.values():
             if neighbor_store.loss_value == 0:
                 return
@@ -177,7 +79,4 @@ def recv_model_param(data, term, loss_value,from_rank):
     global model_avg_rpc_communicator
     if from_rank not in model_avg_rpc_communicator.graph.neighbor_list:
         return None
-    with model_avg_rpc_communicator.neighbor_model_buffers[from_rank].lock:
-        model_avg_rpc_communicator.neighbor_model_buffers[from_rank].flatten_tensor = data
-        model_avg_rpc_communicator.neighbor_model_buffers[from_rank].term = term
-        model_avg_rpc_communicator.neighbor_model_buffers[from_rank].loss_value = loss_value
+    model_avg_rpc_communicator.neighbor_model_buffers[from_rank].setDataWithLock(data, term, loss_value)

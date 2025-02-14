@@ -189,6 +189,48 @@ class GraphConstruct:
             
         return neighbors[rank]
 
+def exponential_topology_targets(world_size, rank):
+    """
+    Generate a list of neighbor ranks in an exponential topology.
+
+    Args:
+        world_size (int): Total number of nodes in the topology.
+        rank (int): The rank of the current node (0 <= rank < world_size).
+
+    Returns:
+        list: A list of neighbor ranks.
+    """
+    max_dimension = int(math.ceil(math.log2(world_size)))
+    neighbors = []
+    for k in range(max_dimension):
+        offset = 1 << k  # Calculate 2^k
+        neighbor = (rank + offset) % world_size
+        if neighbor != rank:
+            neighbors.append(neighbor)
+    return neighbors
+
+import math
+
+def exponential_topology_sources(world_size, rank):
+    """
+    Generate a list of source ranks from which the current node will receive data in an exponential topology.
+
+    Args:
+        world_size (int): Total number of nodes in the topology.
+        rank (int): The rank of the current node (0 <= rank < world_size).
+
+    Returns:
+        list: A list of source ranks.
+    """
+    max_dimension = int(math.ceil(math.log2(world_size)))
+    sources = []
+    for k in range(max_dimension):
+        offset = 1 << k  # Calculate 2^k
+        src_rank = (rank - offset) % world_size
+        if src_rank != rank:
+            sources.append(src_rank)
+    return sources
+
 
 if __name__ == "__main__":
     rank = MPI.COMM_WORLD.Get_rank()
