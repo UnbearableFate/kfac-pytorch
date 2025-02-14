@@ -333,11 +333,17 @@ class KFACEigenLayer(KFACBaseLayer):
                 )
             except Exception as e:
                 print(f"eigen a decomposition error: {e} at {self.name}")
-                epsilon = 0.007
-                matrix = self.a_factor + epsilon * torch.eye(self.a_factor.size(0), dtype=self.a_factor.dtype, device=self.a_factor.device)
-                self.da, self.qa = torch.linalg.eigh(
-                    (matrix).to(torch.float32),
-                )
+                if torch.isnan(self.a_factor).any() or torch.isinf(self.a_factor).any():
+                    print(f"nan or inf in a_factor at {self.name} try to fix")
+                    self.a_factor = torch.nan_to_num(self.a_factor)
+                try :
+                    epsilon = 0.007
+                    matrix = self.a_factor + epsilon * torch.eye(self.a_factor.size(0), dtype=self.a_factor.dtype, device=self.a_factor.device)
+                    self.da, self.qa = torch.linalg.eigh(
+                        (matrix).to(torch.float32),
+                    )
+                except Exception as e:
+                    print(f"eigen a decomposition error: {e} at {self.name} ,pass")
         else:
             da, qa = torch.linalg.eig(
                 self.a_factor.to(torch.float32),
@@ -363,11 +369,17 @@ class KFACEigenLayer(KFACBaseLayer):
                 )
             except Exception as e:
                 print(f"eigen g decomposition error: {e} at {self.name}")
-                epsilon = 0.007
-                matrix = self.g_factor + epsilon * torch.eye(self.g_factor.size(0), dtype=self.g_factor.dtype, device=self.g_factor.device)
-                self.dg, self.qg = torch.linalg.eigh(
-                    (matrix).to(torch.float32),
-                )
+                if torch.isnan(self.g_factor).any() or torch.isinf(self.g_factor).any():
+                    print(f"nan or inf in g_factor at {self.name} try to fix")
+                    self.g_factor = torch.nan_to_num(self.g_factor)
+                try:
+                    epsilon = 0.007
+                    matrix = self.g_factor + epsilon * torch.eye(self.g_factor.size(0), dtype=self.g_factor.dtype, device=self.g_factor.device)
+                    self.dg, self.qg = torch.linalg.eigh(
+                        (matrix).to(torch.float32),
+                    )
+                except Exception as e:
+                    print(f"eigen g decomposition error: {e} at {self.name} ,pass")
         else:
             dg, qg = torch.linalg.eig(
                 self.g_factor.to(torch.float32),

@@ -128,7 +128,7 @@ class DataPreparer:
             self.test_sampler = None
 
         self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=(self.train_sampler is None),
-                                       sampler=self.train_sampler, num_workers=2, persistent_workers =False)
+                                       sampler=self.train_sampler, num_workers=1, persistent_workers =False)
         self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False,
                                       sampler=self.test_sampler,
                                       num_workers=2, persistent_workers=False)

@@ -138,7 +138,7 @@ class GeneralManager:
         for i in range(self.start_epoch, self.epochs):
             self.simple_rpc_train(epoch=i)
             self.test_local_top(epoch=i, topk=(1, 3))
-            self.save_checkpoint(epoch=i)
+            #self.save_checkpoint(epoch=i)
 
         self.writer.close()
         print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_total_time}")
@@ -205,12 +205,13 @@ class GeneralManager:
                     output = self.model(data)
                     loss = self.loss_func(output, target)
                     loss.backward()
-                    self.optimizer.step()
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
 
+                with self.rpc_communicator.model_avg_rpc.local_model_store.lock:
+                    self.optimizer.step()
                 #if batch_idx % 10 == 9:
                 #    self.rpc_communicator.model_avg_rpc.process2_5()
                 self.rpc_communicator.send_model_param()

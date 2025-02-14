@@ -52,6 +52,7 @@ class SwiftManager(RootModelAvgRPCCommunicator):
     def process(self):
         self.update_local_flat_model()
         send_work_list = []
+        result = self.local_model_store.flatten_tensor * self.sw
         for neighbor in self.graph.neighbor_list:
             work = rpc.rpc_async(
                 to=rpc_work_name(neighbor),
@@ -64,14 +65,12 @@ class SwiftManager(RootModelAvgRPCCommunicator):
             if neighbor_store.loss_value == 0:
                 return
 
-        result = self.local_model_store.flatten_tensor * self.sw
         for neighbor_store in self.neighbor_model_buffers.values():
             with neighbor_store.lock:
                 result.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.weight)
 
         with torch.no_grad() and self.local_model_store.lock:
             vector_to_parameters(result, self.model.parameters())
-    
 
 model_avg_rpc_communicator: SwiftManager
 

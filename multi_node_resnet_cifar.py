@@ -39,6 +39,10 @@ if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
+from mpi4py import MPI
+ompi_world_rank = MPI.COMM_WORLD.Get_rank()
+ompi_world_size = MPI.COMM_WORLD.Get_size()
+
 if ompi_world_rank == 0:
     logging.basicConfig(level=logging.NOTSET)
 
@@ -72,10 +76,10 @@ if __name__ == '__main__':
 
     mgr = GeneralManager( dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc',  is_2nd_order=True, epochs=80, device=device,
+                         train_com_method='rpc',  is_2nd_order=True, epochs=10, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="resnet18_cifar10_swift",
-                         recover=False)
+                         transform_train=None, transform_test=None,experiment_name="fe5ed60",
+                         recover=False,batch_size=32)
 
     mgr.rpc_train_and_test()
     print("Done!")
