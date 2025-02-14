@@ -166,7 +166,7 @@ class KFacRPCCommunicator:
         self.rpc_layers: Dict[str:KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
         self.assigned_layers = []
         self.candidate_participate_factor_computation_layers = []
-        self.participate_factor_computation_layers = []
+        self.current_participate_factor_computation_layers = []
         self.current_inverse_computation_layers = []
         for name, kfac_layer in preconditioner._layers.values():
             a_handler = preconditioner._assignment.inv_worker(name, 'A')
@@ -177,7 +177,7 @@ class KFacRPCCommunicator:
                 self.current_inverse_computation_layers.append(name)
             else:
                 self.candidate_participate_factor_computation_layers.append(name)
-                self.participate_factor_computation_layers.append(name)
+                self.current_participate_factor_computation_layers.append(name)
 
         self.node_states: Dict[int, NodeState] = {}
         for i in range(world_size):
@@ -450,7 +450,7 @@ class KFacRPCCommunicator:
         gc.collect()
         self.print_rpc_state(f"update new assignment {new_assignment_generation}: {new_assignment}")
         self.current_inverse_computation_layers = self.assigned_layers.copy()
-        self.participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
+        self.current_participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
         self.update_assignment_callback = None
         self.task_reassign_rpc.running_time = 0
         self.eigen_tensor_packages = None
@@ -483,7 +483,7 @@ class KFacRPCCommunicator:
         return self.rpc_layers[layer_name].assigned_worker[factor_type]
 
     def send_kfac_factor(self,layer_name:str,factor_tensor :torch.Tensor, factor_type:str):
-        if layer_name not in self.participate_factor_computation_layers and layer_name not in self.assigned_layers:
+        if layer_name not in self.current_participate_factor_computation_layers and layer_name not in self.assigned_layers:
             return True
         target = 0
         if factor_type == "A":
@@ -579,7 +579,7 @@ class KFacRPCCommunicator:
         self.time_cost_accumulation += loop_time_cost
         for layer_name in self.current_inverse_computation_layers:
             self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]*1.1  +self.layers_workload[layer_name]["G"]) #* 0.001
-        for layer_name in self.participate_factor_computation_layers:
+        for layer_name in self.current_participate_factor_computation_layers:
             self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]*0.1) #* 0.001
 
         self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
@@ -593,19 +593,16 @@ class KFacRPCCommunicator:
 
         random.shuffle(self.candidate_participate_factor_computation_layers)
         random.shuffle(self.assigned_layers)
-        self.participate_factor_computation_layers = \
-            self.candidate_participate_factor_computation_layers[:len(self.participate_factor_computation_layers)]
+        self.current_participate_factor_computation_layers = \
+            self.candidate_participate_factor_computation_layers[:len(self.current_participate_factor_computation_layers)]
         self.current_inverse_computation_layers = self.assigned_layers[:len(self.current_inverse_computation_layers)]
         if forward_than_local >= math.ceil(self.get_world_size() * 0.7) and iter_diff > 5: # local is too slow, work less
-            if len(self.participate_factor_computation_layers) > 0:
-                layer_name = random.choice(self.participate_factor_computation_layers)
-                self.participate_factor_computation_layers.remove(layer_name)
+            if len(self.current_participate_factor_computation_layers) > 0:
+                layer_name = random.choice(self.current_participate_factor_computation_layers)
+                self.current_participate_factor_computation_layers.remove(layer_name)
             elif len(self.current_inverse_computation_layers) > 0:
                 layer_name = random.choice(self.current_inverse_computation_layers)
                 self.current_inverse_computation_layers.remove(layer_name)
-            else:
-                if self.preconditioner.inv_update_steps < 30:
-                    self.preconditioner._inv_update_steps += 1
 
         if late_than_local >= 1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
             if len(self.current_inverse_computation_layers) < len(self.assigned_layers):
@@ -613,15 +610,15 @@ class KFacRPCCommunicator:
                     if layer_name not in self.current_inverse_computation_layers:
                         self.current_inverse_computation_layers.append(layer_name)
                         break
-            elif len(self.participate_factor_computation_layers) < len(self.candidate_participate_factor_computation_layers):
+            elif len(self.current_participate_factor_computation_layers) < len(self.candidate_participate_factor_computation_layers):
                 for layer_name in reversed(self.candidate_participate_factor_computation_layers):
-                    if layer_name not in self.participate_factor_computation_layers:
-                        self.participate_factor_computation_layers.append(layer_name)
+                    if layer_name not in self.current_participate_factor_computation_layers:
+                        self.current_participate_factor_computation_layers.append(layer_name)
                         break
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.process2_5()
+            self.model_avg_rpc.process()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):
