@@ -14,7 +14,7 @@ import logging
 from kfac.rpc_model_param_avg import ModelAvgRPCCommunicator
 from kfac.adsgds.swift import SwiftManager
 import kfac.rpc_task_manager as task_manager
-from kfac.rpc_util.data_send_scheduler import DataSendScheduler
+from kfac.rpc_util.send_scheduler import DataSendScheduler
 import numpy as np
 
 from typing import TYPE_CHECKING ,List
@@ -330,7 +330,7 @@ class KFacRPCCommunicator:
 
     def compute_and_broadcast_inverse(self, preconditioner: 'BaseKFACPreconditioner'):
         current_send_type = self.data_send_scheduler.get_next_send_type()
-        if current_send_type is None:
+        if current_send_type is None or current_send_type == "model_param":
             return
         elif current_send_type == "factor":
             self.data_send_scheduler.update_next_send_time("factor")
