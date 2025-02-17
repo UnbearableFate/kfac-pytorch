@@ -295,14 +295,6 @@ class KFACBaseLayer:
                 operation. All ranks in the group should enter this function.
                 Defaults to None, the default process group.
         """
-        #if mischief.reduce_a_factor_with_sick(self, group): return
-        # RPC communication
-        if rpc_distributed.global_communicator is not None:
-            if rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
-                return
-            rpc_distributed.global_communicator.send_kfac_factor(self.name,self.a_factor, "A")
-            return
-
         if self.a_factor is None:
             raise RuntimeError('a_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:
@@ -331,14 +323,6 @@ class KFACBaseLayer:
                 operation. All ranks in the group should enter this function.
                 Defaults to None, the default process group.
         """
-        #if mischief.reduce_g_factor_with_sick(self, group): return
-        # RPC communication
-        if rpc_distributed.global_communicator is not None:
-            if rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
-                return
-            rpc_distributed.global_communicator.send_kfac_factor(self.name,self.g_factor, "G")
-            return
-
         if self.g_factor is None:
             raise RuntimeError('g_factor is None, cannot reduce')
         if self.allreduce_method == AllreduceMethod.ALLREDUCE:
@@ -399,10 +383,6 @@ class KFACBaseLayer:
         Args:
             alpha (float): running average parameter (default: 0.95).
         """
-        # slow down the computation
-        # RPC part
-        if rpc_distributed.global_communicator is not None and rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
-            return
         
         if self._a_batch is None:
             return
@@ -422,9 +402,6 @@ class KFACBaseLayer:
         Args:
             alpha (float): running average parameter (default: 0.95).
         """
-        # RPC part
-        if rpc_distributed.global_communicator is not None and rpc_distributed.global_communicator.is_factor_computation_skipped(self.name):
-            return
         
         if self._g_batch is None:
             return

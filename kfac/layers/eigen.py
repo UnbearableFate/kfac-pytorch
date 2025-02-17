@@ -144,6 +144,56 @@ class KFACEigenLayer(KFACBaseLayer):
         """Set precomputed eigen values for preconditioning."""
         self._dgda = value
 
+    def get_factor(self, factor_name: str) -> torch.Tensor:
+        """Get factor by name.
+
+        Args:
+            factor_name (str): name of factor to get.
+
+        Returns:
+            torch.Tensor: factor tensor.
+        """
+        if factor_name == 'A':
+            return self.a_factor
+        elif factor_name == 'G':
+            return self.g_factor
+        elif factor_name == 'qa':
+            return self.qa
+        elif factor_name == 'qg':
+            return self.qg
+        elif factor_name == 'da':
+            return self.da
+        elif factor_name == 'dg':
+            return self.dg
+        elif factor_name == 'dgda':
+            return self.dgda
+        else:
+            raise ValueError(f'Unknown factor name: {factor_name}')
+
+    def set_factor(self, factor_name: str, value: torch.Tensor) -> None:
+        """Set factor by name.
+
+        Args:
+            factor_name (str): name of factor to set.
+            value (torch.Tensor): value to set factor to.
+        """
+        if factor_name == 'A':
+            self.a_factor = value
+        elif factor_name == 'G':
+            self.g_factor = value
+        elif factor_name == 'qa':
+            self.qa = value
+        elif factor_name == 'qg':
+            self.qg = value
+        elif factor_name == 'da':
+            self.da = value
+        elif factor_name == 'dg':
+            self.dg = value
+        elif factor_name == 'dgda':
+            self.dgda = value
+        else:
+            raise ValueError(f'Unknown factor name: {factor_name}')
+
     def memory_usage(self) -> dict[str, int]:
         """Get memory usage for all variables in the layer."""
         sizes = super().memory_usage()

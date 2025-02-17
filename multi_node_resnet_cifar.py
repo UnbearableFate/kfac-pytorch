@@ -65,7 +65,7 @@ if __name__ == '__main__':
     model = ResNetForCIFAR10(layers=18)
     device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1,train_method='rpc')
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224

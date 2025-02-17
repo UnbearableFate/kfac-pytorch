@@ -294,6 +294,8 @@ class KFacRPCCommunicator:
 
     def load_factor(self,kfac_layer: 'KFACBaseLayer', factor_type):
         if self.assigned_worker(kfac_layer.name, factor_type) == self.rank:
+            if  self.rpc_layers[kfac_layer.name].factor[factor_type] is None:
+                self.debug_print(f"can not load factor {factor_type} for {kfac_layer.name}")
             assert self.rpc_layers[kfac_layer.name].factor[factor_type] is not None
             if factor_type == "A":
                 kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
@@ -338,7 +340,6 @@ class KFacRPCCommunicator:
         task_set = set()
         for layer_name in self.current_inverse_computation_layers:
             task_set.add(layer_name + "#A")
-            #task_set.add(layer_name + "#G")
         while len(task_set) > 0:
             ready_list = []
             for task_name in task_set:
@@ -482,21 +483,14 @@ class KFacRPCCommunicator:
         """
         return self.rpc_layers[layer_name].assigned_worker[factor_type]
 
-    def send_kfac_factor(self,layer_name:str,factor_tensor :torch.Tensor, factor_type:str):
-        if layer_name not in self.current_participate_factor_computation_layers and layer_name not in self.assigned_layers:
-            return True
-        target = 0
-        if factor_type == "A":
-            target = self.rpc_layers[layer_name].assigned_worker['A']
-        elif factor_type == "G":
-            target = self.rpc_layers[layer_name].assigned_worker['G']
+    def send_kfac_factor(self,layer_name:str,factor_type:str):
+        self.debug_print(f"send factor {factor_type} of {layer_name}")
+        target = self.assigned_worker(layer_name, factor_type)
         t = self.current_t()
+        factor_tensor = self.rpc_layers[layer_name].kfac_layer.get_factor(factor_type).clone()
         if target == self.rank:
-            self.rpc_layers[layer_name].update_local_factor(factor_tensor.clone(), t, t, factor_type, world_size=self.origin_world_size)
+            self.rpc_layers[layer_name].update_local_factor(factor_tensor, t, t, factor_type, world_size=self.origin_world_size)
             return
-
-        if not self.data_send_scheduler.can_send("factor"):
-            return False
         try:
             rpc.rpc_async(
                 to=rpc_work_name(target),
