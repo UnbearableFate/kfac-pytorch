@@ -19,7 +19,7 @@ class SwiftManager(RootModelAvgRPCCommunicator):
     def __init__(self, rank: int, model: torch.nn.Module, rpc_communicator: 'KFacRPCCommunicator'):
         super().__init__(rank, model, rpc_communicator)
         self.graph = GraphConstruct.GraphConstruct(rank,self.origin_world_size, MPI.COMM_WORLD, 'ring', 'swift', p = 0.15, num_c=8)
-        self.sw = 1 - sum(self.graph.neighbor_weights)
+        self.local_model_store.weight = 1 - sum(self.graph.neighbor_weights)
         self.neighbor_model_buffers : Dict[int, ModelStore] = {}
         for index,neighbor in enumerate(self.graph.neighbor_list):
             self.neighbor_model_buffers[neighbor] = ModelStore(self.local_model_store.flatten_tensor)
@@ -52,7 +52,7 @@ class SwiftManager(RootModelAvgRPCCommunicator):
     def process(self):
         self.update_local_flat_model()
         send_work_list = []
-        result = self.local_model_store.flatten_tensor * self.sw
+        result = self.local_model_store.flatten_tensor * self.local_model_store.weight
         for neighbor in self.graph.neighbor_list:
             work = rpc.rpc_async(
                 to=rpc_work_name(neighbor),
@@ -71,6 +71,9 @@ class SwiftManager(RootModelAvgRPCCommunicator):
 
         with torch.no_grad() and self.local_model_store.lock:
             vector_to_parameters(result, self.model.parameters())
+
+        self.rpc_communicator.debug_print(f"model avg process done ,memeory usage is {self.rpc_communicator.get_memory_usage_percent()}")
+
 
 model_avg_rpc_communicator: SwiftManager
 

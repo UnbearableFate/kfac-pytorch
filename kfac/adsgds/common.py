@@ -37,14 +37,17 @@ class ModelStore:
             self.term = term
             self.loss_value = loss_value
 class RootModelAvgRPCCommunicator:
-    def __init__(self, rank, model: torch.nn.Module ,rpc_communicator: 'KFacRPCCommunicator'):
+    def __init__(self, rank, model: torch.nn.Module ,rpc_communicator: 'KFacRPCCommunicator',default_model_store = True):
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
         self.world_size_cb = rpc_communicator.get_world_size
         self.current_t_cb = self.rpc_communicator.current_t
         self.origin_world_size = rpc_communicator.origin_world_size
         self.rank = rank
         self.model = model
-        self.local_model_store = ModelStore(parameters_to_vector(self.model.parameters()))
+        if default_model_store:
+            self.local_model_store = ModelStore(parameters_to_vector(self.model.parameters()))
+        else:
+            self.local_model_store = None
 
     def set_loss(self, loss_value):
         self.local_model_store.loss_value = loss_value
@@ -59,7 +62,7 @@ class RootModelAvgRPCCommunicator:
 
     @torch.no_grad()
     def update_local_flat_model(self):
-        with self.local_model_store.lock and torch.no_grad():
+        with self.local_model_store.lock:
             self.local_model_store.flatten_tensor = parameters_to_vector(self.model.parameters())
             self.local_model_store.term = self.current_t_cb()
 

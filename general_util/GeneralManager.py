@@ -167,7 +167,6 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
-                print(f"rank {self.rank} : {data.size()}")
                 output = self.model(data)
                 loss = self.loss_func(output, target)
                 loss.backward()

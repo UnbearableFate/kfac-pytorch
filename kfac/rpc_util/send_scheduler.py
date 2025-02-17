@@ -1,16 +1,12 @@
-import torch
-
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from kfac.rpc_distributed import KFacRPCCommunicator
 class DataSendScheduler:
-    def __init__(self, send_intervals, device=None):
+    def __init__(self, send_intervals):
         self.intervals = dict(send_intervals)
         self.next_send = {k: v for k, v in send_intervals.items()}
         self.priority_order = list(send_intervals.keys())
         self.current_iter = 0
-        if device is not None and (device == "cuda" or device.type == "cuda"):
-            self.total_memory = torch.cuda.get_device_properties(0).total_memory
-        else:
-            # Get cpu memory
-            self.total_memory = 0
 
     def update_loop_counter(self):
         """更新当前迭代轮次"""
@@ -35,21 +31,6 @@ class DataSendScheduler:
         for dt in candidates[1:]:
             self.next_send[dt] = current_iter + 1
         return selected
-
-        """
-        if self.total_memory > 0 and torch.cuda.memory_allocated() / self.total_memory < 0.9:
-            # 选择最高优先级的候选者
-            selected = candidates[0]
-
-            # 将其他冲突的候选者延迟到下一次迭代
-            for dt in candidates[1:]:
-                self.next_send[dt] = current_iter + 1
-            return selected
-        else:
-            for dt in candidates:
-                self.next_send[dt] = current_iter + 1
-            return None
-        """
 
     def can_send(self, data_type):
         """检查指定的数据类型是否可以发送"""
