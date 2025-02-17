@@ -51,8 +51,10 @@ class GeneralManager:
         if is_2nd_order:
             if precondtioner is not None:
                 self.preconditioner = precondtioner
-            else:
+            elif train_com_method == "ddp":
                 self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
+            elif train_com_method == "rpc":
+                self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,train_method="rpc")
             if train_com_method == "rpc":
                 self.rpc_communicator:rpc_distributed.KFacRPCCommunicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
                                                                                                                 preconditioner=self.preconditioner, model=model,
@@ -138,7 +140,7 @@ class GeneralManager:
         for i in range(self.start_epoch, self.epochs):
             self.simple_rpc_train(epoch=i)
             self.test_local_top(epoch=i, topk=(1, 3))
-            #self.save_checkpoint(epoch=i)
+            self.save_checkpoint(epoch=i)
 
         self.writer.close()
         print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_total_time}")
@@ -201,20 +203,18 @@ class GeneralManager:
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
                 
-                with self.rpc_communicator.model_avg_rpc.local_model_store.lock:
-                    output = self.model(data)
-                    loss = self.loss_func(output, target)
-                    loss.backward()
+                output = self.model(data)
+                loss = self.loss_func(output, target)
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
-                
+                loss.backward()
+
                 if self.preconditioner is not None:
                     self.preconditioner.step()
 
+                self.rpc_communicator.send_model_param()
+
                 with self.rpc_communicator.model_avg_rpc.local_model_store.lock:
                     self.optimizer.step()
-                #if batch_idx % 10 == 9:
-                #    self.rpc_communicator.model_avg_rpc.process2_5()
-                self.rpc_communicator.send_model_param()
 
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()

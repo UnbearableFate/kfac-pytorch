@@ -24,7 +24,7 @@ class LayerwiseModelStore:
                 self.layer_parameters[layer_name] = param.data
     
     def clone_model_store(self, model_store: 'LayerwiseModelStore'):
-        with self.lock:
+        with self.lock and model_store.lock:
             for layer_name, layer_parameter in model_store.layer_parameters.items():
                 self.layer_parameters[layer_name] = layer_parameter.clone()
     

@@ -136,7 +136,6 @@ class KFacRPCCommunicator:
         self.data_send_scheduler = DataSendScheduler(send_intervals)
 
         self.writer = None
-        self.node_state_lock = threading.Lock()
 
         self.slow_tolerance_value = 150
         self.max_election_period = 20
@@ -294,8 +293,6 @@ class KFacRPCCommunicator:
 
     def load_factor(self,kfac_layer: 'KFACBaseLayer', factor_type):
         if self.assigned_worker(kfac_layer.name, factor_type) == self.rank:
-            if  self.rpc_layers[kfac_layer.name].factor[factor_type] is None:
-                self.debug_print(f"can not load factor {factor_type} for {kfac_layer.name}")
             assert self.rpc_layers[kfac_layer.name].factor[factor_type] is not None
             if factor_type == "A":
                 kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
@@ -484,7 +481,6 @@ class KFacRPCCommunicator:
         return self.rpc_layers[layer_name].assigned_worker[factor_type]
 
     def send_kfac_factor(self,layer_name:str,factor_type:str):
-        self.debug_print(f"send factor {factor_type} of {layer_name}")
         target = self.assigned_worker(layer_name, factor_type)
         t = self.current_t()
         factor_tensor = self.rpc_layers[layer_name].kfac_layer.get_factor(factor_type).clone()

@@ -55,4 +55,4 @@ def recv_model_param(data, from_term, from_loss, from_rank):
     global model_avg_rpc_communicator
     if from_rank not in model_avg_rpc_communicator.graph.neighbor_list:
         return
-    model_avg_rpc_communicator.neighbor_model_buffers[from_rank].setData(data, from_term, from_loss)
+    model_avg_rpc_communicator.neighbor_model_buffers[from_rank].setDataWithLock(data, from_term, from_loss)
