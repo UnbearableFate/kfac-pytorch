@@ -314,12 +314,12 @@ class KFacRPCCommunicator:
                 layer_name, factor_type = ready_task_name.split("#")
                 kfac_layer = self.rpc_layers[layer_name].kfac_layer
                 if factor_type == "A":
-                    with self.rpc_layers[layer_name].tensor_locks['qa']: #, self.rpc_layers[layer_name].tensor_locks['A']:
+                    with self.rpc_layers[layer_name].tensor_locks['qa'], self.rpc_layers[layer_name].tensor_locks['A']:
                         kfac_layer.compute_a_inv(damping=preconditioner.damping)
                         self.rpc_layers[layer_name].recv_handled_a_version = self.current_t()
                     self.broadcast_kfac_eigen_tensor_a(layer_name=layer_name)
                 elif factor_type == "G":
-                    with self.rpc_layers[layer_name].tensor_locks['qg']: #, self.rpc_layers[layer_name].tensor_locks['G']:
+                    with self.rpc_layers[layer_name].tensor_locks['qg'], self.rpc_layers[layer_name].tensor_locks['G']:
                         kfac_layer.compute_g_inv(damping=preconditioner.damping)
                         self.rpc_layers[layer_name].recv_handled_g_version = self.current_t()
                     self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name)
