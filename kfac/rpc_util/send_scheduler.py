@@ -2,9 +2,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 class DataSendScheduler:
-    def __init__(self, send_intervals):
+    def __init__(self):
+        send_intervals = {'model_param': 31, 'factor': 43, 'eigen': 63}
         self.intervals = dict(send_intervals)
-        self.next_send = {k: v for k, v in send_intervals.items()}
+        self.next_send = {'model_param': 9, 'factor': 2, 'eigen': 5}
+        #self.next_send = {k: v for k, v in send_intervals.items()}
         self.priority_order = list(send_intervals.keys())
         self.current_iter = 0
 

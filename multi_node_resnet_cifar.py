@@ -77,10 +77,10 @@ if __name__ == '__main__':
 
     mgr = GeneralManager( dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc',  is_2nd_order=True, epochs=1, device=device,
+                         train_com_method='rpc',  is_2nd_order=True, epochs=75, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="cccc",
-                         recover=False,batch_size=32)
+                         transform_train=None, transform_test=None,experiment_name="baseline",
+                         recover=False,batch_size=128)
 
     mgr.rpc_train_and_test()
     print("Done!")

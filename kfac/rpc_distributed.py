@@ -132,9 +132,7 @@ class KfacRPCLayer:
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
         self.eigen_tensor_packages = None
-
-        send_intervals = {'model_param': 15, 'factor': 23, 'eigen': 31}
-        self.data_send_scheduler = DataSendScheduler(send_intervals)
+        self.data_send_scheduler = DataSendScheduler()
 
         self.writer = None
 
