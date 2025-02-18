@@ -62,72 +62,45 @@ class NodeState():
 
 
 class KfacRPCLayer:
-    def __init__(self,a_handler,g_handler ,name , prediv_eigenvalues ,kfac_layer):
-        self.factor : Dict[str:Optional['torch.Tensor']] = {"A" : None, "G": None }
-        self.factor_recv_ct : Dict[str : int ]= {"A" : 0, "G": 0 }
-        self.assigned_worker :Dict[str : int]= {'A': a_handler, 'G': g_handler}
-        self.qa = None
-        self.da = None
+    def __init__(self,a_handler,g_handler ,name ,kfac_layer):
+        self.kfac_layer :"KFACEigenLayer"= kfac_layer
+        self.tensor_locks :Dict[str, 'threading.Lock'] = {"A": threading.Lock(), "G": threading.Lock() , "qa": threading.Lock() , "qg": threading.Lock()}
+        #self.factor_recv_ct : Dict[str , int ]= {"A" : 0, "G": 0 }
+        self.assigned_worker :Dict[str , int]= {'A': a_handler, 'G': g_handler}
         self.recv_handled_a_version = -2
-        self.last_load_handled_a_version = -2
-        self.qg = None
-        self.dg = None
-        self.dgda = None
-        self.prediv_eigenvalues = prediv_eigenvalues # False：da, dg must be provided; True: dgda must be provided
-        self.kfac_layer :"KFACEigenLayer"=  kfac_layer
         self.recv_handled_g_version = -2
-        self.last_load_handled_g_version = -2
-        self.outdated_weight_param = 1
-        self.ahead_weight_param = 1
         self.name = name
-
-        self.qa_lock = threading.Lock()
-        self.qg_lock = threading.Lock()
 
     def reassign_inverse_workers(self, a_handler, g_handler):
         self.assigned_worker['A'] = a_handler
         self.assigned_worker['G'] = g_handler
 
     def update_local_factor(self, recv_factor, local_t, recv_t, factor_type, world_size = 8):
-        self.factor_recv_ct[factor_type] += 1
-        if self.factor[factor_type] is None:
-            self.factor[factor_type] = recv_factor
-            return
-        sigmoid_param = (recv_t - local_t) / (local_t + 1)
-        recv_world_weight = 2 / ((1 + math.exp(-sigmoid_param)) * world_size)
-        self.factor[factor_type] = (1 - recv_world_weight) * self.factor[factor_type] + recv_world_weight * recv_factor
+        #self.factor_recv_ct[factor_type] += 1
+        with self.tensor_locks[factor_type]:
+            if self.kfac_layer.get_factor(factor_type) is None:
+                self.kfac_layer.set_factor(factor_type, recv_factor)
+                return
+            sigmoid_param = (recv_t - local_t) / (local_t + 1)
+            recv_world_weight = 2 / ((1 + math.exp(-sigmoid_param)) * world_size)
+            self.kfac_layer.set_factor(factor_type, self.kfac_layer.get_factor(factor_type) * (1 - recv_world_weight) + recv_factor * recv_world_weight)
 
     def update_local_eigen_a(self, qa, da, t):
         if t <= self.recv_handled_a_version :
             return # outdated
-        with self.qa_lock:
-            self.qa = qa
-            self.da = da
+        with self.tensor_locks['qa']:
+            self.kfac_layer.set_factor("qa", qa)
+            self.kfac_layer.set_factor("da", da)
             self.recv_handled_a_version = t
 
     def update_local_eigen_g(self, qg, dg, dgda, t):
         if t <= self.recv_handled_g_version :
             return # outdated
-        with self.qg_lock:
-            self.qg = qg
-            self.dg = dg
-            self.dgda = dgda
+        with self.tensor_locks['qg']:
+            self.kfac_layer.set_factor("qg", qg)
+            self.kfac_layer.set_factor("dg", dg)
+            self.kfac_layer.set_factor("dgda", dgda)
             self.recv_handled_g_version = t
-
-    def load_eigen_tensor(self):
-        assert self.name == self.kfac_layer.name
-        assert self.recv_handled_a_version >=0 and self.recv_handled_g_version >= 0
-        if self.last_load_handled_a_version < self.recv_handled_a_version:
-            with self.qa_lock:
-                self.kfac_layer.qa = self.qa
-                self.kfac_layer.qg = self.qg
-        if self.last_load_handled_g_version < self.recv_handled_g_version:
-            with self.qg_lock:
-                if self.prediv_eigenvalues:
-                    self.kfac_layer.dgda = self.dgda
-                else:
-                    self.kfac_layer.dg = self.dg
-                    self.kfac_layer.da = self.da
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
@@ -161,7 +134,7 @@ class KFacRPCCommunicator:
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)
         self.origin_world_size = world_size
         self.rank = rank
-        self.rpc_layers: Dict[str:KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
+        self.rpc_layers: Dict[str,KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
         self.assigned_layers = []
         self.candidate_participate_factor_computation_layers = []
         self.current_participate_factor_computation_layers = []
@@ -169,7 +142,7 @@ class KFacRPCCommunicator:
         for name, kfac_layer in preconditioner._layers.values():
             a_handler = preconditioner._assignment.inv_worker(name, 'A')
             g_handler = preconditioner._assignment.inv_worker(name, 'G')
-            self.rpc_layers[name] = KfacRPCLayer(a_handler,g_handler ,name ,kfac_layer.prediv_eigenvalues ,kfac_layer)
+            self.rpc_layers[name] = KfacRPCLayer(a_handler,g_handler ,name ,kfac_layer)
             if a_handler == self.rank or g_handler == self.rank:
                 self.assigned_layers.append(name)
                 self.current_inverse_computation_layers.append(name)
@@ -274,7 +247,7 @@ class KFacRPCCommunicator:
 
     def debug_print(self, text):
         global logger
-        logger.debug(f"{self.current_t()} iter in R{self.rank}, {text}")
+        logger.debug(f"T{self.current_t()} in R{self.rank}, {text}")
 
     def __repr__(self):
         log = f"Rank {self.rank} : iter {self.current_t()}\n"
@@ -291,26 +264,13 @@ class KFacRPCCommunicator:
             log += f"\tG handler: {layer.assigned_worker['G']}\n"
         return log
 
-    def load_factor(self,kfac_layer: 'KFACBaseLayer', factor_type):
-        if self.assigned_worker(kfac_layer.name, factor_type) == self.rank:
-            assert self.rpc_layers[kfac_layer.name].factor[factor_type] is not None
-            if factor_type == "A":
-                kfac_layer.a_factor = self.rpc_layers[kfac_layer.name].factor["A"].clone().detach()
-            if factor_type == "G":
-                kfac_layer.g_factor = self.rpc_layers[kfac_layer.name].factor["G"].clone().detach()
-        return True
-
     def shutdown(self):
         rpc.shutdown()
 
     def update_self_t(self):
         self.loop_start_time = time.time()
         self.data_send_scheduler.update_loop_counter()
-        if not self.node_state_lock.acquire(timeout=1):
-            raise RuntimeError("Failed to acquire lock in update_self_t")
         self.node_states[self.rank].iter += 1
-        self.node_state_lock.release()
-        # debug print
         if self.data_send_scheduler.get_next_send_type() is not None:
             self.debug_print(f"do {self.data_send_scheduler.get_next_send_type()}, current memory usage: {self.get_memory_usage_percent()}")
 
@@ -326,6 +286,11 @@ class KFacRPCCommunicator:
         if speed is not None:
             self.node_states[from_rank].speed = speed
         self.node_state_lock.release()
+
+    def get_layer_lock(self, layer_name, factor_name):
+        assert factor_name in ['A', 'G', 'qa', 'qg']
+        assert layer_name in self.rpc_layers
+        return self.rpc_layers[layer_name].tensor_locks[factor_name]
 
     def compute_and_broadcast_inverse(self, preconditioner: 'BaseKFACPreconditioner'):
         current_send_type = self.data_send_scheduler.get_next_send_type()
@@ -348,16 +313,16 @@ class KFacRPCCommunicator:
             for ready_task_name in ready_list:
                 layer_name, factor_type = ready_task_name.split("#")
                 kfac_layer = self.rpc_layers[layer_name].kfac_layer
-                self.load_factor(kfac_layer=kfac_layer, factor_type=factor_type)
                 if factor_type == "A":
-                    with self.rpc_layers[layer_name].qa_lock:
+                    with self.rpc_layers[layer_name].tensor_locks['qa']: #, self.rpc_layers[layer_name].tensor_locks['A']:
                         kfac_layer.compute_a_inv(damping=preconditioner.damping)
-                    self.broadcast_kfac_eigen_tensor_a(layer_name=layer_name, qa=kfac_layer.qa, da=kfac_layer.da)
+                        self.rpc_layers[layer_name].recv_handled_a_version = self.current_t()
+                    self.broadcast_kfac_eigen_tensor_a(layer_name=layer_name)
                 elif factor_type == "G":
-                    with self.rpc_layers[layer_name].qg_lock:
+                    with self.rpc_layers[layer_name].tensor_locks['qg']: #, self.rpc_layers[layer_name].tensor_locks['G']:
                         kfac_layer.compute_g_inv(damping=preconditioner.damping)
-                    self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name, qg=kfac_layer.qg, dg=kfac_layer.dg,
-                                                dadg=kfac_layer.dgda)
+                        self.rpc_layers[layer_name].recv_handled_g_version = self.current_t()
+                    self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name)
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
@@ -372,8 +337,8 @@ class KFacRPCCommunicator:
                     return False # start next forwarding because not all of the eigen tensor is ready
             self.gradient_computation_start = True
         for layer_name in self.current_inverse_computation_layers:
-            self.rpc_layers[layer_name].load_eigen_tensor()
-            self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
+            with self.get_layer_lock(layer_name, "qa") and self.get_layer_lock(layer_name, "qg"):
+                self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
             all_layer.remove(layer_name)
 
         while len(all_layer) > 0:
@@ -387,8 +352,8 @@ class KFacRPCCommunicator:
             if len(ready_set) == 0:
                 ready_set.add(random.choice(list(all_layer)))
             for layer_name in ready_set:
-                self.rpc_layers[layer_name].load_eigen_tensor()
-                self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
+                with self.get_layer_lock(layer_name, "qa") and self.get_layer_lock(layer_name, "qg"):
+                    self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
             all_layer = all_layer - ready_set
 
     def get_computation_speed_dict(self):
@@ -460,9 +425,10 @@ class KFacRPCCommunicator:
         return len(self.get_health_node_state_list())
 
     def is_factor_ready(self, layer_name, factor_type):
-        if self.rpc_layers[layer_name].factor_recv_ct[factor_type] > 0:
+        if self.rpc_layers[layer_name].kfac_layer.get_factor(factor_type) is not None:
             return True
-        return False
+        else:
+            return False
 
     def is_eigen_tensor_ready(self, layer_name,staleness_tolerance = 0):
         current_t = self.current_t()
@@ -482,10 +448,13 @@ class KFacRPCCommunicator:
 
     def send_kfac_factor(self,layer_name:str,factor_type:str):
         target = self.assigned_worker(layer_name, factor_type)
-        t = self.current_t()
-        factor_tensor = self.rpc_layers[layer_name].kfac_layer.get_factor(factor_type).clone()
         if target == self.rank:
-            self.rpc_layers[layer_name].update_local_factor(factor_tensor, t, t, factor_type, world_size=self.origin_world_size)
+            return
+        t = self.current_t()
+        with self.get_layer_lock(layer_name, factor_type):
+            factor_tensor = self.rpc_layers[layer_name].kfac_layer.get_factor(factor_type)
+        if factor_tensor is None:
+            print(f"Factor {factor_type} is None in {layer_name} at {self.rank} at t={t}")
             return
         try:
             rpc.rpc_async(
@@ -498,18 +467,17 @@ class KFacRPCCommunicator:
         self.com_statistic.add_send_stat("factor")
         return True
 
-    def broadcast_kfac_eigen_tensor_a(self, layer_name,qa:torch.Tensor,da:torch.Tensor):
+    def broadcast_kfac_eigen_tensor_a(self, layer_name):
         if self.assigned_worker(layer_name, 'A') != self.rank:
             return
-        if qa is None:
+        if self.rpc_layers[layer_name].kfac_layer.get_factor("qa") is None:
             raise RuntimeError(
                 f'Attempt to broadcast A inv from src={self.rank} but this rank '
                 'has not computed inv yet.',
             )
         t= self.current_t()
-        self.rpc_layers[layer_name].update_local_eigen_a(qa, da,t)
-
-        #for target_rank in self.send_rank_group[self.group_id]:
+        qa = self.rpc_layers[layer_name].kfac_layer.get_factor("qa")
+        da = self.rpc_layers[layer_name].kfac_layer.get_factor("da")
         for target_rank in range(self.origin_world_size):
             if target_rank == self.rank:
                 continue
@@ -523,9 +491,13 @@ class KFacRPCCommunicator:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
         self.com_statistic.add_send_stat("eigen",times=self.origin_world_size-1)
 
-    def broadcast_kfac_eigen_tensor_g(self, layer_name,qg:torch.Tensor,dg:torch.Tensor,dadg: None|torch.Tensor):
+    def broadcast_kfac_eigen_tensor_g(self, layer_name):
         t = self.current_t()
-        if self.rpc_layers[layer_name].prediv_eigenvalues:
+        qg = self.rpc_layers[layer_name].kfac_layer.get_factor("qg")
+        dg = self.rpc_layers[layer_name].kfac_layer.get_factor("dg")
+        dadg = self.rpc_layers[layer_name].kfac_layer.get_factor("dgda")
+
+        if self.rpc_layers[layer_name].kfac_layer.prediv_eigenvalues:
             if dadg is None:
                 raise RuntimeError(
                     f'Attempt to broadcast g inv from src={self.rank} but this rank '
@@ -537,9 +509,6 @@ class KFacRPCCommunicator:
                 'has not computed inv yet.',
             )
 
-        self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
-
-        #for target_rank in self.send_rank_group[self.group_id]:
         for target_rank in range(self.origin_world_size):
             if target_rank == self.rank:
                 continue
@@ -694,7 +663,6 @@ def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
     if self.rpc_layers[layer_name].assigned_worker[factor_type] != self.rank:
         return
 
-    #with self.lock:
     current_t = self.current_t()
     self.rpc_layers[layer_name].update_local_factor(factor, current_t, from_iter, factor_type ,world_size=self.origin_world_size)
     self.update_node_iter(from_rank, from_iter)

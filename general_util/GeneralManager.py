@@ -143,6 +143,7 @@ class GeneralManager:
             self.save_checkpoint(epoch=i)
 
         self.writer.close()
+        print(f"Rank {self.rank} : total train time: {self.train_total_time}")
         print(f"Rank {self.rank} : {self.rpc_communicator.com_statistic} at iteration {self.rpc_communicator.current_t()}")
         print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_total_time}")
         dist.barrier()
@@ -221,9 +222,7 @@ class GeneralManager:
                 t.update()
             self.train_total_time += time.time() - start_time
             if self.writer is not None:
-                self.writer.add_scalar('Iteration Variance',
-                                       rpc_distributed.global_communicator.compute_iter_variance(),
-                                       self.train_total_time)
+                self.writer.add_scalar("Total train time", self.train_total_time, epoch)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
 
     def rpc_train(self, epoch):
