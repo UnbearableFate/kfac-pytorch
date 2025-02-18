@@ -16,6 +16,7 @@ from kfac.adsgds.swift import SwiftManager
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.send_scheduler import DataSendScheduler
 import numpy as np
+from kfac.rpc_util.communication_statatic import CommunicationStatics
 
 from typing import TYPE_CHECKING ,List
 if TYPE_CHECKING:
@@ -132,7 +133,7 @@ class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
         self.eigen_tensor_packages = None
 
-        send_intervals = {'model_param': 9, 'factor': 5, 'eigen': 17}
+        send_intervals = {'model_param': 15, 'factor': 23, 'eigen': 31}
         self.data_send_scheduler = DataSendScheduler(send_intervals)
 
         self.writer = None
@@ -211,6 +212,7 @@ class KFacRPCCommunicator:
         global_communicator = self
 
         self.gradient_computation_start = False
+        self.com_statistic = CommunicationStatics()
 
     def compute_iter_variance(self):
     # 提取所有节点的iter值
@@ -495,7 +497,7 @@ class KFacRPCCommunicator:
             )
         except Exception as e:
             print(f"Failed to send factor to {target} from {self.rank}: {e}")
-
+        self.com_statistic.add_send_stat("factor")
         return True
 
     def broadcast_kfac_eigen_tensor_a(self, layer_name,qa:torch.Tensor,da:torch.Tensor):
@@ -521,6 +523,7 @@ class KFacRPCCommunicator:
                 )
             except Exception as e:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
+        self.com_statistic.add_send_stat("eigen",times=self.origin_world_size-1)
 
     def broadcast_kfac_eigen_tensor_g(self, layer_name,qg:torch.Tensor,dg:torch.Tensor,dadg: None|torch.Tensor):
         t = self.current_t()
@@ -550,12 +553,13 @@ class KFacRPCCommunicator:
                 )
             except Exception as e:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
+        self.com_statistic.add_send_stat("eigen",times=self.origin_world_size-1)
 
-    def is_factor_computation_skipped(self, layer_name):
+    def factor_computation_nessary(self, layer_name):
         """
         既不需要帮其他人算
         """
-        if layer_name not in self.current_participate_factor_computation_layers and layer_name not in self.current_inverse_computation_layers:
+        if layer_name in self.current_participate_factor_computation_layers or layer_name in self.current_inverse_computation_layers:
             return True
         return False
 

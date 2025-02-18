@@ -19,7 +19,7 @@ class DataSendScheduler:
         
         # 按优先级顺序检查所有数据类型
         for data_type in self.priority_order:
-            if self.next_send[data_type] == current_iter:
+            if self.next_send[data_type] <= current_iter:
                 candidates.append(data_type)
         
         if not candidates:

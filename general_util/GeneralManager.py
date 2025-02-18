@@ -143,6 +143,7 @@ class GeneralManager:
             self.save_checkpoint(epoch=i)
 
         self.writer.close()
+        print(f"Rank {self.rank} : {self.rpc_communicator.com_statistic} at iteration {self.rpc_communicator.current_t()}")
         print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_total_time}")
         dist.barrier()
 
