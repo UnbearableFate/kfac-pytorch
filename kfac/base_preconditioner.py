@@ -488,7 +488,8 @@ class BaseKFACPreconditioner:
             # Update mini_step here because forward pass should always
             # happen before backward pass
             self._mini_steps[name] += 1
-            layer.update_a_factor(alpha=self.factor_decay)
+            with kfac_rpc.global_communicator.get_layer_lock(name, 'A'):
+                layer.update_a_factor(alpha=self.factor_decay)
         if (kfac_rpc.global_communicator.data_send_scheduler.can_send("factor")):
             kfac_rpc.global_communicator.send_kfac_factor(name, 'A')
 
@@ -529,6 +530,7 @@ class BaseKFACPreconditioner:
             if isinstance(grad_output, torch.Tensor):
                     grad_output = (grad_output,)
             layer.save_layer_grad_output(grad_output)
-            layer.update_g_factor(alpha=self.factor_decay)
+            with kfac_rpc.global_communicator.get_layer_lock(name, 'G'):
+                layer.update_g_factor(alpha=self.factor_decay)
         if kfac_rpc.global_communicator.data_send_scheduler.can_send("factor"):
             kfac_rpc.global_communicator.send_kfac_factor(name, 'G')
