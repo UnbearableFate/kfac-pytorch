@@ -13,6 +13,7 @@ from typing import Dict, Optional, Tuple
 import logging
 from kfac.rpc_model_param_avg import ModelAvgRPCCommunicator
 from kfac.adsgds.swift import SwiftManager
+from kfac.adsgds.aedfl import AedflManager
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.send_scheduler import DataSendScheduler
 import numpy as np
@@ -81,9 +82,13 @@ class KfacRPCLayer:
             if self.kfac_layer.get_factor(factor_type) is None:
                 self.kfac_layer.set_factor(factor_type, recv_factor)
                 return
-            sigmoid_param = (recv_t - local_t) / (local_t + 1)
-            recv_world_weight = 2 / ((1 + math.exp(-sigmoid_param)) * world_size)
-            self.kfac_layer.set_factor(factor_type, self.kfac_layer.get_factor(factor_type) * (1 - recv_world_weight) + recv_factor * recv_world_weight)
+            #sigmoid_param = (recv_t - local_t) / (local_t + 1)
+            #recv_world_weight = 2 / ((1 + math.exp(-sigmoid_param)) * world_size)
+            #self.kfac_layer.set_factor(factor_type, self.kfac_layer.get_factor(factor_type) * (1 - recv_world_weight) + recv_factor * recv_world_weight)
+            if factor_type == "A":
+                self.kfac_layer._a_factor.mul_(0.9).add_(recv_factor, alpha=0.1)
+            elif factor_type == "G":
+                self.kfac_layer._g_factor.mul_(0.9).add_(recv_factor, alpha=0.1)
 
     def update_local_eigen_a(self, qa, da, t):
         if t <= self.recv_handled_a_version :
@@ -164,7 +169,7 @@ class KFacRPCCommunicator:
             raise RuntimeError(f"RPC initialization failed for rank {rank}")
 
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = SwiftManager(rank, model, self)
+        self.model_avg_rpc = AedflManager(rank, model, self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment ,slow_tolerance_value=self.slow_tolerance_value, max_election_period=self.max_election_period)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
