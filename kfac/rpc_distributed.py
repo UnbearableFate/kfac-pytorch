@@ -170,7 +170,7 @@ class KFacRPCCommunicator:
 
         self.init_logger(rank,log_dir)
         self.model_avg_rpc = AedflManager(rank, model, self)
-        self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment ,slow_tolerance_value=self.slow_tolerance_value, max_election_period=self.max_election_period)
+        self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
 
@@ -387,7 +387,10 @@ class KFacRPCCommunicator:
             if state.rank not in computational_efficiency or computational_efficiency[state.rank] == 0:
                 computational_efficiency[state.rank] = avg
         self.print_rpc_state(f"computation efficiency: {computational_efficiency}")
-            
+        max_speed = max(computational_efficiency.values())
+        for rank, speed in computational_efficiency.items():
+            computational_efficiency[rank] = speed*10 / max_speed
+        self.debug_print(f"computation efficiency: {computational_efficiency}")
         return computational_efficiency
 
     def update_node_state_list(self, new_health_node_list):
@@ -537,15 +540,23 @@ class KFacRPCCommunicator:
 
     def computation_volume_statistic(self):
         current_t = self.current_t()
-        if current_t % 100 == 0:
-            self.computation_volume_accumulation /= 1000
-            self.time_cost_accumulation /= 1000
+        if current_t % 200 < 10:
+            self.computation_volume_accumulation /= 100
+            self.time_cost_accumulation /= 100
 
         loop_time_cost = time.time() - self.loop_start_time
         self.time_cost_accumulation += loop_time_cost
         for layer_name in self.current_inverse_computation_layers:
-            self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]*1.1  +self.layers_workload[layer_name]["G"]) #* 0.001
+            self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]  +self.layers_workload[layer_name]["G"]) #* 0.001
         self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
+
+    def get_local_node_speed(self):
+        if self.node_states[self.rank].speed is not None and self.node_states[self.rank].speed != 0:
+            return self.node_states[self.rank].speed
+        elif self.time_cost_accumulation != 0:
+            self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
+            return self.node_states[self.rank].speed
+        return 0
 
     def facotr_comput_lazy_wl_rebal(self):
         current_t = self.current_t()
@@ -561,20 +572,24 @@ class KFacRPCCommunicator:
             if len(self.current_participate_factor_computation_layers) > 0:
                 layer_name = random.choice(self.current_participate_factor_computation_layers)
                 self.current_participate_factor_computation_layers.remove(layer_name)
+                self.debug_print(f"remove {layer_name} from factor computation")
             elif len(self.current_inverse_computation_layers) > 0:
                 layer_name = random.choice(self.current_inverse_computation_layers)
                 self.current_inverse_computation_layers.remove(layer_name)
+                self.debug_print(f"remove {layer_name} from inverse computation")
 
-        if late_than_local >= 3 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
+        if late_than_local >= 1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
             if len(self.current_inverse_computation_layers) < len(self.assigned_layers):
                 for layer_name in reversed(self.assigned_layers):
                     if layer_name not in self.current_inverse_computation_layers:
                         self.current_inverse_computation_layers.append(layer_name)
+                        self.debug_print(f"add {layer_name} to inverse computation")
                         break
             elif len(self.current_participate_factor_computation_layers) < len(self.candidate_participate_factor_computation_layers):
                 for layer_name in reversed(self.candidate_participate_factor_computation_layers):
                     if layer_name not in self.current_participate_factor_computation_layers:
                         self.current_participate_factor_computation_layers.append(layer_name)
+                        self.debug_print(f"add {layer_name} to factor computation")
                         break
 
     def send_model_param(self):
