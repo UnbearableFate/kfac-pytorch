@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 class RPCTaskManager:
-    slow_tolerance_value = 150
+    slowness_threshold = 100
+    dead_threshold_rate = 300
     max_election_period = 20
     def __init__(self,rpc_communicator: 'KFacRPCCommunicator' , assignment : 'KAISAAssignment' ,slow_tolerance_value = 150,max_election_period=20):
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
@@ -39,7 +40,7 @@ class RPCTaskManager:
         else:
             self.identity = 1 # 1:follower 2:candidate
 
-        RPCTaskManager.slow_tolerance_value = slow_tolerance_value
+        RPCTaskManager.slowness_threshold = slow_tolerance_value
         RPCTaskManager.max_election_period = max_election_period
 
         global rpc_task_manager
@@ -76,9 +77,9 @@ class RPCTaskManager:
         health_nodes = []
         sick_nodes = []
         for rank, state in self.rpc_communicator.node_states.items():
-            if state.health == True and median_iter - state.iter  < RPCTaskManager.slow_tolerance_value:
+            if state.health == True and median_iter - state.iter  < RPCTaskManager.slowness_threshold:
                 health_nodes.append(rank)
-            if state.health == False and median_iter - state.iter  < 0.8 * RPCTaskManager.slow_tolerance_value:
+            if state.health == False and median_iter - state.iter  < 0.8 * RPCTaskManager.slowness_threshold:
                 health_nodes.append(rank)
         return health_nodes, sick_nodes
 
@@ -182,7 +183,7 @@ class RPCTaskManager:
     def electing_new_leader_loop(self): # call by in loop
         #leader_iter = self.rpc_communicator.health_node_states[self.leader_rank].iter
         #forward_than_leader = sum(state.iter > leader_iter for state in self.rpc_communicator.health_node_states.values())
-        if (self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slow_tolerance_value
+        if (self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slowness_threshold
              and self.identity == 1
              and self.votedFor is None
              and self.election_period < 0 ):
@@ -199,7 +200,7 @@ class RPCTaskManager:
                 self.rpc_communicator.print_rpc_state(f"give up election")
                 self.update_follwer_state(self.leader_rank,self.currentTerm-1)
             elif (self.identity == 1 and
-                  (self.votedFor is not None and  self.rpc_communicator.node_states[self.votedFor].iter - self.rpc_communicator.node_states[self.leader_rank].iter < RPCTaskManager.slow_tolerance_value)):
+                  (self.votedFor is not None and  self.rpc_communicator.node_states[self.votedFor].iter - self.rpc_communicator.node_states[self.leader_rank].iter < RPCTaskManager.slowness_threshold)):
                 self.update_follwer_state(self.leader_rank,self.currentTerm)
         elif self.election_period >= 0 and self.votedFor is not None:
             self.election_period += 1
@@ -222,7 +223,7 @@ rpc_task_manager:RPCTaskManager
 def request_vote(candidateTerm, candidateId): # recv by follower
     global rpc_task_manager
     if (candidateTerm < rpc_task_manager.currentTerm or
-    rpc_task_manager.rpc_communicator.node_states[candidateId].iter - rpc_task_manager.rpc_communicator.node_states[rpc_task_manager.leader_rank].iter < RPCTaskManager.slow_tolerance_value /2
+    rpc_task_manager.rpc_communicator.node_states[candidateId].iter - rpc_task_manager.rpc_communicator.node_states[rpc_task_manager.leader_rank].iter < RPCTaskManager.slowness_threshold /2
         ):
         return
     if rpc_task_manager.votedFor is None or rpc_task_manager.votedFor == candidateId:

@@ -331,7 +331,7 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
-
+        self.computation_volume_statistic()
         self.data_send_scheduler.update_next_send_time("eigen")
 
     def compute_preconditioned_gradients(self,damping):
@@ -545,24 +545,19 @@ class KFacRPCCommunicator:
         self.time_cost_accumulation += loop_time_cost
         for layer_name in self.current_inverse_computation_layers:
             self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]*1.1  +self.layers_workload[layer_name]["G"]) #* 0.001
-        for layer_name in self.current_participate_factor_computation_layers:
-            self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]*0.1) #* 0.001
-
         self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
 
     def facotr_comput_lazy_wl_rebal(self):
-        self.computation_volume_statistic()
         current_t = self.current_t()
         forward_than_local = sum(state.iter > current_t for state in self.get_health_node_state_list())
         late_than_local = sum(state.iter < current_t for state in self.get_health_node_state_list())
         iter_diff = self.max_iter_in_cluster() - current_t
-
         random.shuffle(self.candidate_participate_factor_computation_layers)
         random.shuffle(self.assigned_layers)
         self.current_participate_factor_computation_layers = \
             self.candidate_participate_factor_computation_layers[:len(self.current_participate_factor_computation_layers)]
         self.current_inverse_computation_layers = self.assigned_layers[:len(self.current_inverse_computation_layers)]
-        if forward_than_local >= math.ceil(self.get_world_size() * 0.7) and iter_diff > 5: # local is too slow, work less
+        if forward_than_local >= math.ceil(self.get_world_size() * 0.7) and iter_diff > 50: # local is too slow, work less
             if len(self.current_participate_factor_computation_layers) > 0:
                 layer_name = random.choice(self.current_participate_factor_computation_layers)
                 self.current_participate_factor_computation_layers.remove(layer_name)
@@ -570,7 +565,7 @@ class KFacRPCCommunicator:
                 layer_name = random.choice(self.current_inverse_computation_layers)
                 self.current_inverse_computation_layers.remove(layer_name)
 
-        if late_than_local >= 1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
+        if late_than_local >= 3 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
             if len(self.current_inverse_computation_layers) < len(self.assigned_layers):
                 for layer_name in reversed(self.assigned_layers):
                     if layer_name not in self.current_inverse_computation_layers:

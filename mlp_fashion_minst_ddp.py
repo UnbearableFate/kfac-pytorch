@@ -71,5 +71,4 @@ if __name__ == '__main__':
                          timestamp=timestamp,precondtioner=preconditioner)
 
     mgr.train_and_test()
-    mgr.close_all()
     print("Done!")

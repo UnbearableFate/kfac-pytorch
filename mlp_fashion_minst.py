@@ -67,10 +67,9 @@ if __name__ == '__main__':
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layers.1"], damping= 0.003,train_method='rpc')
     mgr = GeneralManager(experiment_name="mlp_mnist",dataset_name="FashionMNIST", model=model,
-                         train_com_method='rpc', is_2nd_order=True, epochs=2,batch_size=64,device=device,
+                         train_com_method='rpc', is_2nd_order=True, epochs=4,batch_size=64,device=device,
                          timestamp=timestamp,precondtioner=preconditioner)
 
     mgr.rpc_train_and_test()
-    mgr.close_all()
     print(f"Done! at {rank}")
     exit(0)
