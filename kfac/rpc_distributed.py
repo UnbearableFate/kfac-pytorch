@@ -12,10 +12,9 @@ import threading
 from typing import Dict, Optional, Tuple
 import logging
 from kfac.rpc_model_param_avg import ModelAvgRPCCommunicator
-from kfac.adsgds.swift import SwiftManager
-from kfac.adsgds.aedfl import AedflManager
+from kfac.adsgds.exp_swift import ExpTopoSwiftManager
 import kfac.rpc_task_manager as task_manager
-from kfac.rpc_util.send_scheduler import DataSendScheduler
+from kfac.rpc_util.send_scheduler import DataSendScheduler ,PackageSender
 import numpy as np
 from kfac.rpc_util.communication_statatic import CommunicationStatics
 
@@ -52,9 +51,6 @@ class NodeState():
     def __init__(self,rank):
         self.rank = rank
         self.iter = 0
-        self.factor_computation_iter = -1
-        self.inverse_computation_iter = -1
-        self.model_param_avg_iter = -1
         self.health = True
         self.speed = 0
 
@@ -71,6 +67,7 @@ class KfacRPCLayer:
         self.recv_handled_a_version = -2
         self.recv_handled_g_version = -2
         self.name = name
+        self.send_trigger = {"A": False, "G": False}
 
     def reassign_inverse_workers(self, a_handler, g_handler):
         self.assigned_worker['A'] = a_handler
@@ -155,6 +152,9 @@ class KFacRPCCommunicator:
                 self.candidate_participate_factor_computation_layers.append(name)
                 self.current_participate_factor_computation_layers.append(name)
 
+        self.update_send_trigger()
+        self.is_packged_send = preconditioner.is_packaged_send
+
         self.node_states: Dict[int, NodeState] = {}
         for i in range(world_size):
             self.node_states[i] = NodeState(i)
@@ -169,7 +169,7 @@ class KFacRPCCommunicator:
             raise RuntimeError(f"RPC initialization failed for rank {rank}")
 
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = AedflManager(rank, model, self)
+        self.model_avg_rpc = ExpTopoSwiftManager(rank, model, self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
@@ -189,6 +189,29 @@ class KFacRPCCommunicator:
 
         self.gradient_computation_start = False
         self.com_statistic = CommunicationStatics()
+        self.package_sender = PackageSender(self)
+
+    def update_send_trigger(self):
+        target_set = set()
+        target_set.add(self.rank)
+        log_info = ""
+        for name, layer in reversed(self.rpc_layers.items()):
+            handler_rank = layer.assigned_worker['A']
+            if handler_rank not in target_set and handler_rank != self.rank:
+                target_set.add(handler_rank)
+                layer.send_trigger["A"] = True
+                log_info += f"A -> {handler_rank} @ {name} "
+
+        target_set.clear()
+        target_set.add(self.rank)
+        for name, layer in self.rpc_layers.items():
+            handler_rank = layer.assigned_worker['G']
+            if handler_rank not in target_set and handler_rank != self.rank:
+                target_set.add(handler_rank)
+                layer.send_trigger["G"] = True
+                log_info += f"G -> {handler_rank} @ {name} "
+        if self.rank == 0:
+            print(log_info)
 
     def compute_iter_variance(self):
     # 提取所有节点的iter值
@@ -322,15 +345,25 @@ class KFacRPCCommunicator:
                     with self.rpc_layers[layer_name].tensor_locks['qa'], self.rpc_layers[layer_name].tensor_locks['A']:
                         kfac_layer.compute_a_inv(damping=preconditioner.damping)
                         self.rpc_layers[layer_name].recv_handled_a_version = self.current_t()
-                    self.broadcast_kfac_eigen_tensor_a(layer_name=layer_name)
+                    if not self.is_packged_send:
+                        self.broadcast_kfac_eigen_tensor_a(layer_name=layer_name)
+                    else:
+                        self.async_eigen_broadcast_register(layer_name=layer_name,factor_types =['qa'])
                 elif factor_type == "G":
                     with self.rpc_layers[layer_name].tensor_locks['qg'], self.rpc_layers[layer_name].tensor_locks['G']:
                         kfac_layer.compute_g_inv(damping=preconditioner.damping)
                         self.rpc_layers[layer_name].recv_handled_g_version = self.current_t()
-                    self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name)
+                    if not self.is_packged_send:
+                        self.broadcast_kfac_eigen_tensor_g(layer_name=layer_name)
+                    else:
+                        self.async_eigen_broadcast_register(layer_name=layer_name,factor_types =['qg','dgda'])
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
+        for rank in range(self.origin_world_size):
+            if rank == self.rank:
+                continue
+            self.send_data_package(rank)
         self.computation_volume_statistic()
         self.data_send_scheduler.update_next_send_time("eigen")
 
@@ -422,8 +455,8 @@ class KFacRPCCommunicator:
         self.print_rpc_state(f"update new assignment {new_assignment_generation}: {new_assignment}")
         self.current_inverse_computation_layers = self.assigned_layers.copy()
         self.current_participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
+        self.update_send_trigger()
         self.update_assignment_callback = None
-        self.task_reassign_rpc.running_time = 0
         self.eigen_tensor_packages = None
 
     def get_world_size(self):
@@ -453,6 +486,20 @@ class KFacRPCCommunicator:
         Return the rank of the worker assigned to compute the decomp of the factor.
         """
         return self.rpc_layers[layer_name].assigned_worker[factor_type]
+    
+    def update_local_node_state(self,node_states:Dict[int,NodeState]):
+        with self.node_state_lock:
+            for rank, state in node_states.items():
+                if rank == self.rank:
+                    continue
+                if rank not in self.node_states:
+                    self.node_states[rank] = state
+                    self.debug_print(f"Warning!!!! add new node {rank} to node_states")
+                else:
+                    if node_states[rank].iter > self.node_states[rank].iter:
+                        self.node_states[rank].iter = state.iter
+                        self.node_states[rank].speed = state.speed
+                        self.node_states[rank].health = state.health
 
     def send_kfac_factor(self,layer_name:str,factor_type:str):
         target = self.assigned_worker(layer_name, factor_type)
@@ -474,6 +521,37 @@ class KFacRPCCommunicator:
             print(f"Failed to send factor to {target} from {self.rank}: {e}")
         self.com_statistic.add_send_stat("factor")
         return True
+    
+    def async_factor_send_register(self,layer_name:str,factor_type:str):
+        target = self.assigned_worker(layer_name, factor_type)
+        if target == self.rank:
+            return
+        self.package_sender.add_data(target, layer_name, [factor_type])
+    
+    def async_eigen_broadcast_register(self,layer_name:str,factor_types:List[str]):
+        for rank in range(self.origin_world_size):
+            if rank == self.rank:
+                continue
+            self.package_sender.add_data(rank, layer_name, factor_types)
+
+    def send_data_package(self,target_rank):
+        data = self.package_sender.get_packaged_data(target_rank=target_rank)
+        if data is None or len(data.keys()) == 0:
+            return
+        with self.node_state_lock:
+            self.node_states[self.rank].speed = self.get_local_node_speed()
+            node_states = self.node_states.copy()
+        try:
+            rpc.rpc_async(
+                to=rpc_work_name(target_rank),
+                func=receive_packaged_tensors,
+                args=(self.rank, data ,node_states)
+            )
+        except Exception as e:
+            print(f"Failed to send factor to {target_rank} from {self.rank}: {e}")
+        self.package_sender.clear_package(target_rank)
+        self.com_statistic.add_send_stat("data_package")
+        return True 
 
     def broadcast_kfac_eigen_tensor_a(self, layer_name):
         if self.assigned_worker(layer_name, 'A') != self.rank:
@@ -682,6 +760,38 @@ def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
     self.rpc_layers[layer_name].update_local_factor(factor, current_t, from_iter, factor_type ,world_size=self.origin_world_size)
     self.update_node_iter(from_rank, from_iter)
 
+def receive_packaged_tensors(from_rank, data:Dict[str,Dict[str,torch.Tensor]], node_states:Dict[int,NodeState]):
+    if fault_simulator.is_fault():
+        return
+    global global_communicator
+    self = global_communicator
+    self.update_local_node_state(node_states)
+    log_info = f"receive data {str(from_rank)}:\n"
+    qa , da , qg , dg , dgda = None, None, None, None, None
+    for layer_name, tensor_name_data_dict in data.items():
+        for tensor_name, tensor in tensor_name_data_dict.items():
+            current_t = self.current_t()
+            if tensor_name in ['A', 'G']:
+                self.rpc_layers[layer_name].update_local_factor(tensor, current_t, node_states[from_rank].iter, tensor_name ,world_size=self.origin_world_size)
+                log_info += f"{layer_name} {tensor_name} from {from_rank}\n"
+            elif tensor_name == 'qa':
+                qa = tensor
+            elif tensor_name == 'da':
+                da = tensor
+            elif tensor_name == 'qg':
+                qg = tensor
+            elif tensor_name == 'dg':
+                dg = tensor
+            elif tensor_name == 'dgda':
+                dgda = tensor
+        if qa is not None and da is not None:
+            log_info += f"{layer_name} qa from {from_rank}\n"
+            self.rpc_layers[layer_name].update_local_eigen_a(qa, da, current_t)
+        if qg is not None:
+            log_info += f"{layer_name} qg from {from_rank}\n"
+            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dgda, current_t)
+    self.debug_print(log_info)
+
 def receive_eigen_tensor_a(from_rank, layer_name, qa, da, t):
     if fault_simulator.is_fault():
         return
@@ -757,6 +867,3 @@ def shutdown_notification(from_rank):
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
         sys.exit(2)
-
-def send(correct_ct, total_ct, epoch):
-    global global_communicator

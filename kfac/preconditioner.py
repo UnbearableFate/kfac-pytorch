@@ -86,6 +86,7 @@ class KFACPreconditioner(BaseKFACPreconditioner):
         update_factors_in_hook: bool = True,
         loglevel: int = logging.DEBUG,
         train_method: str = 'ddp',
+        is_packaged_send: bool = False,
     ) -> None:
         """Init KFACPreconditioner.
 
@@ -334,4 +335,5 @@ class KFACPreconditioner(BaseKFACPreconditioner):
             tdc=self.tdc,
             loglevel=loglevel,
             train_method=train_method,
+            is_packaged_send=is_packaged_send,
         )

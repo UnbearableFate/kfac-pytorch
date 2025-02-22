@@ -65,7 +65,7 @@ if __name__ == '__main__':
     model = ResNetForCIFAR10(layers=18)
     device = torch.device(f"cuda:0")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1,train_method='rpc')
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1,train_method='rpc',is_packaged_send=True)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -77,10 +77,10 @@ if __name__ == '__main__':
 
     mgr = GeneralManager( dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc',  is_2nd_order=True, epochs=75, device=device,
+                         train_com_method='rpc',  is_2nd_order=True, epochs=2, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
                          transform_train=None, transform_test=None,experiment_name="baseline",
-                         recover=False,batch_size=128)
+                         recover=False,batch_size=64)
 
     mgr.rpc_train_and_test()
     print("Done!")

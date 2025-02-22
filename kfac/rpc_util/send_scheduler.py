@@ -1,9 +1,11 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List
+
+import torch
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 class DataSendScheduler:
     def __init__(self):
-        send_intervals = {'model_param': 31, 'factor': 43, 'eigen': 63}
+        send_intervals = {'model_param': 13, 'factor': 7, 'eigen': 23}
         self.intervals = dict(send_intervals)
         self.next_send = {'model_param': 9, 'factor': 2, 'eigen': 5}
         #self.next_send = {k: v for k, v in send_intervals.items()}
@@ -45,3 +47,43 @@ class DataSendScheduler:
         
         # 基于当前迭代计算新的发送时间
         self.next_send[data_type] = self.current_iter + self.intervals[data_type]
+
+class PackageSender:
+    def __init__(self, communicator: 'KFacRPCCommunicator'):
+        self.communicator = communicator
+        self.packages: Dict[int, Dict[str, List]]= dict () # target -> (layer_name -> data_names) {1 : {'layer_0': ["A", "G"]}}
+        for rank in range(communicator.origin_world_size):
+            if rank == communicator.rank:
+                continue
+            self.packages[rank] = dict()
+        
+    def add_data(self, target_rank, layer_name, data_types:List):
+        if target_rank not in self.packages:
+            raise ValueError(f"Unknown target rank: {target_rank}")
+        
+        if isinstance(data_types,str):
+            data_types = [data_types]
+    
+        if layer_name not in self.packages[target_rank]:
+            self.packages[target_rank][layer_name] = data_types
+        else:
+            self.packages[target_rank][layer_name].extend(data_types)
+        
+    def get_packaged_data(self, target_rank):
+        data : Dict[str, Dict[str, torch.Tensor]] = dict()
+        log_info = f"Sending data to rank {target_rank}:"
+        if target_rank not in self.packages:
+            raise ValueError(f"Unknown target rank: {target_rank}")
+        for layer_name, data_name_list in self.packages[target_rank].items():
+            kfac_layer = self.communicator.rpc_layers[layer_name].kfac_layer
+            data[layer_name] = dict()
+            log_info += f"\n  {layer_name}:"
+            for tensor_name in data_name_list:
+                data[layer_name][tensor_name] = kfac_layer.get_factor(tensor_name)
+                log_info += f" {tensor_name} : {data[layer_name][tensor_name].shape}"
+        self.communicator.debug_print(log_info)
+        return data
+    
+    def clear_package(self, target_rank):
+        if target_rank in self.packages:
+            self.packages[target_rank].clear()
