@@ -215,11 +215,9 @@ class GeneralManager:
                 self.optimizer.step()
                 self.rpc_communicator.send_model_param()
                 
-                """
-                if rpc_distributed.global_communicator.data_send_scheduler.current_iter % 20 == 19:
-                    rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
-                    rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
-                """
+                #if rpc_distributed.global_communicator.data_send_scheduler.current_iter % 20 == 19:
+                #    rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                #    #rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()

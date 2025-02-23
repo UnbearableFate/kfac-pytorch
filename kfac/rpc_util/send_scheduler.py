@@ -5,8 +5,9 @@ if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 class DataSendScheduler:
     def __init__(self):
-        send_intervals = {'model_param': 13, 'factor': 7, 'eigen': 23}
+        send_intervals = {'model_param': 23, 'factor': 17, 'eigen': 43}
         self.intervals = dict(send_intervals)
+        self.start_interval = dict(send_intervals)
         self.next_send = {'model_param': 9, 'factor': 2, 'eigen': 5}
         #self.next_send = {k: v for k, v in send_intervals.items()}
         self.priority_order = list(send_intervals.keys())
@@ -15,6 +16,15 @@ class DataSendScheduler:
     def update_loop_counter(self):
         """更新当前迭代轮次"""
         self.current_iter += 1
+    
+    def relax_send_interval(self):
+        """放宽所有数据类型的发送时间间隔"""
+        for dt in self.intervals.keys():
+            self.intervals[dt]  = int(self.intervals[dt] * 1.2)
+    
+    def shorten_send_interval(self):
+        for dt in self.intervals.keys():
+            self.intervals[dt] = max(int(self.intervals[dt] / 1.1),self.start_interval[dt])
 
     def get_next_send_type(self):
         """获取当前可发送的数据类型（优先级高的优先）"""
@@ -81,7 +91,6 @@ class PackageSender:
             for tensor_name in data_name_list:
                 data[layer_name][tensor_name] = kfac_layer.get_factor(tensor_name)
                 log_info += f" {tensor_name} : {data[layer_name][tensor_name].shape}"
-        self.communicator.debug_print(log_info)
         return data
     
     def clear_package(self, target_rank):

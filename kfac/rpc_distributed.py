@@ -300,7 +300,12 @@ class KFacRPCCommunicator:
         self.data_send_scheduler.update_loop_counter()
         self.node_states[self.rank].iter += 1
         if self.data_send_scheduler.get_next_send_type() is not None:
-            self.debug_print(f"do {self.data_send_scheduler.get_next_send_type()}, current memory usage: {self.get_memory_usage_percent()}")
+            if self.get_memory_usage_percent() > 0.5:
+                self.data_send_scheduler.relax_send_interval()
+                self.debug_print(f"relax send interval to {self.data_send_scheduler.intervals}")
+            if self.get_memory_usage_percent() < 0.3 and self.data_send_scheduler.intervals["model_param"] > self.data_send_scheduler.start_interval["model_param"]:
+                self.data_send_scheduler.shorten_send_interval()
+                self.debug_print(f"shorten send interval to {self.data_send_scheduler.intervals}")
 
     def current_t(self):
         return self.node_states[self.rank].iter
@@ -790,7 +795,6 @@ def receive_packaged_tensors(from_rank, data:Dict[str,Dict[str,torch.Tensor]], n
         if qg is not None:
             log_info += f"{layer_name} qg from {from_rank}\n"
             self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dgda, current_t)
-    self.debug_print(log_info)
 
 def receive_eigen_tensor_a(from_rank, layer_name, qa, da, t):
     if fault_simulator.is_fault():
