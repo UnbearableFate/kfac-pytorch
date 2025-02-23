@@ -615,7 +615,7 @@ class KFacRPCCommunicator:
 
     def factor_computation_nessary(self, layer_name):
         """
-        既不需要帮其他人算
+        需要算A和G的因子
         """
         if layer_name in self.current_participate_factor_computation_layers or layer_name in self.current_inverse_computation_layers:
             return True

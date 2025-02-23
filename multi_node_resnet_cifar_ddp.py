@@ -44,6 +44,11 @@ ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
 if ompi_world_rank == 0:
     logging.basicConfig(level=logging.NOTSET)
 
+from mpi4py import MPI
+if ompi_world_size == -1 or ompi_world_rank == -1:
+    ompi_world_rank = MPI.COMM_WORLD.Get_rank()
+    ompi_world_size = MPI.COMM_WORLD.Get_size()
+
 if __name__ == '__main__':
     print("Start!")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -63,7 +68,7 @@ if __name__ == '__main__':
     device = torch.device(f"cuda:0")
     model = model.to(device)
     model = DDP(model)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,factor_update_steps=7,inv_update_steps=13,lr=0.1)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,factor_update_steps=17,inv_update_steps=43,lr=0.1)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
