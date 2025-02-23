@@ -80,10 +80,11 @@ if __name__ == '__main__':
 
     mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='ddp', is_2nd_order=True, epochs=80, device=device,
+                         train_com_method='ddp', is_2nd_order=True, epochs=75, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
                          transform_train=None, transform_test=None,experiment_name="ddp",
                          recover=False)
 
     mgr.train_and_test()
     print("Done!")
+    exit(0)
