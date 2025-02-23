@@ -498,12 +498,16 @@ class BaseKFACPreconditioner:
             with kfac_rpc.global_communicator.get_layer_lock(name, 'A'):
                 layer.update_a_factor(alpha=self.factor_decay)
         if (kfac_rpc.global_communicator.data_send_scheduler.can_send("factor")):
+            target_rank = kfac_rpc.global_communicator.rpc_layers[name].assigned_worker["A"]
+            if target_rank == kfac_rpc.global_communicator.rank:
+                return
+
             if not self.is_packaged_send:
                 kfac_rpc.global_communicator.send_kfac_factor(name, 'A')
             else:
                 kfac_rpc.global_communicator.async_factor_send_register(name, 'A')
                 if kfac_rpc.global_communicator.rpc_layers[name].send_trigger["A"]:
-                    target_rank = kfac_rpc.global_communicator.rpc_layers[name].assigned_worker["A"]
+                    
                     kfac_rpc.global_communicator.send_data_package(target_rank)
 
     @torch.no_grad()
@@ -554,10 +558,13 @@ class BaseKFACPreconditioner:
             with kfac_rpc.global_communicator.get_layer_lock(name, 'G'):
                 layer.update_g_factor(alpha=self.factor_decay)
         if kfac_rpc.global_communicator.data_send_scheduler.can_send("factor"):
+            target_rank = kfac_rpc.global_communicator.rpc_layers[name].assigned_worker["G"]
+            if target_rank == kfac_rpc.global_communicator.rank:
+                return
             if not self.is_packaged_send:
                 kfac_rpc.global_communicator.send_kfac_factor(name, 'G')
             else:
                 rpc_layer = kfac_rpc.global_communicator.rpc_layers[name]
                 kfac_rpc.global_communicator.async_factor_send_register(name, 'G')
                 if rpc_layer.send_trigger["G"]:
-                    kfac_rpc.global_communicator.send_data_package(rpc_layer.assigned_worker["G"])
+                    kfac_rpc.global_communicator.send_data_package(target_rank)

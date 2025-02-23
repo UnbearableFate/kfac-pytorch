@@ -53,11 +53,13 @@ class SwiftManager(RootModelAvgRPCCommunicator):
         self.update_local_flat_model()
         send_work_list = []
         result = self.local_model_store.flatten_tensor * self.local_model_store.weight
+        with self.rpc_communicator.node_state_lock:
+            node_states = self.rpc_communicator.node_states
         for neighbor in self.graph.neighbor_list:
             work = rpc.rpc_async(
                 to=rpc_work_name(neighbor),
                 func= recv_model_param,
-                args=(*self.local_model_store.getData(),self.rank)
+                args=(*self.local_model_store.getData(),self.rank , node_states)
             )
             send_work_list.append(work)
 
@@ -78,8 +80,9 @@ class SwiftManager(RootModelAvgRPCCommunicator):
 
 model_avg_rpc_communicator: SwiftManager
 
-def recv_model_param(data, term, loss_value,from_rank):
+def recv_model_param(data, term, loss_value,from_rank,from_node_states):
     global model_avg_rpc_communicator
+    model_avg_rpc_communicator.rpc_communicator.update_node_states(from_node_states)
     if from_rank not in model_avg_rpc_communicator.graph.neighbor_list:
         return None
     model_avg_rpc_communicator.neighbor_model_buffers[from_rank].setDataWithLock(data, term, loss_value)

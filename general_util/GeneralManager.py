@@ -1,4 +1,5 @@
 import math
+import random
 import time
 import torch
 from tqdm import tqdm
@@ -191,6 +192,7 @@ class GeneralManager:
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
+        com = rpc_distributed.global_communicator
         with (tqdm(
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
@@ -214,12 +216,20 @@ class GeneralManager:
 
                 self.optimizer.step()
                 self.rpc_communicator.send_model_param()
+
+                if self.rank == 3 :
+                    time.sleep(0.1)
                 
-                #if rpc_distributed.global_communicator.data_send_scheduler.current_iter % 20 == 19:
-                #    rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
-                #    #rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
+                if com.current_t() % 20 == 19:
+                    rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 
-                if rpc_distributed.global_communicator.current_t() % 200 == 0:
+                if rpc_distributed.global_communicator.current_t() % 40 == 39:
+                    rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
+                
+                if com.task_reassign_rpc.reassign_task_callback is not None:
+                    com.task_reassign_rpc.reassign_task_callback()
+                    
+                if rpc_distributed.global_communicator.current_t() % 300 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
                 t.update()
             self.train_total_time += time.time() - start_time

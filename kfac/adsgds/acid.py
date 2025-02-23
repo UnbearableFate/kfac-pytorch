@@ -15,7 +15,10 @@ from kfac.adsgds.common import ModelStore, rpc_work_name, RootModelAvgRPCCommuni
 
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
+"""
+not finish
 
+"""
 class AcidModelAvgRPCCommunicator:
     def __init__(self,model: torch.nn.Module ,rpc_communicator: 'KFacRPCCommunicator'):
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
@@ -58,7 +61,6 @@ model_avg_rpc_communicator: AcidModelAvgRPCCommunicator
 
 def receive_model_param(from_rank,data,from_rank_term,from_loss, from_speed = 0):
     global model_avg_rpc_communicator
-
     if from_rank not in model_avg_rpc_communicator.graph.neighbor_list:
         return
     with model_avg_rpc_communicator.neighbors_model_buffer[from_rank].lock:
@@ -71,7 +73,6 @@ def exchange_model_param(data, from_rank, from_term, from_loss, from_speed = 0):
     if (from_rank not in model_avg_rpc_communicator.graph.neighbor_list or
         from_term <= model_avg_rpc_communicator.neighbors_model_buffer[from_rank].term):
         return
-    model_avg_rpc_communicator.rpc_communicator.update_node_iter(from_rank,from_term, from_speed)
     model_avg_rpc_communicator.local_flat_model.setDataWithLock(data, from_term, from_loss)
     if model_avg_rpc_communicator.local_flat_model.term < model_avg_rpc_communicator.current_t_cb():
         model_avg_rpc_communicator.update_local_flat_model()

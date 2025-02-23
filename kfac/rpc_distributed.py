@@ -11,8 +11,8 @@ import torch.distributed.rpc as rpc
 import threading
 from typing import Dict, Optional, Tuple
 import logging
-from kfac.rpc_model_param_avg import ModelAvgRPCCommunicator
 from kfac.adsgds.exp_swift import ExpTopoSwiftManager
+from kfac.adsgds.adpsgd import AdpsgdManager
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.send_scheduler import DataSendScheduler ,PackageSender
 import numpy as np
@@ -26,7 +26,7 @@ from kfac.rpc_util.fault_sim import fault_simulator
 
 # 创建日志记录器
 logger = logging.getLogger('my_logger')
-logger.setLevel(logging.DEBUG)  # 设置日志级别
+logger.setLevel(logging.INFO)  # 设置日志级别
 
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
@@ -51,11 +51,11 @@ class NodeState():
     def __init__(self,rank):
         self.rank = rank
         self.iter = 0
-        self.health = True
+        self.health = 0
         self.speed = 0
 
     def __str__(self):
-        return f"R{self.rank} :t{self.iter}, h{self.health}"
+        return f"R{self.rank} :t{self.iter},s{self.speed}, h{self.health}"
 
 
 class KfacRPCLayer:
@@ -169,7 +169,7 @@ class KFacRPCCommunicator:
             raise RuntimeError(f"RPC initialization failed for rank {rank}")
 
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = ExpTopoSwiftManager(rank, model, self)
+        self.model_avg_rpc = AdpsgdManager(rank, model, self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
@@ -224,24 +224,27 @@ class KFacRPCCommunicator:
     def close_rpc(self):
         rpc.shutdown()
 
-    def get_health_node_state_list(self) -> list[NodeState]:
-        return [state for rank, state in self.node_states.items() if state.health]
+    def get_working_node_state_list(self) -> list[NodeState]:
+        return [state for rank, state in self.node_states.items() if state.health == 0 or state.health == 1]
 
-    def get_health_nodes_rank_list(self):
-        return [state.rank for state in self.node_states.values() if state.health]
+    def get_working_nodes_rank_list(self):
+        return [state.rank for state in self.node_states.values() if state.health == 0 or state.health == 1]
+    
+    def get_health_nodes_rank_list(self) -> list[int]:
+        return [state.rank for state in self.node_states.values() if state.health == 0]
 
     def get_sick_node_list(self) -> list[NodeState]:
-        return [state for rank, state in self.node_states.items() if not state.health]
+        return [state for rank, state in self.node_states.items() if state.health == 2]
 
     def max_iter_in_cluster(self):
         # return max iter in node_states
-        return max([state.iter for state in self.get_health_node_state_list()])
+        return max([state.iter for state in self.get_working_node_state_list()])
 
     def min_iter_in_health_nodes(self):
-        return min([state.iter for state in self.get_health_node_state_list()])
+        return min([state.iter for state in self.get_working_node_state_list()])
 
     def median_iter_in_health_nodes(self):
-        iters = [state.iter for state in self.get_health_node_state_list()]
+        iters = [state.iter for state in self.get_working_node_state_list()]
         return statistics.median(iters)
 
     def init_logger(self,rank,log_dir):
@@ -271,11 +274,11 @@ class KFacRPCCommunicator:
         for node_rank, state in self.node_states.items():
             log_txt += f"{state}; "
         log_txt += self.task_reassign_rpc.print_state()
-        logger.debug(f"Rank {self.rank}: {log_txt} , {text}")
+        logger.info(f"{log_txt} , {text}")
 
     def debug_print(self, text):
         global logger
-        logger.debug(f"T{self.current_t()} in R{self.rank}, {text}")
+        logger.warning(f"T{self.current_t()} in R{self.rank}, {text}")
 
     def __repr__(self):
         log = f"Rank {self.rank} : iter {self.current_t()}\n"
@@ -298,8 +301,11 @@ class KFacRPCCommunicator:
     def update_self_t(self):
         self.loop_start_time = time.time()
         self.data_send_scheduler.update_loop_counter()
-        self.node_states[self.rank].iter += 1
+        with self.node_state_lock:
+            self.node_states[self.rank].iter += 1
+        self.is_do_kfac_this_loop = False
         if self.data_send_scheduler.get_next_send_type() is not None:
+            self.is_do_kfac_this_loop = True
             if self.get_memory_usage_percent() > 0.5:
                 self.data_send_scheduler.relax_send_interval()
                 self.debug_print(f"relax send interval to {self.data_send_scheduler.intervals}")
@@ -309,16 +315,6 @@ class KFacRPCCommunicator:
 
     def current_t(self):
         return self.node_states[self.rank].iter
-
-    def update_node_iter(self, from_rank, t , speed = None):
-        if not self.node_state_lock.acquire(timeout=1):
-            raise RuntimeError("Failed to acquire lock in node_state")
-        if from_rank not in self.node_states:
-            raise RuntimeError(f"Rank {from_rank} is not in the node_states")
-        self.node_states[from_rank].iter = max(self.node_states[from_rank].iter, t)
-        if speed is not None:
-            self.node_states[from_rank].speed = speed
-        self.node_state_lock.release()
 
     def get_layer_lock(self, layer_name, factor_name):
         assert factor_name in ['A', 'G', 'qa', 'qg']
@@ -370,6 +366,7 @@ class KFacRPCCommunicator:
                 continue
             self.send_data_package(rank)
         self.computation_volume_statistic()
+        #self.facotr_comput_lazy_wl_rebal()
         self.data_send_scheduler.update_next_send_time("eigen")
 
     def compute_preconditioned_gradients(self,damping):
@@ -408,7 +405,7 @@ class KFacRPCCommunicator:
             summ = computational_efficiency[self.rank]
             ct = 1
 
-        for state in self.get_health_node_state_list():
+        for state in self.get_working_node_state_list():
             if state.rank == self.rank:
                 continue
             if state.speed is not None and state.speed > 0:
@@ -418,7 +415,7 @@ class KFacRPCCommunicator:
 
         avg = summ / ct
 
-        for state in self.get_health_node_state_list():
+        for state in self.get_working_node_state_list():
             if avg == 0:
                 computational_efficiency[state.rank] = 1000
                 continue
@@ -431,13 +428,6 @@ class KFacRPCCommunicator:
         self.debug_print(f"computation efficiency: {computational_efficiency}")
         return computational_efficiency
 
-    def update_node_state_list(self, new_health_node_list):
-        for node_rank in self.node_states:
-            if node_rank in new_health_node_list:
-                self.node_states[node_rank].health = True
-            else:
-                self.node_states[node_rank].health = False
-
     def update_inverse_workers(self, new_assignment, new_assignment_generation):
         self.task_reassign_rpc.assignment._inv_assignments = new_assignment
         self.assigned_layers.clear() # not change unless reassign
@@ -447,16 +437,11 @@ class KFacRPCCommunicator:
         for name, kfac_layer in self.rpc_layers.items():
             a_handler = new_assignment[name]['A']
             g_handler =  new_assignment[name]['G']
-            if a_handler != self.rank:
-                kfac_layer.factor['A'] = None
-            if g_handler != self.rank:
-                kfac_layer.factor['G'] = None
             self.rpc_layers[name].reassign_inverse_workers(a_handler,g_handler)
             if a_handler == self.rank or g_handler == self.rank:
                 self.assigned_layers.append(name)
             else:
                 self.candidate_participate_factor_computation_layers.append(name)
-        gc.collect()
         self.print_rpc_state(f"update new assignment {new_assignment_generation}: {new_assignment}")
         self.current_inverse_computation_layers = self.assigned_layers.copy()
         self.current_participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
@@ -468,7 +453,7 @@ class KFacRPCCommunicator:
         return len(self.node_states.keys())
 
     def get_health_world_size(self):
-        return len(self.get_health_node_state_list())
+        return len(self.get_working_node_state_list())
 
     def is_factor_ready(self, layer_name, factor_type):
         if self.rpc_layers[layer_name].kfac_layer.get_factor(factor_type) is not None:
@@ -492,7 +477,11 @@ class KFacRPCCommunicator:
         """
         return self.rpc_layers[layer_name].assigned_worker[factor_type]
     
-    def update_local_node_state(self,node_states:Dict[int,NodeState]):
+    def get_node_states(self):
+        with self.node_state_lock:
+            return self.node_states.copy()
+
+    def update_node_states(self,node_states:Dict[int,NodeState], from_leader = False):
         with self.node_state_lock:
             for rank, state in node_states.items():
                 if rank == self.rank:
@@ -504,23 +493,24 @@ class KFacRPCCommunicator:
                     if node_states[rank].iter > self.node_states[rank].iter:
                         self.node_states[rank].iter = state.iter
                         self.node_states[rank].speed = state.speed
+                    if from_leader:
                         self.node_states[rank].health = state.health
 
     def send_kfac_factor(self,layer_name:str,factor_type:str):
         target = self.assigned_worker(layer_name, factor_type)
         if target == self.rank:
             return
-        t = self.current_t()
+        with self.node_state_lock:
+            node_states = self.node_states.copy()
         with self.get_layer_lock(layer_name, factor_type):
             factor_tensor = self.rpc_layers[layer_name].kfac_layer.get_factor(factor_type)
         if factor_tensor is None:
-            print(f"Factor {factor_type} is None in {layer_name} at {self.rank} at t={t}")
             return
         try:
             rpc.rpc_async(
                 to=rpc_work_name(target),
                 func=receive_kfac_factor,
-                args=(self.rank, layer_name, factor_tensor, t, factor_type)
+                args=(self.rank, layer_name, factor_tensor, node_states, factor_type)
             )
         except Exception as e:
             print(f"Failed to send factor to {target} from {self.rank}: {e}")
@@ -566,9 +556,10 @@ class KFacRPCCommunicator:
                 f'Attempt to broadcast A inv from src={self.rank} but this rank '
                 'has not computed inv yet.',
             )
-        t= self.current_t()
         qa = self.rpc_layers[layer_name].kfac_layer.get_factor("qa")
         da = self.rpc_layers[layer_name].kfac_layer.get_factor("da")
+        with self.node_state_lock:
+            node_states = self.node_states.copy()
         for target_rank in range(self.origin_world_size):
             if target_rank == self.rank:
                 continue
@@ -576,18 +567,18 @@ class KFacRPCCommunicator:
                 rpc.rpc_async(
                     to=rpc_work_name(target_rank),
                     func=receive_eigen_tensor_a,
-                    args=(self.rank, layer_name, qa, da, t)
+                    args=(self.rank, layer_name, qa, da, node_states)
                 )
             except Exception as e:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
         self.com_statistic.add_send_stat("eigen",times=self.origin_world_size-1)
 
     def broadcast_kfac_eigen_tensor_g(self, layer_name):
-        t = self.current_t()
         qg = self.rpc_layers[layer_name].kfac_layer.get_factor("qg")
         dg = self.rpc_layers[layer_name].kfac_layer.get_factor("dg")
         dadg = self.rpc_layers[layer_name].kfac_layer.get_factor("dgda")
-
+        with self.node_state_lock:
+            node_states = self.node_states.copy()
         if self.rpc_layers[layer_name].kfac_layer.prediv_eigenvalues:
             if dadg is None:
                 raise RuntimeError(
@@ -607,7 +598,7 @@ class KFacRPCCommunicator:
                 rpc.rpc_async(
                     to=rpc_work_name(target_rank),
                     func=receive_eigen_tensor_g,
-                    args=(self.rank, layer_name, qg, dg, dadg, t)
+                    args=(self.rank, layer_name, qg, dg, dadg, node_states)
                 )
             except Exception as e:
                 print(f"Failed to send eigen tensor to {target_rank} from {self.rank}: {e}")
@@ -630,7 +621,7 @@ class KFacRPCCommunicator:
         loop_time_cost = time.time() - self.loop_start_time
         self.time_cost_accumulation += loop_time_cost
         for layer_name in self.current_inverse_computation_layers:
-            self.computation_volume_accumulation += (self.layers_workload[layer_name]["A"]  +self.layers_workload[layer_name]["G"]) #* 0.001
+            self.computation_volume_accumulation += ((self.layers_workload[layer_name]["A"]  +self.layers_workload[layer_name]["G"]))/100000 #* 0.001
         self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
 
     def get_local_node_speed(self):
@@ -643,8 +634,8 @@ class KFacRPCCommunicator:
 
     def facotr_comput_lazy_wl_rebal(self):
         current_t = self.current_t()
-        forward_than_local = sum(state.iter > current_t for state in self.get_health_node_state_list())
-        late_than_local = sum(state.iter < current_t for state in self.get_health_node_state_list())
+        forward_than_local = sum(state.iter > current_t for state in self.get_working_node_state_list())
+        late_than_local = sum(state.iter < current_t for state in self.get_working_node_state_list())
         iter_diff = self.max_iter_in_cluster() - current_t
         random.shuffle(self.candidate_participate_factor_computation_layers)
         random.shuffle(self.assigned_layers)
@@ -656,18 +647,26 @@ class KFacRPCCommunicator:
                 layer_name = random.choice(self.current_participate_factor_computation_layers)
                 self.current_participate_factor_computation_layers.remove(layer_name)
                 self.debug_print(f"remove {layer_name} from factor computation")
+            else:
+                self.data_send_scheduler.relax_send_interval("eigen")
+            """
             elif len(self.current_inverse_computation_layers) > 0:
                 layer_name = random.choice(self.current_inverse_computation_layers)
                 self.current_inverse_computation_layers.remove(layer_name)
                 self.debug_print(f"remove {layer_name} from inverse computation")
+            """
 
-        if late_than_local >= 1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
+        if late_than_local >= self.origin_world_size * 0.1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
+            """
             if len(self.current_inverse_computation_layers) < len(self.assigned_layers):
                 for layer_name in reversed(self.assigned_layers):
                     if layer_name not in self.current_inverse_computation_layers:
                         self.current_inverse_computation_layers.append(layer_name)
                         self.debug_print(f"add {layer_name} to inverse computation")
                         break
+            """
+            if self.data_send_scheduler.intervals["eigen"] > self.data_send_scheduler.start_interval["eigen"]:
+                self.data_send_scheduler.shorten_send_interval("eigen")
             elif len(self.current_participate_factor_computation_layers) < len(self.candidate_participate_factor_computation_layers):
                 for layer_name in reversed(self.candidate_participate_factor_computation_layers):
                     if layer_name not in self.current_participate_factor_computation_layers:
@@ -704,19 +703,8 @@ class KFacRPCCommunicator:
         else:
             return 0
 
-    def write_model_test_accuracy(self, epoch, max_epoch):
-        for i in range(epoch+1):
-            if i not in self.model_accuracy_statistic:
-                break
-            if "written" in self.model_accuracy_statistic[i]:
-                continue
-            if self.model_accuracy_statistic[i]['recv_ct'] >= self.origin_world_size or epoch == max_epoch-1:
-                if self.writer is not None:
-                    self.writer.add_scalar('Accuracy/test', self.model_accuracy_statistic[i]['correct_ct'] / self.model_accuracy_statistic[i]['total_ct'], i)
-                    self.model_accuracy_statistic[i]["written"] = True
-
     def restart_sick_node(self): # call by sick nodes
-        if self.node_states[self.rank].health == False and self.task_reassign_rpc.assignment_generation not in self.request_regression_record:
+        if self.node_states[self.rank].health == 2 and self.task_reassign_rpc.assignment_generation not in self.request_regression_record:
             self.task_reassign_rpc.resurrection_declaration()
             self.print_rpc_state(f"request regression from sick node {self.rank}")
             self.request_regression_record.add(self.task_reassign_rpc.assignment_generation)
@@ -752,7 +740,7 @@ class KFacRPCCommunicator:
 
 global_communicator: KFacRPCCommunicator = None
 
-def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
+def receive_kfac_factor(from_rank, layer_name, factor, from_node_states:Dict[int,NodeState], factor_type):
     if fault_simulator.is_fault():
         return
     global global_communicator
@@ -762,15 +750,17 @@ def receive_kfac_factor(from_rank, layer_name, factor, from_iter, factor_type):
         return
 
     current_t = self.current_t()
+    from_iter = from_node_states[from_rank].iter
     self.rpc_layers[layer_name].update_local_factor(factor, current_t, from_iter, factor_type ,world_size=self.origin_world_size)
-    self.update_node_iter(from_rank, from_iter)
+    #self.update_node_iter(from_rank, from_iter)
+    self.update_node_states(from_node_states)
 
 def receive_packaged_tensors(from_rank, data:Dict[str,Dict[str,torch.Tensor]], node_states:Dict[int,NodeState]):
     if fault_simulator.is_fault():
         return
     global global_communicator
     self = global_communicator
-    self.update_local_node_state(node_states)
+    self.update_node_states(node_states)
     log_info = f"receive data {str(from_rank)}:\n"
     qa , da , qg , dg , dgda = None, None, None, None, None
     for layer_name, tensor_name_data_dict in data.items():
@@ -796,23 +786,25 @@ def receive_packaged_tensors(from_rank, data:Dict[str,Dict[str,torch.Tensor]], n
             log_info += f"{layer_name} qg from {from_rank}\n"
             self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dgda, current_t)
 
-def receive_eigen_tensor_a(from_rank, layer_name, qa, da, t):
+def receive_eigen_tensor_a(from_rank, layer_name, qa, da, recv_node_states:Dict[int,NodeState]):
     if fault_simulator.is_fault():
         return
     global global_communicator
+    t = recv_node_states[from_rank].iter
     if t < global_communicator.rpc_layers[layer_name].recv_handled_a_version:
         return
     global_communicator.rpc_layers[layer_name].update_local_eigen_a(qa, da, t)
-    global_communicator.update_node_iter(from_rank, t)
+    global_communicator.update_node_states(recv_node_states)
 
-def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, t):
+def receive_eigen_tensor_g(from_rank, layer_name, qg, dg, dadg, recv_node_states:Dict[int,NodeState]):
     if fault_simulator.is_fault():
         return
     global global_communicator
+    t = recv_node_states[from_rank].iter
     if t < global_communicator.rpc_layers[layer_name].recv_handled_g_version:
         return
     global_communicator.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dadg, t)
-    global_communicator.update_node_iter(from_rank, t)
+    global_communicator.update_node_states(recv_node_states)
 
 def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
     """

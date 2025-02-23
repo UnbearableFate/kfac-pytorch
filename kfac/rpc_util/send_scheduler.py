@@ -17,14 +17,23 @@ class DataSendScheduler:
         """更新当前迭代轮次"""
         self.current_iter += 1
     
-    def relax_send_interval(self):
+    def relax_send_interval(self, type_name = None):
         """放宽所有数据类型的发送时间间隔"""
-        for dt in self.intervals.keys():
-            self.intervals[dt]  = int(self.intervals[dt] * 1.2)
+        if type_name is not None:
+            self.intervals[type_name] = int(self.intervals[type_name] * 1.2)
+        else :
+            for dt in self.intervals.keys():
+                self.intervals[dt]  = int(self.intervals[dt] * 1.2)
+        return f"relax send interval to {self.intervals}"
     
-    def shorten_send_interval(self):
-        for dt in self.intervals.keys():
-            self.intervals[dt] = max(int(self.intervals[dt] / 1.1),self.start_interval[dt])
+    def shorten_send_interval(self ,type_name = None):
+        if type_name is not None:
+            self.intervals[type_name] = max(int(self.intervals[type_name] / 1.1),self.start_interval[type_name])
+        else :
+            for dt in self.intervals.keys():
+                self.intervals[dt] = max(int(self.intervals[dt] / 1.1),self.start_interval[dt])
+        return f"shorten send interval to {self.intervals}"
+            
 
     def get_next_send_type(self):
         """获取当前可发送的数据类型（优先级高的优先）"""
