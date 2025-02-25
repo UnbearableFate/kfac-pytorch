@@ -380,6 +380,7 @@ class KFacRPCCommunicator:
         for layer_name in self.current_inverse_computation_layers:
             with self.get_layer_lock(layer_name, "qa") and self.get_layer_lock(layer_name, "qg"):
                 self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
+                self.rpc_layers[layer_name].kfac_layer.update_grad(None)
             all_layer.remove(layer_name)
 
         while len(all_layer) > 0:
@@ -395,6 +396,7 @@ class KFacRPCCommunicator:
             for layer_name in ready_set:
                 with self.get_layer_lock(layer_name, "qa") and self.get_layer_lock(layer_name, "qg"):
                     self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
+                    self.rpc_layers[layer_name].kfac_layer.update_grad(None)
             all_layer = all_layer - ready_set
 
     def get_computation_speed_dict(self):
