@@ -13,6 +13,7 @@ from typing import Dict, Optional, Tuple
 import logging
 from kfac.adsgds.exp_swift import ExpTopoSwiftManager
 from kfac.adsgds.adpsgd import AdpsgdManager
+from kfac.adsgds.swift import SwiftManager
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.send_scheduler import DataSendScheduler ,PackageSender
 import numpy as np
@@ -169,7 +170,7 @@ class KFacRPCCommunicator:
             raise RuntimeError(f"RPC initialization failed for rank {rank}")
 
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = AdpsgdManager(rank, model, self)
+        self.model_avg_rpc = SwiftManager(rank, model, self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
@@ -240,10 +241,10 @@ class KFacRPCCommunicator:
         # return max iter in node_states
         return max([state.iter for state in self.get_working_node_state_list()])
 
-    def min_iter_in_health_nodes(self):
+    def min_iter_in_working_nodes(self):
         return min([state.iter for state in self.get_working_node_state_list()])
 
-    def median_iter_in_health_nodes(self):
+    def median_iter_in_working_nodes(self):
         iters = [state.iter for state in self.get_working_node_state_list()]
         return statistics.median(iters)
 
@@ -398,34 +399,18 @@ class KFacRPCCommunicator:
 
     def get_computation_speed_dict(self):
         computational_efficiency = dict()
-        summ = 0
-        ct = 0
-        if self.time_cost_accumulation > 0:
-            computational_efficiency[self.rank] = self.computation_volume_accumulation / self.time_cost_accumulation
-            summ = computational_efficiency[self.rank]
-            ct = 1
-
-        for state in self.get_working_node_state_list():
-            if state.rank == self.rank:
-                continue
-            if state.speed is not None and state.speed > 0:
-                summ += state.speed
-                ct += 1
-                computational_efficiency[state.rank] = state.speed
-
-        avg = summ / ct
-
+        avg = statistics.mean([state.speed for state in self.get_working_node_state_list() if state.speed is not None and state.speed > 0])
+        self.print_rpc_state(f"avg speed: {avg}")
         for state in self.get_working_node_state_list():
             if avg == 0:
                 computational_efficiency[state.rank] = 1000
                 continue
-            if state.rank not in computational_efficiency or computational_efficiency[state.rank] == 0:
+            if state.speed > 0:
+                computational_efficiency[state.rank] = state.speed
+            elif state.speed == 0:
                 computational_efficiency[state.rank] = avg
+
         self.print_rpc_state(f"computation efficiency: {computational_efficiency}")
-        max_speed = max(computational_efficiency.values())
-        for rank, speed in computational_efficiency.items():
-            computational_efficiency[rank] = speed*10 / max_speed
-        self.debug_print(f"computation efficiency: {computational_efficiency}")
         return computational_efficiency
 
     def update_inverse_workers(self, new_assignment, new_assignment_generation):
@@ -676,7 +661,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.process()
+            self.model_avg_rpc.process_with_dynamic_weight()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def send_rpc_test_result(self, correct_ct, total_ct, epoch):

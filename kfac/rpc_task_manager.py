@@ -1,8 +1,6 @@
 import threading
-import time
-from functools import reduce
 from functools import partial
-import random
+from general_util.consts import relative_lag_threshold, extreme_relative_lag_threshold , max_election_period, slowness_threshold ,extreme_threshold
 
 import torch.distributed.rpc as rpc
 
@@ -13,8 +11,7 @@ if TYPE_CHECKING:
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 class RPCTaskManager:
-    slowness_threshold = 80
-    max_election_period = 20
+
     def __init__(self,rpc_communicator: 'KFacRPCCommunicator' , assignment : 'KAISAAssignment'):
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
         self.rank = rpc_communicator.rank
@@ -38,11 +35,6 @@ class RPCTaskManager:
         else:
             self.identity = 1 # 1:follower 2:candidate
 
-        self.normal_threshold = RPCTaskManager.slowness_threshold # 正常节点阈值
-        self.extreme_threshold = RPCTaskManager.slowness_threshold * 3 # 极端节点阈值
-        self.relative_lag_threshold = 0.05  # 相对滞后阈值
-        self.extreme_relative_lag_threshold = 0.2  # 极端相对滞后阈值
-
         global rpc_task_manager
         rpc_task_manager = self
 
@@ -57,7 +49,7 @@ class RPCTaskManager:
         return result
     def check_and_reassign(self): # call by leader
         if self.leader_rank == self.rank and self.reassign_task_callback is None:
-            median_iter = self.rpc_communicator.median_iter_in_health_nodes()
+            median_iter = self.rpc_communicator.median_iter_in_working_nodes()
             ct = self.pick_nodes_by_speed(median_iter)
             if ct > 0:
                 if self.temp_state_list[self.rank] == 2:
@@ -69,18 +61,18 @@ class RPCTaskManager:
                 self.reassign_lock.release()
 
     def pick_nodes_by_speed(self, median_iter):
-        slightly_slow_diff_threshold = median_iter * self.relative_lag_threshold
-        extremely_slow_diff_threshold = median_iter * self.extreme_relative_lag_threshold
+        slightly_slow_diff_threshold = median_iter * relative_lag_threshold
+        extremely_slow_diff_threshold = median_iter * extreme_relative_lag_threshold
         health_states_change_ct = 0
         for rank, state in self.rpc_communicator.node_states.items():
             # 计算相对滞后比例
             lag_diff = median_iter - state.iter
             # 根据相对差值分类（阈值可根据实验调优）
-            if lag_diff < max(self.normal_threshold, slightly_slow_diff_threshold):
+            if lag_diff < max(slowness_threshold, slightly_slow_diff_threshold):
                 self.temp_state_list[rank] = 0
                 if state.health != 0:
                     health_states_change_ct += 1
-            elif lag_diff < max(self.extreme_threshold, extremely_slow_diff_threshold):
+            elif lag_diff < max(extreme_threshold, extremely_slow_diff_threshold):
                 self.temp_state_list[rank] = 1
                 if state.health != 1:
                     health_states_change_ct += 1
@@ -103,9 +95,11 @@ class RPCTaskManager:
                     new_working_nodes.append(rank)
         #old_health_nodes = set(self.rpc_communicator.get_working_nodes_rank_list())
         print (f"new_working_nodes {new_working_nodes}")
-        new_assignment = self.assignment.greedy_assignment_efficiency(self.assignment.work, [new_working_nodes],
+        speeds = self.rpc_communicator.get_computation_speed_dict()
+        new_assignment = self.assignment.greedy_assignment_efficiency_new(self.assignment.work, new_working_nodes,
                                                                       True,
-                                                                      self.rpc_communicator.get_computation_speed_dict())
+                                                                      speeds)
+        self.rpc_communicator.debug_print(f"new_assignment {new_assignment} \n work {self.assignment.work} \n speed {speeds}")
         self.rpc_communicator.update_inverse_workers(new_assignment, self.assignment_generation + 1)
 
         self.temp_state_list = [-1 for i in range(self.rpc_communicator.origin_world_size)]
@@ -114,8 +108,6 @@ class RPCTaskManager:
         node_states = self.rpc_communicator.get_node_states()
         sent_ok_list = []
         for rank in self.rpc_communicator.get_working_nodes_rank_list():
-            self.rpc_communicator.print_rpc_state(
-                f"reassign task {new_assignment} to {rank}")
             try:
                 rpc.rpc_async(
                     to=rpc_work_name(rank),
@@ -129,8 +121,6 @@ class RPCTaskManager:
             sent_ok_list.append(rank)
 
         for rank in [state.rank for state in self.rpc_communicator.get_sick_node_list()]:
-            self.rpc_communicator.print_rpc_state(
-                f"reassign task {new_assignment} to sick {rank}")
             try:
                 rpc.rpc_async(
                     to=rpc_work_name(rank),
@@ -252,13 +242,15 @@ class RPCTaskManager:
     def electing_new_leader_loop(self): # call by in loop
         #leader_iter = self.rpc_communicator.health_node_states[self.leader_rank].iter
         #forward_than_leader = sum(state.iter > leader_iter for state in self.rpc_communicator.health_node_states.values())
+        median_iter = self.rpc_communicator.median_iter_in_working_nodes()
         if (self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slowness_threshold
              and self.identity == 1
              and self.votedFor is None
-             and self.election_period < 0 ):
+             and self.election_period < 0
+             and median_iter - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slowness_threshold / 2):
             self.rpc_communicator.print_rpc_state(f"start new election")
             self.start_election()
-        elif self.election_period > RPCTaskManager.max_election_period:
+        elif self.election_period > max_election_period:
             if self.identity == 2:
                 """
                 if self.rpc_communicator.current_t() - self.rpc_communicator.node_states[self.leader_rank].iter > RPCTaskManager.slow_tolerance_value :

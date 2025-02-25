@@ -140,7 +140,7 @@ class GeneralManager:
 
         for i in range(self.start_epoch, self.epochs):
             self.simple_rpc_train(epoch=i)
-            self.test_local_top(epoch=i, topk=(1, 3))
+            self.test_local(epoch=i)
             self.save_checkpoint(epoch=i)
 
         self.writer.close()
@@ -216,18 +216,18 @@ class GeneralManager:
 
                 self.optimizer.step()
                 self.rpc_communicator.send_model_param()
-
-                if self.rank == 3 :
-                    time.sleep(0.1)
                 
-                if com.current_t() % 20 == 19:
+                if com.current_t() % 30 == 29:
                     rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                    #rpc_distributed.global_communicator.task_reassign_rpc.electing_new_leader_loop()
                 
-                if rpc_distributed.global_communicator.current_t() % 40 == 39:
+                if rpc_distributed.global_communicator.current_t() % 100 == 99:
                     rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 
                 if com.task_reassign_rpc.reassign_task_callback is not None:
                     com.task_reassign_rpc.reassign_task_callback()
+                if com.update_assignment_callback is not None:
+                    com.update_assignment_callback()
                     
                 if rpc_distributed.global_communicator.current_t() % 300 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
@@ -417,7 +417,9 @@ class GeneralManager:
                 correct += pred.eq(target.view_as(pred)).sum().item()
                 total += target.size(0)
         accuracy = correct / total
-        self.writer.add_scalar('Accuracy/test', accuracy, epoch)
+        time_as_step = round(self.train_total_time * 1000)
+        self.rpc_communicator.model_avg_rpc.set_acc(accuracy)
+        self.writer.add_scalar('Accuracy/test', accuracy, time_as_step)
 
     def test_local_top(self, epoch, topk=(1,)):  # 添加 topk 参数，支持多种 Top-N 精度
         self.model.eval()

@@ -75,7 +75,7 @@ if __name__ == '__main__':
                              std=[0.229, 0.224, 0.225]),
     ])
 
-    mgr = GeneralManager( dataset_name="CIFAR10", model=model,
+    mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
                          train_com_method='rpc',  is_2nd_order=True, epochs=70, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,

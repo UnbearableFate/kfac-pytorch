@@ -11,6 +11,8 @@ import torch.distributed as dist
 import time
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from typing import Dict
+from scipy.special import expit
+from general_util.consts import extreme_threshold
 
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
@@ -48,7 +50,31 @@ class SwiftManager(RootModelAvgRPCCommunicator):
                 dist.send(tensor=send_tensor, dst=(self.rank-1)%self.origin_world_size)
 
         vector_to_parameters(recv_tensor.add_(send_tensor).mul_(0.5), self.model.parameters())
-    
+
+    def update_dynamic_weight(self,aggregating_node_list):
+        sum_of_weight = 0
+        self.local_model_store.dynamic_weight  = 1/ self.local_model_store.loss_value
+        sum_of_weight += self.local_model_store.dynamic_weight
+
+        for rank in aggregating_node_list:
+            neighbor_store = self.neighbor_model_buffers[rank]
+            self.neighbor_model_buffers[rank].dynamic_weight = expit((neighbor_store.term - self.local_model_store.term)/self.local_model_store.term) * (1/ self.neighbor_model_buffers[rank].loss_value)
+            sum_of_weight += self.neighbor_model_buffers[rank].dynamic_weight
+        
+        self.local_model_store.dynamic_weight /= sum_of_weight
+        for rank in aggregating_node_list:
+            self.neighbor_model_buffers[rank].dynamic_weight /= sum_of_weight
+
+    def select_aggregating_node(self):
+        aggregating_node_list = []
+        for rank,neighbor_node in self.neighbor_model_buffers.items():
+            if (neighbor_node.loss_value != 0
+                and neighbor_node.has_aggregated == False
+                and self.local_model_store.term - neighbor_node.term  < extreme_threshold
+                and neighbor_node.loss_value / self.local_model_store.loss_value < 2):
+                aggregating_node_list.append(rank)
+        return aggregating_node_list
+
     def process(self):
         self.update_local_flat_model()
         send_work_list = []
@@ -76,7 +102,39 @@ class SwiftManager(RootModelAvgRPCCommunicator):
 
         self.rpc_communicator.debug_print(f"model avg process done ,memeory usage is {self.rpc_communicator.get_memory_usage_percent()}")
         self.rpc_communicator.com_statistic.add_send_stat("model_param", len(self.graph.neighbor_list))
+    
+    def process_with_dynamic_weight(self):
+        self.update_local_flat_model()
+        node_states = self.rpc_communicator.get_node_states()
+        result = self.local_model_store.flatten_tensor.clone()
+        for neighbor in self.graph.neighbor_list:
+            work = rpc.rpc_async(
+                to=rpc_work_name(neighbor),
+                func= recv_model_param,
+                args=(*self.local_model_store.getData(), self.rank , node_states)
+            )
 
+        for neighbor_store in self.neighbor_model_buffers.values():
+            if neighbor_store.loss_value == 0:
+                return
+            
+        aggregating_node_list = self.select_aggregating_node()
+        self.update_dynamic_weight(aggregating_node_list)
+        log_info = f"aggr: {aggregating_node_list} ,weight: {self.local_model_store.dynamic_weight}"
+        result *= self.local_model_store.dynamic_weight
+
+        for rank in aggregating_node_list:
+            neighbor_store = self.neighbor_model_buffers[rank]
+            with neighbor_store.lock:
+                result.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.dynamic_weight)
+                neighbor_store.has_aggregated = True
+                log_info += f"{neighbor_store.dynamic_weight} "
+
+        with torch.no_grad() and self.local_model_store.lock:
+            vector_to_parameters(result, self.model.parameters())
+
+        self.rpc_communicator.debug_print(f"model avg process done. {log_info} ,memeory usage is {self.rpc_communicator.get_memory_usage_percent()}")
+        self.rpc_communicator.com_statistic.add_send_stat("model_param", len(self.graph.neighbor_list))
 
 model_avg_rpc_communicator: SwiftManager
 

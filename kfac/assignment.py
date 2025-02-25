@@ -403,6 +403,104 @@ class KAISAAssignment(WorkAssignment):
         return assignments
 
     @staticmethod
+    def greedy_assignment_efficiency_new(
+        work: dict[str, dict[str, float]],
+        workers: list[int],
+        colocate_factors: bool,
+        computational_efficiency: dict[int, float],
+        ) -> dict[str, dict[str, int]]:
+        '''
+        Greedy layer-factor assignment with respect to computational efficiency.
+        Now uses only one worker group (workers), and encourages
+        larger tasks to go to higher-efficiency (faster) workers.
+
+        Args:
+            work: 
+                A dict mapping layer names to a dict of {factor_name: cost}.
+                e.g. work["layer1"] = {"factorA": 10.0, "factorB": 5.0}
+            workers:
+                A list of worker ranks, e.g. [0, 1, 2].
+            colocate_factors:
+                If True, all factors of a layer must be assigned to the same worker;
+                otherwise, factors of the same layer can be assigned to different workers.
+            computational_efficiency:
+                A dict mapping worker rank -> computational efficiency (GFLOPs/s or any relative measure).
+                e.g. {0: 1.0, 1: 2.0, 2: 1.5}.
+
+        Returns:
+            assignments:
+                A dict of the same structure as `work`, but values replaced by the
+                worker rank to which each factor is assigned. 
+                e.g. assignments["layer1"]["factorA"] = 1
+        '''
+
+        # 1) 初始化每个 worker 的负载（表示当前已经累积的“时间”）
+        worker_loads = {w: 0.0 for w in workers}
+
+        # 2) 准备返回结果，结构同 work
+        assignments = {
+            layer: {factor: -1 for factor in factors} 
+            for layer, factors in work.items()
+        }
+
+        # 3) 计算每个 layer 的总工作量，并按从大到小排序
+        #    这样先分配大任务，可以更好地利用高效节点
+        summed_work = {layer: sum(factors.values()) for layer, factors in work.items()}
+        layers_sorted = sorted(summed_work, key=summed_work.get, reverse=True)
+
+        # 4) 遍历层（由大到小）
+        for layer in layers_sorted:
+            # 当前层所有 factor 的工作量
+            factors_dict = work[layer]
+            
+            if colocate_factors:
+                # 4.1) 需要将整层的所有 factor 分配给同一个节点
+                total_cost = summed_work[layer]
+
+                # 找到分配此层后 "负载 + total_cost / efficiency" 最小的节点
+                best_worker = None
+                best_time = float('inf')
+                for w in workers:
+                    # 计算分配给 worker w 后，总的时间负载
+                    time_if_assigned = worker_loads[w] + (total_cost / computational_efficiency[w])
+                    if time_if_assigned < best_time:
+                        best_time = time_if_assigned
+                        best_worker = w
+
+                # 更新选中节点的负载
+                worker_loads[best_worker] = best_time
+
+                # 将该 layer 的所有 factor 分配给同一个节点
+                for factor in factors_dict:
+                    assignments[layer][factor] = best_worker
+
+            else:
+                # 4.2) 同一层内的 factors 可以分开分配
+                #      先对 factor 按照 cost 从大到小排序，优先分配大 factor
+                sorted_factors = sorted(factors_dict.items(), key=lambda x: x[1], reverse=True)
+                
+                for factor_name, factor_cost in sorted_factors:
+                    # 为每个 factor 找到 "分配后负载" 最小的 worker
+                    best_worker = None
+                    best_time = float('inf')
+                    for w in workers:
+                        time_if_assigned = worker_loads[w] + (factor_cost / computational_efficiency[w])
+                        if time_if_assigned < best_time:
+                            best_time = time_if_assigned
+                            best_worker = w
+
+                    # 更新负载并记录分配结果
+                    worker_loads[best_worker] = best_time
+                    assignments[layer][factor_name] = best_worker
+
+        # 5) 确保所有 factor 都已分配给有效的 worker
+        for layer in assignments:
+            for factor in assignments[layer]:
+                assert assignments[layer][factor] >= 0, "Factor assignment failed."
+
+        return assignments
+
+    @staticmethod
     def partition_grad_workers(
         world_size: int,
         grad_workers: int,

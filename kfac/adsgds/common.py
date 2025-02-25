@@ -1,3 +1,4 @@
+from math import exp
 import threading
 import torch
 from sympy.core.random import random
@@ -13,14 +14,20 @@ if TYPE_CHECKING:
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
+def sigmoid(x):
+    return 1 / (1 + exp(-x))
+
 class ModelStore:
     def __init__(self ,flatten_tensor: torch.Tensor):
         self.term = 0
         self.loss_value = 0
         self.weight = 0
+        self.dynamic_weight = 0
+        self.has_aggregated = False
         self.lock = threading.Lock()
         self.flatten_tensor = torch.zeros_like(flatten_tensor)
         self.recv_flatten_tensor = torch.zeros_like(flatten_tensor)
+        self.acc = 0
 
     def getData(self):
         return [self.flatten_tensor,self.term,self.loss_value]
@@ -36,6 +43,10 @@ class ModelStore:
             self.flatten_tensor = data
             self.term = term
             self.loss_value = loss_value
+            self.has_aggregated = False
+    def __str__(self):
+        return f"term: {self.term}, loss_value: {self.loss_value}, weight: {self.weight}, dynamic_weight: {self.dynamic_weight}, has_aggregated: {self.has_aggregated}"
+
 class RootModelAvgRPCCommunicator:
     def __init__(self, rank, model: torch.nn.Module ,rpc_communicator: 'KFacRPCCommunicator',default_model_store = True):
         self.rpc_communicator: 'KFacRPCCommunicator' = rpc_communicator
@@ -51,6 +62,9 @@ class RootModelAvgRPCCommunicator:
 
     def set_loss(self, loss_value):
         self.local_model_store.loss_value = loss_value
+    
+    def set_acc(self, accuracy):
+        self.local_model_store.acc = accuracy
 
     def get_local_node_speed(self):
         if self.rpc_communicator.node_states[self.rank].speed is not None and self.rpc_communicator.node_states[self.rank].speed != 0:
