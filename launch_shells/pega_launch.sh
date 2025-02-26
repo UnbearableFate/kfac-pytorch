@@ -4,11 +4,11 @@
 #PBS -q gpu_low
 #PBS -T openmpi
 #PBS -b 16
-#PBS -l elapstim_req=00:30:00
+#PBS -l elapstim_req=00:25:00
 #PBS -v NQSV_MPI_VER=4.1.6/nvhpc24.5-cuda12.4
 #PBS -M kanakawapanman@gmail.com
 
-module load openmpi/4.1.6/nvhpc24.5-cuda12.4 
+module load openmpi/4.1.6/nvhpc24.5-cuda12.4
 
 current_time=$(date "+%Y%m%d%H%M")
 

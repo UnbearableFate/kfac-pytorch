@@ -120,8 +120,8 @@ class SwiftManager(RootModelAvgRPCCommunicator):
             
         aggregating_node_list = self.select_aggregating_node()
         self.update_dynamic_weight(aggregating_node_list)
-        log_info = f"aggr: {aggregating_node_list} ,weight: {self.local_model_store.dynamic_weight}"
-        result *= self.local_model_store.dynamic_weight
+        log_info = f"aggr: {aggregating_node_list} ,weight: {self.local_model_store.dynamic_weight}, "
+        result.mul_(self.local_model_store.dynamic_weight)
 
         for rank in aggregating_node_list:
             neighbor_store = self.neighbor_model_buffers[rank]

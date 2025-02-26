@@ -307,6 +307,7 @@ class KFacRPCCommunicator:
         self.is_do_kfac_this_loop = False
         if self.data_send_scheduler.get_next_send_type() is not None:
             self.is_do_kfac_this_loop = True
+            self.debug_print(f"do {self.data_send_scheduler.get_next_send_type()} this loop ,memory usage: {self.get_memory_usage_percent()}")
             if self.get_memory_usage_percent() > 0.5:
                 self.data_send_scheduler.relax_send_interval()
                 self.debug_print(f"relax send interval to {self.data_send_scheduler.intervals}")
@@ -352,7 +353,7 @@ class KFacRPCCommunicator:
                     else:
                         self.async_eigen_broadcast_register(layer_name=layer_name,factor_types =['qa'])
                 elif factor_type == "G":
-                    with self.rpc_layers[layer_name].tensor_locks['qg'], self.rpc_layers[layer_name].tensor_locks['G']:
+                    with self.get_layer_lock(layer_name,'qg'), self.get_layer_lock(layer_name,'qa') ,self.get_layer_lock(layer_name,'G'):
                         kfac_layer.compute_g_inv(damping=preconditioner.damping)
                         self.rpc_layers[layer_name].recv_handled_g_version = self.current_t()
                     if not self.is_packged_send:
@@ -380,7 +381,7 @@ class KFacRPCCommunicator:
         for layer_name in self.current_inverse_computation_layers:
             with self.get_layer_lock(layer_name, "qa") and self.get_layer_lock(layer_name, "qg"):
                 self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
-                self.rpc_layers[layer_name].kfac_layer.update_grad(None)
+            self.rpc_layers[layer_name].kfac_layer.update_grad(None)
             all_layer.remove(layer_name)
 
         while len(all_layer) > 0:
@@ -396,7 +397,7 @@ class KFacRPCCommunicator:
             for layer_name in ready_set:
                 with self.get_layer_lock(layer_name, "qa") and self.get_layer_lock(layer_name, "qg"):
                     self.rpc_layers[layer_name].kfac_layer.preconditioned_grad(damping=damping)
-                    self.rpc_layers[layer_name].kfac_layer.update_grad(None)
+                self.rpc_layers[layer_name].kfac_layer.update_grad(None)
             all_layer = all_layer - ready_set
 
     def get_computation_speed_dict(self):
@@ -766,12 +767,12 @@ def receive_packaged_tensors(from_rank, data:Dict[str,Dict[str,torch.Tensor]], n
                 dg = tensor
             elif tensor_name == 'dgda':
                 dgda = tensor
-        if qa is not None and da is not None:
+        if qa is not None:
             log_info += f"{layer_name} qa from {from_rank}\n"
-            self.rpc_layers[layer_name].update_local_eigen_a(qa, da, current_t)
+            self.rpc_layers[layer_name].update_local_eigen_a(qa, da, node_states[from_rank].iter)
         if qg is not None:
             log_info += f"{layer_name} qg from {from_rank}\n"
-            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dgda, current_t)
+            self.rpc_layers[layer_name].update_local_eigen_g(qg, dg, dgda, node_states[from_rank].iter)
 
 def receive_eigen_tensor_a(from_rank, layer_name, qa, da, recv_node_states:Dict[int,NodeState]):
     if fault_simulator.is_fault():

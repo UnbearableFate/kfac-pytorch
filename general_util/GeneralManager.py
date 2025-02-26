@@ -122,8 +122,12 @@ class GeneralManager:
 
         for i in range(0, self.epochs):
             self.train(epoch=i)
-            self.test_all_top_1_and_top_n(epoch=i)
+            self.test_all(epoch=i)
             self.save_checkpoint(epoch=i)
+            train_total_time = torch.tensor(self.train_total_time, dtype=torch.int, device="cuda")  # 或者"cpu"
+            dist.all_reduce(train_total_time)
+            if train_total_time.item() / self.world_size > 1000:
+                break
 
         self.writer.close()
 
@@ -185,7 +189,7 @@ class GeneralManager:
         self.train_total_time += time.time() - start_time
         if self.writer is not None:
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
-            self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
+            self.writer.add_scalar('Total train time', self.train_total_time, epoch)
 
     def simple_rpc_train(self, epoch):
         start_time = time.time()
@@ -221,7 +225,7 @@ class GeneralManager:
                     rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                     #rpc_distributed.global_communicator.task_reassign_rpc.electing_new_leader_loop()
                 
-                if rpc_distributed.global_communicator.current_t() % 100 == 99:
+                if rpc_distributed.global_communicator.current_t() % 200 == 199:
                     rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
                 
                 if com.task_reassign_rpc.reassign_task_callback is not None:
@@ -229,7 +233,7 @@ class GeneralManager:
                 if com.update_assignment_callback is not None:
                     com.update_assignment_callback()
                     
-                if rpc_distributed.global_communicator.current_t() % 300 == 0:
+                if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
                 t.update()
             self.train_total_time += time.time() - start_time
@@ -339,7 +343,8 @@ class GeneralManager:
         if self.writer is not None and self.rank == 0:  # 假设self.rank存储了当前进程的rank
             correct_sum, total_sum = correct_total_tensor.unbind()
             accuracy = correct_sum.item() / total_sum.item()
-            self.writer.add_scalar('Accuracy/test', accuracy, epoch)
+            time_as_step = round(self.train_total_time * 1000)
+            self.writer.add_scalar('Accuracy/test', accuracy, time_as_step)
 
     def test_all_top_1_and_top_n(self, epoch, top_n=3):
         self.model.eval()

@@ -5,7 +5,7 @@ if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 class DataSendScheduler:
     def __init__(self):
-        send_intervals = {'model_param': 23, 'factor': 17, 'eigen': 43}
+        send_intervals = {'model_param': 27, 'factor': 19, 'eigen': 47}
         self.intervals = dict(send_intervals)
         self.start_interval = dict(send_intervals)
         self.next_send = {'model_param': 9, 'factor': 2, 'eigen': 5}

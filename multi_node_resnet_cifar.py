@@ -13,6 +13,8 @@ import logging
 import torch.distributed as dist
 import shutil
 
+#os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
 pg_share_file = "pg_share"
@@ -77,9 +79,9 @@ if __name__ == '__main__':
 
     mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc',  is_2nd_order=True, epochs=70, device=device,
+                         train_com_method='rpc',  is_2nd_order=True, epochs=75, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="exp_logy",
+                         transform_train=None, transform_test=None,experiment_name="ring_swift_dynamic",
                          recover=False,batch_size=128)
 
     mgr.rpc_train_and_test()
