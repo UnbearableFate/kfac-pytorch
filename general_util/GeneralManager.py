@@ -16,10 +16,31 @@ import kfac.rpc_distributed as rpc_distributed
 from  kfac.rpc_util.fault_sim import fault_simulator
 from kfac.rpc_util.common_util import get_model_total_l2_norm
 from general_util.consts import CHECK_POINT_PATH, DATA_DIR, LOG_DIR, SHARE_FILES_DIR
+from dataclasses import dataclass, asdict
 
+@dataclass
+class HyperParameters:
+    experiment_name: str = "default"
+    dataset_name: str = "CIFAR10"
+    model: None
+    sampler_func: None = None
+    train_com_method: str = "ddp"
+    is_2nd_order: bool = True
+    epochs: int = 100
+    batch_size: int = 128
+    device: torch.device = torch.device("cuda:0")
+    timestamp: str = ""
+    transform_train: None
+    transform_test: None
+    precondtioner: None
+    recover: bool = False
 
 class GeneralManager:
-    def __init__(self,experiment_name:str, dataset_name, model, sampler_func = None, train_com_method="ddp", is_2nd_order =True, epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",transform_train=None, transform_test=None, precondtioner=None ,recover = False):
+    def __init__(self,experiment_name:str, dataset_name, model, 
+                 sampler_func = None, train_com_method="ddp", is_2nd_order =True,
+                   epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",
+                   transform_train=None, transform_test=None, precondtioner=None ,recover = False,
+                   optimizer_choice = "SGD"):
         self.experiment_name_detail = None
         self.writer = None
         batch_size=batch_size
@@ -47,15 +68,11 @@ class GeneralManager:
 
         self.loss_func = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.001, momentum = 0.9) #torch.optim.Adam(model.parameters())
-        #self.optimizer = torch.optim.Adam(model.parameters(),lr=0.0008)
+        #self.optimizer = torch.optim.Adam(model.parameters())
 
         if is_2nd_order:
-            if precondtioner is not None:
-                self.preconditioner = precondtioner
-            elif train_com_method == "ddp":
-                self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model)
-            elif train_com_method == "rpc":
-                self.preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,train_method="rpc")
+            assert precondtioner is not None
+            self.preconditioner = precondtioner
             if train_com_method == "rpc":
                 self.rpc_communicator:rpc_distributed.KFacRPCCommunicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
                                                                                                                 preconditioner=self.preconditioner, model=model,
@@ -95,23 +112,6 @@ class GeneralManager:
         if fault_simulator is not None:
             fault_simulator.train_total_time_cb = self.get_total_training_time
 
-    """"
-    '''
-    Departure from the original code
-    '''
-    
-    def init_mischief(self,disconnect_ratio=0,max_sick_iter_ratio=0.2,max_disconnected_node_num = 2, possible_disconnect_node = None):
-        max_disconnect_iter = int(len(self.data_manager.train_dataset) / self.batch_size / self.world_size * max_sick_iter_ratio)
-        mischief.mischief_init(world_size=self.world_size, possible_disconnect_node=possible_disconnect_node,
-                           max_disconnect_iter=max_disconnect_iter, disconnect_ratio=disconnect_ratio,
-                            max_disconnected_node_num=max_disconnected_node_num,
-                           ddp_trigger=True, factor_comm_trigger=True, inverse_comm_trigger=True)
-        self.is_fault = True
-        self.experiment_name_detail = f"mdn{max_disconnected_node_num}_dr{disconnect_ratio}_mdi{max_disconnect_iter}_ws{self.world_size}"
-        if self.train_com_method == "rpc":
-            mischief.recover_func = self.rpc_communicator.restart_sick_node
-    """
-
     def train_and_test(self):
         writer_path = self.log_dir
         if self.experiment_name_detail is not None:
@@ -124,10 +124,12 @@ class GeneralManager:
             self.train(epoch=i)
             self.test_all(epoch=i)
             self.save_checkpoint(epoch=i)
+            """
             train_total_time = torch.tensor(self.train_total_time, dtype=torch.int, device="cuda")  # 或者"cpu"
             dist.all_reduce(train_total_time)
             if train_total_time.item() / self.world_size > 1000:
                 break
+            """
 
         self.writer.close()
 
