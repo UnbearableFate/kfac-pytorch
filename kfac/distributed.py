@@ -9,8 +9,6 @@ from typing import Union
 import torch
 import torch.distributed as dist
 
-import kfac.mischief as mischief
-
 try:
     import apex_C  # type: ignore
 
@@ -275,11 +273,6 @@ class TorchDistributedCommunicator:
             NonSquareTensorError:
                 if symmetric is True and tensor is not a 2D square tensor.
         """
-        if (result := mischief.broadcast_with_sick(NonSquareTensorError, get_triu, fill_triu, get_world_size,
-                                                  tensor= tensor,src= src,group= group,symmetric=symmetric)) is not None:
-            return result
-
-        mischief.easy_log_once("broadcast ok",dist.get_rank())
         if get_world_size(group) == 1:
             return tensor
         shape = tensor.size()
@@ -419,10 +412,7 @@ def get_world_size(group: dist.ProcessGroup | None = None) -> int:
         initialized.
     """
     if dist.is_initialized():
-        if mischief.is_normal():
-            return dist.get_world_size(group)
-        return mischief.get_connnecting_world_size()
-        #return dist.get_world_size(group)
+        return dist.get_world_size(group)
     else:
         return 1
 

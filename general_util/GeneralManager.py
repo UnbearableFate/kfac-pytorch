@@ -2,8 +2,8 @@ import math
 import random
 import time
 import torch
+import datetime
 from tqdm import tqdm
-import kfac.mischief as mischief
 from general_util.data_preparation import DataPreparer
 import torch.distributed as dist
 import logging
@@ -16,31 +16,12 @@ import kfac.rpc_distributed as rpc_distributed
 from  kfac.rpc_util.fault_sim import fault_simulator
 from kfac.rpc_util.common_util import get_model_total_l2_norm
 from general_util.consts import CHECK_POINT_PATH, DATA_DIR, LOG_DIR, SHARE_FILES_DIR
-from dataclasses import dataclass, asdict
-
-@dataclass
-class HyperParameters:
-    experiment_name: str = "default"
-    dataset_name: str = "CIFAR10"
-    model: None
-    sampler_func: None = None
-    train_com_method: str = "ddp"
-    is_2nd_order: bool = True
-    epochs: int = 100
-    batch_size: int = 128
-    device: torch.device = torch.device("cuda:0")
-    timestamp: str = ""
-    transform_train: None
-    transform_test: None
-    precondtioner: None
-    recover: bool = False
-
+from general_util.lr_schduler import get_scheduler
 class GeneralManager:
     def __init__(self,experiment_name:str, dataset_name, model, 
                  sampler_func = None, train_com_method="ddp", is_2nd_order =True,
                    epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",
-                   transform_train=None, transform_test=None, precondtioner=None ,recover = False,
-                   optimizer_choice = "SGD"):
+                   transform_train=None, transform_test=None, precondtioner=None ,recover = False):
         self.experiment_name_detail = None
         self.writer = None
         batch_size=batch_size
@@ -67,7 +48,9 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.001, momentum = 0.9) #torch.optim.Adam(model.parameters())
+        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.2, momentum = 0.9) #torch.optim.Adam(model.parameters())
+        #self.schduler  = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[30,60,90], gamma=0.3)
+        self.warmup_schduler, self.decay_scheduler  = get_scheduler(self.optimizer, "KFAC")
         #self.optimizer = torch.optim.Adam(model.parameters())
 
         if is_2nd_order:
@@ -94,6 +77,12 @@ class GeneralManager:
             model.load_state_dict(checkpoint["model"])
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.preconditioner.load_state_dict(checkpoint["preconditioner"])
+            if "scheduler" in checkpoint and hasattr(self, "schduler"):
+                self.schduler.load_state_dict(checkpoint["scheduler"])
+            if "decay_scheduler" in checkpoint and hasattr(self, "decay_scheduler"):
+                self.decay_scheduler.load_state_dict(checkpoint["decay_scheduler"])
+            if "warmup_schduler" in checkpoint and hasattr(self, "warmup_schduler"):
+                self.warmup_schduler.load_state_dict(checkpoint["warmup_schduler"])
             self.start_epoch = checkpoint["epoch"] + 1
             self.train_total_time = checkpoint["train_total_time"]
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
@@ -120,7 +109,7 @@ class GeneralManager:
         self.writer = SummaryWriter(
             log_dir=writer_name)
 
-        for i in range(0, self.epochs):
+        for i in range(self.start_epoch, self.epochs):
             self.train(epoch=i)
             self.test_all(epoch=i)
             self.save_checkpoint(epoch=i)
@@ -189,9 +178,14 @@ class GeneralManager:
                 self.optimizer.step()
                 t.update()
         self.train_total_time += time.time() - start_time
+        if epoch < 5:
+            self.warmup_schduler.step()
+        else:
+            self.decay_scheduler.step()
         if self.writer is not None:
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
             self.writer.add_scalar('Total train time', self.train_total_time, epoch)
+            self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]["lr"], epoch)
 
     def simple_rpc_train(self, epoch):
         start_time = time.time()
@@ -242,6 +236,7 @@ class GeneralManager:
             if self.writer is not None:
                 self.writer.add_scalar("Total train time", self.train_total_time, epoch)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
+                self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
 
     def rpc_train(self, epoch):
         start_time = time.time()
@@ -266,12 +261,7 @@ class GeneralManager:
                         rpc_distributed.global_communicator.task_reassign_rpc.resurrection_declaration()
                         fault_simulator.recover_flg = False
                 """
-                '''
-                mischief.update_iter()
-                if self.is_fault:
-                    if mischief.is_sick_at(self.rank):
-                        time.sleep(0.1)
-                '''
+                
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
@@ -346,7 +336,8 @@ class GeneralManager:
             correct_sum, total_sum = correct_total_tensor.unbind()
             accuracy = correct_sum.item() / total_sum.item()
             time_as_step = round(self.train_total_time * 1000)
-            self.writer.add_scalar('Accuracy/test', accuracy, time_as_step)
+            self.writer.add_scalar('test_accuracy/train_time', accuracy, time_as_step)
+            self.writer.add_scalar('test_accuracy/train_epoch', accuracy, epoch)
 
     def test_all_top_1_and_top_n(self, epoch, top_n=3):
         self.model.eval()
@@ -457,26 +448,6 @@ class GeneralManager:
         for k, acc in topk_accuracies.items():
             self.writer.add_scalar(f'{k}/test', acc, time_as_step)
 
-    def average_health_nodes_param_tensor_fusion_async(self):
-        model = self.model
-        health_nodes = mischief.get_health_nodes()
-        ratio = 0
-        result_list = []
-        if dist.get_rank() in mischief.POSSIBLE_DISCONNECTED_NODE:
-            ratio = mischief.sick_weight_magnification_ratio / len(health_nodes)
-        else:
-            ratio = mischief.health_weight_magnification_ratio / len(health_nodes)
-
-        flat_tensor = fuse_model_paramenters(model)
-        if dist.get_rank() in health_nodes:
-            fut = dist.all_reduce(flat_tensor, op=dist.ReduceOp.SUM,async_op=True).get_future()
-            fut.then(lambda fut: fut.value()[0].mul_(ratio)).then(lambda fut: unfuse_tensors_to_model(fut.value()[0], model))
-            result_list.append(fut)
-        else:
-            result_list.append(dist.all_reduce(torch.zeros_like(flat_tensor), op=dist.ReduceOp.SUM,async_op=True).get_future())
-            mischief.LAST_AVG_ITER = mischief.ITER
-        return result_list
-
     def save_checkpoint(self, epoch):
         state = {
             'model': self.model.state_dict(),
@@ -485,6 +456,12 @@ class GeneralManager:
             'epoch': epoch,
             'train_total_time': self.train_total_time,
         }
+        if hasattr(self, "scheduler"):
+            state["scheduler"] = self.scheduler.state_dict()
+        if hasattr(self, "warmup_schduler"):
+            state["warmup_schduler"] = self.warmup_schduler.state_dict()
+        if hasattr(self, "decay_scheduler"):
+            state["decay_scheduler"] = self.decay_scheduler.state_dict()
         try:
             temp_path = self.checkpoint_file_path + ".temp"
             torch.save(state, temp_path)

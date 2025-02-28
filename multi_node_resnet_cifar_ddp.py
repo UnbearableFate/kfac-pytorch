@@ -41,16 +41,17 @@ if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
-if ompi_world_rank == 0:
-    logging.basicConfig(level=logging.NOTSET)
 
 from mpi4py import MPI
 if ompi_world_size == -1 or ompi_world_rank == -1:
     ompi_world_rank = MPI.COMM_WORLD.Get_rank()
     ompi_world_size = MPI.COMM_WORLD.Get_size()
 
+if ompi_world_rank == 0:
+    logging.basicConfig(level=logging.NOTSET)
+
 if __name__ == '__main__':
-    print("Start!")
+    print(f"Start! at {datetime.datetime.now()}")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     parser = argparse.ArgumentParser(description="experiment script")
     parser.add_argument('--timestamp', type=str, default=timestamp)
@@ -68,7 +69,7 @@ if __name__ == '__main__':
     device = torch.device(f"cuda:0")
     model = model.to(device)
     model = DDP(model)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,factor_update_steps=17,inv_update_steps=43,lr=0.1)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,damping=0.007,inv_update_steps=20)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -80,11 +81,11 @@ if __name__ == '__main__':
 
     mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='ddp', is_2nd_order=True, epochs=300, device=device,
+                         train_com_method='ddp', is_2nd_order=True, epochs=100, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="ddp",
-                         recover=False, batch_size=128)
+                         transform_train=None, transform_test=None,experiment_name="ddp_kfac_resnet18",
+                         recover=True, batch_size=128)
 
     mgr.train_and_test()
-    print("Done!")
+    print(f"Done! at {datetime.datetime.now()}")
     exit(0)

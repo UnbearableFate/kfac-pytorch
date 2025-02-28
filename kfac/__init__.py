@@ -14,7 +14,6 @@ import kfac.preconditioner as preconditioner
 import kfac.scheduler as scheduler
 import kfac.tracing as tracing
 import kfac.warnings as warnings
-import kfac.mischief as mischief
 import kfac.rpc_distributed as rpc_distributed
 import kfac.adsgds.simple_rpc_model_param_avg as simple_rpc_model_param_avg
 

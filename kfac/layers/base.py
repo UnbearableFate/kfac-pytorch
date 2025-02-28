@@ -17,7 +17,6 @@ from kfac.distributed import TorchDistributedCommunicator
 from kfac.enums import AllreduceMethod
 from kfac.layers.modules import ModuleHelper
 
-import kfac.mischief as mischief
 import kfac.rpc_distributed as rpc_distributed
 class KFACBaseLayer:
     """KFAC base layer implementation.

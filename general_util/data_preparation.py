@@ -118,17 +118,17 @@ class DataPreparer:
             if train_com_method == 'rpc':
                 self.train_sampler = None
             else:
-                self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=3)
+                self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7)
         else:
             self.train_sampler = sampler(self.train_dataset,world_size,rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
 
         if train_com_method == 'ddp':
-            self.test_sampler = None #DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
+            self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
         else:
             self.test_sampler = None
 
         self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=(self.train_sampler is None),
-                                       sampler=self.train_sampler, num_workers=1, persistent_workers =False)
+                                       sampler=self.train_sampler, num_workers=2, persistent_workers =False)
         self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False,
                                       sampler=self.test_sampler,
                                       num_workers=2, persistent_workers=False)
