@@ -12,6 +12,7 @@ import logging
 import torch.distributed as dist
 import shutil
 from kfac.enums import ComputeMethod
+from general_util.consts import DATA_DIR, LOG_DIR, SHARE_FILES_DIR
 
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -19,25 +20,6 @@ gpu = torch.device("cuda:0")
 today = datetime.date.today().strftime('%m%d')
 pg_share_file = "pg_share"
 rpc_share_fie = "rpc_share"
-
-DATA_DIR = ""
-LOG_DIR = ""
-Share_DIR = ""
-if os.path.exists("/home/yu"):
-    DATA_DIR = "/home/yu/data"
-    LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/home/yu/workspace/kfac-pytorch/share_files"
-elif os.path.exists("/Users/unbearablefate"):
-    DATA_DIR = "/Users/unbearablefate/workspace/data"
-    LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
-elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
-    DATA_DIR = "/work/NBB/yu_mingzhe/data"
-    LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
-
-if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
-    raise RuntimeError("Unknown environment.")
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
 ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
@@ -58,18 +40,23 @@ if __name__ == '__main__':
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
+    num_devices = torch.cuda.device_count()
+    print(f"Number of CUDA Devices: {num_devices} at rank {ompi_world_rank} at hostname: {os.uname().nodename}")
 
     timeout = datetime.timedelta(seconds=120)
-    dist.init_process_group("nccl", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
+    dist.init_process_group("nccl", init_method=f"file://{SHARE_FILES_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
 
-    model = ResNetForCIFAR10(layers=18)
-    device = torch.device(f"cuda:0")
+    model = ResNetForCIFAR10(layers=34)
+    if num_devices > 1:
+        device = torch.device(f"cuda:{ompi_world_rank%num_devices}")
+    else:
+        device = torch.device("cuda:0")
     model = model.to(device)
     model = DDP(model)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,damping=0.007,inv_update_steps=20)
+    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model,damping=0.007,factor_update_steps = 15,inv_update_steps=60)
 
     transform = transforms.Compose([
         transforms.Resize(224),  # 将图像大小调整为224x224
@@ -81,10 +68,10 @@ if __name__ == '__main__':
 
     mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='ddp', is_2nd_order=True, epochs=100, device=device,
+                         train_com_method='ddp', is_2nd_order=True, epochs=75, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="ddp_kfac_resnet18",
-                         recover=True, batch_size=128)
+                         transform_train=None, transform_test=None,experiment_name="ddp_kfac_resnet34",
+                         recover=False, batch_size=256)
 
     mgr.train_and_test()
     print(f"Done! at {datetime.datetime.now()}")

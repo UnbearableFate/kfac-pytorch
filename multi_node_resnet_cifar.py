@@ -11,7 +11,7 @@ from my_module.model_split import ModelSplitter
 from torchvision import transforms
 import logging
 import torch.distributed as dist
-import shutil
+from general_util.consts import DATA_DIR, LOG_DIR, SHARE_FILES_DIR
 
 #os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -20,23 +20,7 @@ today = datetime.date.today().strftime('%m%d')
 pg_share_file = "pg_share"
 rpc_share_fie = "rpc_share"
 
-DATA_DIR = ""
-LOG_DIR = ""
-Share_DIR = ""
-if os.path.exists("/home/yu"):
-    DATA_DIR = "/home/yu/data"
-    LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/home/yu/workspace/kfac-pytorch/share_files"
-elif os.path.exists("/Users/unbearablefate"):
-    DATA_DIR = "/Users/unbearablefate/workspace/data"
-    LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
-elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
-    DATA_DIR = "/work/NBB/yu_mingzhe/data"
-    LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs/runs"+today
-    Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
-
-if DATA_DIR == "" or LOG_DIR == "" or Share_DIR == "":
+if DATA_DIR == "" or LOG_DIR == "" or SHARE_FILES_DIR== "":
     raise RuntimeError("Unknown environment.")
 
 ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
@@ -50,21 +34,23 @@ if ompi_world_rank == 0:
     logging.basicConfig(level=logging.NOTSET)
 
 if __name__ == '__main__':
-    print("Start!")
+    print(f"Start! at {datetime.datetime.now()}")
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     parser = argparse.ArgumentParser(description="experiment script")
     parser.add_argument('--timestamp', type=str, default=timestamp)
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
+    num_devices = torch.cuda.device_count()
+    print(f"Number of CUDA Devices: {num_devices}")
 
     timeout = datetime.timedelta(seconds=120)
-    dist.init_process_group("gloo", init_method=f"file://{Share_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
+    dist.init_process_group("gloo", init_method=f"file://{SHARE_FILES_DIR}/pg_share{timestamp}", rank=ompi_world_rank,
                             world_size=ompi_world_size, timeout=timeout)
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
 
-    model = ResNetForCIFAR10(layers=18)
+    model = ResNetForCIFAR10(layers=34)
     device = torch.device(f"cuda:0")
     model = model.to(device)
     preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1,train_method='rpc',is_packaged_send=True)
@@ -81,13 +67,19 @@ if __name__ == '__main__':
                          sampler_func= None,
                          train_com_method='rpc',  is_2nd_order=True, epochs=75, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="ring_swift_dynamic",
-                         recover=False,batch_size=128)
+                         transform_train=None, transform_test=None,experiment_name="ring_swift_resnet34",
+                         recover=False,batch_size=256)
 
     mgr.rpc_train_and_test()
-    print("Done!")
+    print(f"Done! at {datetime.datetime.now()}")
 
 # cd /work/NBB/yu_mingzhe/kfac-pytorch
 # module load openmpi/4.1.6/nvhpc24.5-cuda12.4 
 # conda activate py311
 # mpirun -n 4 python ./multi_node_resnet_cifar.py
+
+# cd /work/xg24i002/x10041/kfac-pytorch
+# psutil scipy
+
+# CFLAGS=-noswitcherror pip install mpi4py
+# pip install tensorboard

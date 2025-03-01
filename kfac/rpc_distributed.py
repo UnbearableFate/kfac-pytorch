@@ -119,7 +119,7 @@ class KFacRPCCommunicator:
 
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
-                num_worker_threads=20,
+                num_worker_threads=32,
                 init_method=f"file://{share_file_path}/rpc_share{timestamp}",
                 rpc_timeout=30,
                 device_maps=full_connection_device_map(world_size,rank),
@@ -620,7 +620,7 @@ class KFacRPCCommunicator:
             return self.node_states[self.rank].speed
         return 0
 
-    def facotr_comput_lazy_wl_rebal(self):
+    def factor_computation_lazy_rebalance(self):
         current_t = self.current_t()
         forward_than_local = sum(state.iter > current_t for state in self.get_working_node_state_list())
         late_than_local = sum(state.iter < current_t for state in self.get_working_node_state_list())

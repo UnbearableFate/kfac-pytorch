@@ -26,6 +26,12 @@ elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
     SHARE_FILES_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/share_files"
     CHECK_POINT_PATH = "/work/NBB/yu_mingzhe/kfac-pytorch/checkpoints"
     SHARED_MODEL_ROOT = CHECK_POINT_PATH+"/shared_models"
+elif os.path.exists("/work/xg24i002/x10041/kfac-pytorch"):
+    DATA_DIR = "/work/xg24i002/x10041/data"
+    LOG_DIR = "/work/xg24i002/x10041/kfac-pytorch/runs/runs"+today
+    SHARE_FILES_DIR = "/work/xg24i002/x10041/kfac-pytorch/share_files"
+    CHECK_POINT_PATH = "/work/xg24i002/x10041/kfac-pytorch/checkpoints"
+    SHARED_MODEL_ROOT = CHECK_POINT_PATH+"/shared_models"
 
 delay_list_dict = [
     [0.0006, 0.0071, 0.0046, 0.0043, 0.0119, 0.0049, 0.0121, 0.0097, 0.0029, 0.0238, 0.0069, 0.0062, 0.0008, 0.0148, 0.0114, 0.0098],

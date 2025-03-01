@@ -1,0 +1,13 @@
+#!/bin/bash
+
+#PBS -q short-mig
+#PBS -W group_list=xg24i002
+#PBS -l select=4:mpiprocs=1
+#PBS -l walltime=00:20:00
+#PBS -j oe
+
+current_time=$(date "+%Y%m%d%H%M")
+mpirun --mca mpi_abort_print_stack 1 \
+ --report-bindings \
+ /work/xg24i002/x10041/miniconda3/envs/py313/bin/python /work/xg24i002/x10041/kfac-pytorch/multi_node_resnet_cifar.py\
+ --timestamp="$current_time"

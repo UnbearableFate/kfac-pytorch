@@ -16,7 +16,7 @@ import kfac.rpc_distributed as rpc_distributed
 from  kfac.rpc_util.fault_sim import fault_simulator
 from kfac.rpc_util.common_util import get_model_total_l2_norm
 from general_util.consts import CHECK_POINT_PATH, DATA_DIR, LOG_DIR, SHARE_FILES_DIR
-from general_util.lr_schduler import get_scheduler
+from general_util.lr_schduler import get_scheduler ,WarmupScheduler
 class GeneralManager:
     def __init__(self,experiment_name:str, dataset_name, model, 
                  sampler_func = None, train_com_method="ddp", is_2nd_order =True,
@@ -48,9 +48,10 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.2, momentum = 0.9) #torch.optim.Adam(model.parameters())
-        #self.schduler  = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[30,60,90], gamma=0.3)
-        self.warmup_schduler, self.decay_scheduler  = get_scheduler(self.optimizer, "KFAC")
+        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.005, momentum = 0.9) #torch.optim.Adam(model.parameters())
+        #self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs)
+        self.warmup_scheduler = WarmupScheduler(self.optimizer, warmup_epochs=5, base_lr=self.optimizer.param_groups[0]['lr'])
+        self.decay_scheduler  = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs-5)
         #self.optimizer = torch.optim.Adam(model.parameters())
 
         if is_2nd_order:
@@ -81,8 +82,8 @@ class GeneralManager:
                 self.schduler.load_state_dict(checkpoint["scheduler"])
             if "decay_scheduler" in checkpoint and hasattr(self, "decay_scheduler"):
                 self.decay_scheduler.load_state_dict(checkpoint["decay_scheduler"])
-            if "warmup_schduler" in checkpoint and hasattr(self, "warmup_schduler"):
-                self.warmup_schduler.load_state_dict(checkpoint["warmup_schduler"])
+            if "warmup_scheduler" in checkpoint and hasattr(self, "warmup_scheduler"):
+                self.warmup_scheduler.load_state_dict(checkpoint["warmup_scheduler"])
             self.start_epoch = checkpoint["epoch"] + 1
             self.train_total_time = checkpoint["train_total_time"]
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
@@ -113,12 +114,11 @@ class GeneralManager:
             self.train(epoch=i)
             self.test_all(epoch=i)
             self.save_checkpoint(epoch=i)
-            """
+            
             train_total_time = torch.tensor(self.train_total_time, dtype=torch.int, device="cuda")  # 或者"cpu"
             dist.all_reduce(train_total_time)
-            if train_total_time.item() / self.world_size > 1000:
+            if train_total_time.item() / self.world_size > 950:
                 break
-            """
 
         self.writer.close()
 
@@ -151,7 +151,7 @@ class GeneralManager:
             dist.destroy_process_group()
 
     def train(self, epoch):
-        start_time = time.time()
+        
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
@@ -164,6 +164,7 @@ class GeneralManager:
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.to(self.device)
                 target = target.to(self.device)
+                start_time = time.time()
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = self.loss_func(output, target)
@@ -177,18 +178,22 @@ class GeneralManager:
                     self.preconditioner.step()
                 self.optimizer.step()
                 t.update()
-        self.train_total_time += time.time() - start_time
-        if epoch < 5:
-            self.warmup_schduler.step()
-        else:
-            self.decay_scheduler.step()
+                self.train_total_time += time.time() - start_time
+        
+        if hasattr(self, "scheduler"):
+                self.scheduler.step()
+        elif hasattr(self, "warmup_scheduler"):
+            if epoch < 5:
+                self.warmup_scheduler.step()
+            else:
+                self.decay_scheduler.step()
         if self.writer is not None:
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
             self.writer.add_scalar('Total train time', self.train_total_time, epoch)
             self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]["lr"], epoch)
 
     def simple_rpc_train(self, epoch):
-        start_time = time.time()
+        
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
@@ -200,10 +205,11 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                rpc_distributed.global_communicator.update_self_t()
-
                 data = data.to(self.device)
                 target = target.to(self.device)
+                start_time = time.time()
+
+                rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
                 
                 output = self.model(data)
@@ -218,7 +224,7 @@ class GeneralManager:
                 self.rpc_communicator.send_model_param()
                 
                 if com.current_t() % 30 == 29:
-                    rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
+                    rpc_distributed.global_communicator.factor_computation_lazy_rebalance()
                     #rpc_distributed.global_communicator.task_reassign_rpc.electing_new_leader_loop()
                 
                 if rpc_distributed.global_communicator.current_t() % 200 == 199:
@@ -231,8 +237,18 @@ class GeneralManager:
                     
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
+                
+                self.train_total_time += time.time() - start_time
                 t.update()
-            self.train_total_time += time.time() - start_time
+        
+        if hasattr(self, "scheduler"):
+                self.scheduler.step()
+        elif hasattr(self, "warmup_scheduler"):
+            if epoch < 5:
+                self.warmup_scheduler.step()
+            else:
+                self.decay_scheduler.step() 
+            
             if self.writer is not None:
                 self.writer.add_scalar("Total train time", self.train_total_time, epoch)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
@@ -417,7 +433,8 @@ class GeneralManager:
         accuracy = correct / total
         time_as_step = round(self.train_total_time * 1000)
         self.rpc_communicator.model_avg_rpc.set_acc(accuracy)
-        self.writer.add_scalar('Accuracy/test', accuracy, time_as_step)
+        self.writer.add_scalar('test_accuracy/train_time', accuracy, time_as_step)
+        self.writer.add_scalar('test_accuracy/train_epoch', accuracy, epoch)
 
     def test_local_top(self, epoch, topk=(1,)):  # 添加 topk 参数，支持多种 Top-N 精度
         self.model.eval()
@@ -458,8 +475,8 @@ class GeneralManager:
         }
         if hasattr(self, "scheduler"):
             state["scheduler"] = self.scheduler.state_dict()
-        if hasattr(self, "warmup_schduler"):
-            state["warmup_schduler"] = self.warmup_schduler.state_dict()
+        if hasattr(self, "warmup_scheduler"):
+            state["warmup_scheduler"] = self.warmup_scheduler.state_dict()
         if hasattr(self, "decay_scheduler"):
             state["decay_scheduler"] = self.decay_scheduler.state_dict()
         try:
