@@ -10,4 +10,5 @@ current_time=$(date "+%Y%m%d%H%M")
 mpirun --mca mpi_abort_print_stack 1 \
  --report-bindings \
  /work/xg24i002/x10041/miniconda3/envs/py313/bin/python /work/xg24i002/x10041/kfac-pytorch/multi_node_resnet_cifar.py\
- --timestamp="$current_time"
+ --timestamp="$current_time" \
+ --no-kfac

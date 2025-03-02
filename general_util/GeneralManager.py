@@ -48,10 +48,11 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.005, momentum = 0.9) #torch.optim.Adam(model.parameters())
+        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.0001, momentum = 0.9) #torch.optim.Adam(model.parameters())
         #self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs)
-        self.warmup_scheduler = WarmupScheduler(self.optimizer, warmup_epochs=5, base_lr=self.optimizer.param_groups[0]['lr'])
-        self.decay_scheduler  = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs-5)
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.0008, epochs = epochs, steps_per_epoch = len(self.data_manager.train_loader))
+        #self.warmup_scheduler = WarmupScheduler(self.optimizer, warmup_epochs=5, base_lr=self.optimizer.param_groups[0]['lr'])
+        #self.decay_scheduler  = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs-5)
         #self.optimizer = torch.optim.Adam(model.parameters())
 
         if is_2nd_order:
@@ -181,12 +182,11 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
+                #self.scheduler.step()
                 t.update()
                 self.train_total_time += time.time() - start_time
         
-        if hasattr(self, "scheduler"):
-                self.scheduler.step()
-        elif hasattr(self, "warmup_scheduler"):
+        if hasattr(self, "warmup_scheduler"):
             if epoch < 5:
                 self.warmup_scheduler.step()
             else:
@@ -224,6 +224,8 @@ class GeneralManager:
                     self.preconditioner.step()
 
                 self.optimizer.step()
+                if hasattr(self, "scheduler"):
+                    self.scheduler.step()
                 self.rpc_communicator.send_model_param()
                 
                 if com.current_t() % 30 == 29:
@@ -244,18 +246,16 @@ class GeneralManager:
                 self.train_total_time += time.time() - start_time
                 t.update()
         
-        if hasattr(self, "scheduler"):
-                self.scheduler.step()
-        elif hasattr(self, "warmup_scheduler"):
+        if hasattr(self, "warmup_scheduler"):
             if epoch < 5:
                 self.warmup_scheduler.step()
             else:
-                self.decay_scheduler.step() 
+                self.decay_scheduler.step()
             
-            if self.writer is not None:
-                self.writer.add_scalar("Total train time", self.train_total_time, epoch)
-                self.writer.add_scalar('Loss/train', loss.item(), epoch)
-                self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
+        if self.writer is not None:
+            self.writer.add_scalar("Total train time", self.train_total_time, epoch)
+            self.writer.add_scalar('Loss/train', loss.item(), epoch)
+            self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
     
     def ad_sgd_train(self, epoch):
         self.model.train()
@@ -301,10 +301,10 @@ class GeneralManager:
             else:
                 self.decay_scheduler.step() 
             
-            if self.writer is not None:
-                self.writer.add_scalar("Total train time", self.train_total_time, epoch)
-                self.writer.add_scalar('Loss/train', loss.item(), epoch)
-                self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
+        if self.writer is not None:
+            self.writer.add_scalar("Total train time", self.train_total_time, epoch)
+            self.writer.add_scalar('Loss/train', loss.item(), epoch)
+            self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
 
 
     def test_all(self, epoch):

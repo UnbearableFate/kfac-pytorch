@@ -36,9 +36,8 @@ if __name__ == '__main__':
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     parser = argparse.ArgumentParser(description="experiment script")
     parser.add_argument('--timestamp', type=str, default=timestamp)
-    parser.add_argument('--is_package_send', type=bool, default=True)
-    parser.add_argument('--is_recover',action='store_true', type=bool, default=False)
-    parser.add_argument('--not_kfac', action='store_true', type=bool, default=False)
+    parser.add_argument('--is_recover',action='store_true', default=False)
+    parser.add_argument('--not_kfac', action='store_true', default=False)
     args = parser.parse_args()
     timestamp = args.timestamp
     num_devices = torch.cuda.device_count()
@@ -50,21 +49,21 @@ if __name__ == '__main__':
     if not dist.is_initialized():
         raise RuntimeError("Unable to initialize process group.")
 
-    model = ResNetForCIFAR10(layers=34)
+    model = ResNetForCIFAR10(layers=50)
     device = torch.device(f"cuda:0")
     model = model.to(device)
     is_kfac = not args.not_kfac
     
     if is_kfac:
-        preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,lr=0.1,train_method='rpc',is_packaged_send=True)
+        preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,train_method='rpc',is_packaged_send=True)
     else:
         preconditioner = None
 
     mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
-                         train_com_method='rpc',  is_2nd_order=is_kfac, epochs=75, device=device,
+                         train_com_method='rpc',  is_2nd_order=is_kfac, epochs=65, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="ring_swift_resnet34",
+                         transform_train=None, transform_test=None,experiment_name="ring_swift_resnet50",
                          recover=args.is_recover,batch_size=256)
 
     mgr.rpc_train_and_test()
@@ -76,6 +75,8 @@ if __name__ == '__main__':
 # mpirun -n 4 python ./multi_node_resnet_cifar.py
 
 # cd /work/xg24i002/x10041/kfac-pytorch
+# conda activate py313
+# mpirun -n 1 python ./multi_node_resnet_cifar.py
 # psutil scipy
 
 # CFLAGS=-noswitcherror pip install mpi4py
