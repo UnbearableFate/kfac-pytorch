@@ -50,7 +50,9 @@ if __name__ == '__main__':
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     parser = argparse.ArgumentParser(description="experiment script")
     parser.add_argument('--timestamp', type=str, default=timestamp)
-    parser.add_argument('--fault_problity', type=float, default=0.0)
+    parser.add_argument('--is_package_send',action='store_true', default=True)
+    parser.add_argument('--is_recover',action='store_true', default=False)
+    parser.add_argument('--not_kfac', action='store_true',default=False)
     args = parser.parse_args()
     timestamp = args.timestamp
     print(f"timestamp: {timestamp}")
@@ -63,12 +65,16 @@ if __name__ == '__main__':
 
     model = MLP(num_hidden_layers=4,hidden_size=128)
     rank = dist.get_rank()
-    #device = torch.device(f"cuda:{rank%4}")
     device = torch.device(f"cpu")
     model = model.to(device)
-    preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layers.1$"], damping= 0.007,train_method='rpc',is_packaged_send=True)
+    is_kfac = not args.not_kfac
+    if is_kfac:
+        preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["layers.1$"], damping= 0.007,train_method='rpc',is_packaged_send=True)
+    else:
+        preconditioner = None
+
     mgr = GeneralManager(experiment_name="mlp_mnist",dataset_name="FashionMNIST", model=model,
-                         train_com_method='rpc', is_2nd_order=True, epochs=25,batch_size=64,device=device,
+                         train_com_method='rpc', is_2nd_order=is_kfac, epochs=2,batch_size=64,device=device,
                          timestamp=timestamp,precondtioner=preconditioner)
 
     mgr.rpc_train_and_test()

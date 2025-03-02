@@ -4,11 +4,15 @@ import torch
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 class DataSendScheduler:
-    def __init__(self):
-        send_intervals = {'model_param': 27, 'factor': 15, 'eigen': 60}
+    def __init__(self, is_kfac:bool = True):
+        if is_kfac:
+            send_intervals = {'model_param': 27, 'factor': 15, 'eigen': 60}
+            self.next_send = {'model_param': 9, 'factor': 2, 'eigen': 5}
+        else:
+            send_intervals = {'model_param': 27}
+            self.next_send = {'model_param': 9}
         self.intervals = dict(send_intervals)
         self.start_interval = dict(send_intervals)
-        self.next_send = {'model_param': 9, 'factor': 2, 'eigen': 5}
         #self.next_send = {k: v for k, v in send_intervals.items()}
         self.priority_order = list(send_intervals.keys())
         self.current_iter = 0

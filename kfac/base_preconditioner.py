@@ -133,6 +133,7 @@ class BaseKFACPreconditioner:
         # steps on a per-layer basis so the key for the dict is the module
         # registered with KFAC
         self._mini_steps: dict[str, int] = defaultdict(int)
+        self.compute_inv_time_static = {}
 
         # Register hooks on all modules
         for module in self._layers:

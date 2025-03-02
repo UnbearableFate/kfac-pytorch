@@ -107,16 +107,6 @@ class KfacRPCLayer:
 
 class KFacRPCCommunicator:
     def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
-        self.eigen_tensor_packages = None
-        self.data_send_scheduler = DataSendScheduler()
-
-        self.writer = None
-
-        self.slow_tolerance_value = 150
-        self.max_election_period = 20
-
-        self.request_regression_record = set()
-
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
                 num_worker_threads=32,
@@ -133,10 +123,30 @@ class KFacRPCCommunicator:
             rpc_timeout=30,
         )
 
-        self.device = device
         rpc.init_rpc(name=f"rpc_{rank}", rank=rank, world_size=world_size,rpc_backend_options=options)
+        if rpc.is_available():
+            print(f"RPC Communicator initialized for rank {rank}")
+        else:
+            raise RuntimeError(f"RPC initialization failed for rank {rank}")
+        self.device  = device
         self.origin_world_size = world_size
         self.rank = rank
+        self.data_send_scheduler = DataSendScheduler(is_kfac= (preconditioner is not None))
+        self.writer = None
+        self.node_states: Dict[int, NodeState] = {}
+        for i in range(world_size):
+            self.node_states[i] = NodeState(i)
+        self.node_state_lock = threading.Lock()
+        self.init_logger(rank,log_dir)
+        self.model_avg_rpc = SwiftManager(rank, model, self)
+        self.com_statistic = CommunicationStatics()
+        global global_communicator
+        global_communicator = self
+
+        if preconditioner is None:
+            return
+        
+        self.request_regression_record = set()
         self.rpc_layers: Dict[str,KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
         self.assigned_layers = []
         self.candidate_participate_factor_computation_layers = []
@@ -156,21 +166,7 @@ class KFacRPCCommunicator:
         self.update_send_trigger()
         self.is_packged_send = preconditioner.is_packaged_send
 
-        self.node_states: Dict[int, NodeState] = {}
-        for i in range(world_size):
-            self.node_states[i] = NodeState(i)
-        self.node_state_lock = threading.Lock()
-
         # hyperparameters
-        self.necessary_ct = 1
-        self.load_inverse_max_loop = 3
-        if rpc.is_available():
-            print(f"RPC Communicator initialized for rank {rank}")
-        else:
-            raise RuntimeError(f"RPC initialization failed for rank {rank}")
-
-        self.init_logger(rank,log_dir)
-        self.model_avg_rpc = SwiftManager(rank, model, self)
         self.task_reassign_rpc = task_manager.RPCTaskManager(rpc_communicator=self, assignment=preconditioner._assignment)
 
         self.model_accuracy_statistic : Dict[int , Dict[str ,int]]= dict() # {epoch: (recv_ct ,correct_ct, total_ct)}
@@ -183,13 +179,7 @@ class KFacRPCCommunicator:
         self.time_cost_accumulation = 0
         self.loop_start_time = 0
 
-        self.shutdown_flag = False
-
-        global global_communicator
-        global_communicator = self
-
         self.gradient_computation_start = False
-        self.com_statistic = CommunicationStatics()
         self.package_sender = PackageSender(self)
 
     def update_send_trigger(self):
@@ -274,7 +264,8 @@ class KFacRPCCommunicator:
         log_txt = ""
         for node_rank, state in self.node_states.items():
             log_txt += f"{state}; "
-        log_txt += self.task_reassign_rpc.print_state()
+        if hasattr(self, "task_reassign_rpc"):
+            log_txt += self.task_reassign_rpc.print_state()
         logger.info(f"{log_txt} , {text}")
 
     def debug_print(self, text):
@@ -435,7 +426,6 @@ class KFacRPCCommunicator:
         self.current_participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
         self.update_send_trigger()
         self.update_assignment_callback = None
-        self.eigen_tensor_packages = None
 
     def get_world_size(self):
         return len(self.node_states.keys())
@@ -667,30 +657,6 @@ class KFacRPCCommunicator:
             self.model_avg_rpc.process_with_dynamic_weight()
             self.data_send_scheduler.update_next_send_time("model_param")
 
-    def send_rpc_test_result(self, correct_ct, total_ct, epoch):
-        for i in range(self.origin_world_size):
-            try:
-                rpc.rpc_async(
-                    to=rpc_work_name(i),
-                    func=recv_rpc_test_result,
-                    args=(correct_ct, total_ct, epoch)
-                )
-            except Exception as e:
-                print(f"Failed to send test result to 0: {e} from {self.rank}")
-
-    def wait_and_return_test_result(self, epoch):
-        wait_time = 0
-        while epoch not in self.model_accuracy_statistic or self.model_accuracy_statistic[epoch]['recv_ct'] < self.origin_world_size:
-            time.sleep(0.1)
-            wait_time += 1
-            if wait_time > 2:
-                break
-
-        if epoch in self.model_accuracy_statistic:
-            return self.model_accuracy_statistic[epoch]['correct_ct'] / self.model_accuracy_statistic[epoch]['total_ct']
-        else:
-            return 0
-
     def restart_sick_node(self): # call by sick nodes
         if self.node_states[self.rank].health == 2 and self.task_reassign_rpc.assignment_generation not in self.request_regression_record:
             self.task_reassign_rpc.resurrection_declaration()
@@ -711,20 +677,6 @@ class KFacRPCCommunicator:
 
         self.send_model_param_callback = None
 
-    def broadcast_shutdown(self):
-        if self.rank != self.task_reassign_rpc.leader_rank:
-            return
-        for i in range(self.origin_world_size):
-            if i == self.rank:
-                continue
-            try :
-                rpc.rpc_async(
-                    to=rpc_work_name(i),
-                    func=shutdown_notification,
-                    args=(self.rank,)
-                )
-            except Exception as e:
-                print(f"Failed to send shutdown to {i} from {self.rank}: {e}")
 
 global_communicator: KFacRPCCommunicator = None
 
@@ -823,31 +775,3 @@ def receive_eigen_tensor_package(from_rank,t, eigen_tensor_package):
             )
         except Exception as e:
             print(f"Failed to send eigen tensor to {target_rank} from {global_communicator.rank}: {e}")
-
-def recv_rpc_test_result(correct_ct, total_ct, epoch):
-    global global_communicator
-    if epoch not in global_communicator.model_accuracy_statistic:
-        global_communicator.model_accuracy_statistic[epoch] = {'recv_ct': 1, 'correct_ct': correct_ct, 'total_ct': total_ct}
-    else:
-        global_communicator.model_accuracy_statistic[epoch]['recv_ct'] +=1
-        global_communicator.model_accuracy_statistic[epoch]['correct_ct'] += correct_ct
-        global_communicator.model_accuracy_statistic[epoch]['total_ct'] += total_ct
-
-def shutdown_notification(from_rank):
-    global global_communicator
-    time.sleep(2)
-    if from_rank == global_communicator.task_reassign_rpc.leader_rank:
-        global_communicator.writer.close()
-        if rpc.is_available():
-            rpc.shutdown()
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-        sys.exit(1)
-    else:
-        time.sleep(5)
-        global_communicator.writer.close()
-        if rpc.is_available():
-            rpc.shutdown()
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-        sys.exit(2)

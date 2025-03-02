@@ -57,13 +57,15 @@ class GeneralManager:
         if is_2nd_order:
             assert precondtioner is not None
             self.preconditioner = precondtioner
-            if train_com_method == "rpc":
-                self.rpc_communicator:rpc_distributed.KFacRPCCommunicator = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
-                                                                                                                preconditioner=self.preconditioner, model=model,
-                                                                                                                share_file_path=SHARE_FILES_DIR, timestamp=timestamp,
-                                                                                                                log_dir = log_dir, device=device)
         else:
             self.preconditioner = None
+
+        if train_com_method == "rpc":
+                self.rpc_communicator:rpc_distributed.KFacRPCCommunicator \
+                = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
+                    preconditioner=self.preconditioner, model=model,
+                    share_file_path=SHARE_FILES_DIR, timestamp=timestamp,
+                    log_dir = log_dir, device=device)
 
         self.start_epoch = 0
         self.checkpoint_file_path = os.path.join(CHECK_POINT_PATH, experiment_name, f"{rank}.pth")
@@ -134,7 +136,10 @@ class GeneralManager:
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
 
         for i in range(self.start_epoch, self.epochs):
-            self.simple_rpc_train(epoch=i)
+            if self.preconditioner is None:
+                self.ad_sgd_train(epoch=i)
+            else:
+                self.ad_kfac_train(epoch=i)
             self.test_local(epoch=i)
             self.save_checkpoint(epoch=i)
 
@@ -151,7 +156,6 @@ class GeneralManager:
             dist.destroy_process_group()
 
     def train(self, epoch):
-        
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
@@ -192,8 +196,7 @@ class GeneralManager:
             self.writer.add_scalar('Total train time', self.train_total_time, epoch)
             self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]["lr"], epoch)
 
-    def simple_rpc_train(self, epoch):
-        
+    def ad_kfac_train(self, epoch):
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
@@ -253,12 +256,12 @@ class GeneralManager:
                 self.writer.add_scalar("Total train time", self.train_total_time, epoch)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
                 self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
-
-    def rpc_train(self, epoch):
-        start_time = time.time()
+    
+    def ad_sgd_train(self, epoch):
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
+        com = rpc_distributed.global_communicator
         with (tqdm(
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
@@ -266,68 +269,43 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                rpc_distributed.global_communicator.update_self_t()
-
-                """
-                if epoch > 0:
-                    fault_simulator.update_fault_status()
-                    if fault_simulator.is_fault():
-                        time.sleep(fault_simulator.fault_over_time - time.time())
-                    elif fault_simulator.recover_flg:
-                        rpc_distributed.global_communicator.task_reassign_rpc.resurrection_declaration()
-                        fault_simulator.recover_flg = False
-                """
-                
                 data = data.to(self.device)
                 target = target.to(self.device)
+                start_time = time.time()
+
+                rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
+                
                 output = self.model(data)
                 loss = self.loss_func(output, target)
-                loss.backward()
-
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
-                self.rpc_communicator.model_avg_rpc.broadcast_model()
-                self.rpc_communicator.model_avg_rpc.avg_model_with_neighbors()
+                loss.backward()
 
                 if self.preconditioner is not None:
                     self.preconditioner.step()
 
                 self.optimizer.step()
-                #self.scheduler.step()
-
-                if batch_idx % 50 == 0:
+                self.rpc_communicator.send_model_param()
+                    
+                if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
-
-                """
-                rpc_distributed.global_communicator.facotr_comput_lazy_wl_rebal()
                 
-                rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
-                self.rpc_communicator.task_reassign_rpc.electing_new_leader_loop()
-
-                if self.rpc_communicator.task_reassign_rpc.reassign_task_callback is not None:
-                    self.rpc_communicator.task_reassign_rpc.reassign_task_callback()
-                if self.rpc_communicator.update_assignment_callback is not None:
-                    self.rpc_communicator.update_assignment_callback()
-                if self.rpc_communicator.send_model_param_callback is not None:
-                    self.rpc_communicator.send_model_param_callback()
-                """
-
-                '''
-                if self.writer is not None and batch_idx % 30 == 0:
-                    process = psutil.Process(os.getpid())
-                    self.writer.add_scalar('Memory', process.memory_info().rss / 1024**3, (epoch+1)*batch_idx)
-                    allocated_memory = torch.cuda.memory_allocated(0)  # 0 表示 GPU 0
-                    cached_memory = torch.cuda.memory_reserved(0)  # 0 表示 GPU 0
-                    self.writer.add_scalar('Memory/GPU_Allocated', allocated_memory / 1024**3, (epoch+1)*batch_idx)
-                    self.writer.add_scalar('Memory/GPU_Cached', cached_memory / 1024**3, (epoch+1)*batch_idx)
-                '''
-
+                self.train_total_time += time.time() - start_time
                 t.update()
-            self.train_total_time += time.time() - start_time
+        
+        if hasattr(self, "scheduler"):
+                self.scheduler.step()
+        elif hasattr(self, "warmup_scheduler"):
+            if epoch < 5:
+                self.warmup_scheduler.step()
+            else:
+                self.decay_scheduler.step() 
+            
             if self.writer is not None:
-                self.writer.add_scalar('Iteration Variance', rpc_distributed.global_communicator.compute_iter_variance(), self.train_total_time)
+                self.writer.add_scalar("Total train time", self.train_total_time, epoch)
                 self.writer.add_scalar('Loss/train', loss.item(), epoch)
-                self.writer.add_scalar('Time/train',time.time() - start_time, epoch)
+                self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
+
 
     def test_all(self, epoch):
         self.model.eval()
@@ -355,70 +333,6 @@ class GeneralManager:
             self.writer.add_scalar('test_accuracy/train_time', accuracy, time_as_step)
             self.writer.add_scalar('test_accuracy/train_epoch', accuracy, epoch)
 
-    def test_all_top_1_and_top_n(self, epoch, top_n=3):
-        self.model.eval()
-        
-        # 初始化 Top-1 和 Top-N 精度的计数
-        correct_top_1 = 0
-        correct_top_n = 0
-        total = 0
-
-        with torch.no_grad():
-            for data, target in self.data_manager.test_loader:
-                data, target = data.to(self.device), target.to(self.device)
-                output = self.model(data)
-
-                # Top-1 精度：获取预测的最大值的索引
-                pred_top_1 = output.argmax(dim=1, keepdim=True)  # 获取最大值索引
-                correct_top_1 += pred_top_1.eq(target.view_as(pred_top_1)).sum().item()
-                
-                # Top-N 精度：获取前 top_n 个预测的索引
-                _, pred_top_n = output.topk(top_n, dim=1, largest=True, sorted=True)
-                
-                # 将 target 从 [batch_size] 形状扩展为 [batch_size, 1] 以便与 top_n 的预测比较
-                target_expanded = target.view(-1, 1)
-
-                # 检查前 top_n 个预测是否包含目标类别
-                correct_top_n += pred_top_n.eq(target_expanded).sum().item()
-
-                # 累加总样本数
-                total += target.size(0)
-
-        # 把 correct_top_1, correct_top_n 和 total 转换成 tensor 以便进行分布式计算
-        correct_total_tensor = torch.tensor([correct_top_1, correct_top_n, total]).to(self.device)
-
-        # 使用 dist.all_reduce 把所有节点的 correct_top_1, correct_top_n 和 total 累加到 rank 0 节点
-        dist.all_reduce(correct_total_tensor)
-
-        # 只在 rank 0 上计算最终的 Top-1 和 Top-N 精度并记录
-        if self.writer is not None and self.rank == 0:  # 假设 self.rank 存储了当前进程的 rank
-            correct_top_1_sum, correct_top_n_sum, total_sum = correct_total_tensor.unbind()
-            top_1_accuracy = correct_top_1_sum.item() / total_sum.item()
-            top_n_accuracy = correct_top_n_sum.item() / total_sum.item()
-            
-            # 记录 Top-1 和 Top-N 精度到 TensorBoard
-            time_as_step = round(self.train_total_time * 1000)  # 使用训练迭代次数作为 x 轴
-            self.writer.add_scalar('Top-1 Accuracy/test', top_1_accuracy, time_as_step)
-            self.writer.add_scalar(f'Top-{top_n} Accuracy/test', top_n_accuracy, time_as_step)
-
-    def test_by_rpc(self, epoch):
-        self.model.eval()
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for data, target in self.data_manager.test_loader:
-                data, target = data.to(self.device), target.to(self.device)
-                output = self.model(data)
-                pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-                correct += pred.eq(target.view_as(pred)).sum().item()
-                total += target.size(0)
-        rpc_distributed.global_communicator.send_rpc_test_result(correct, total, epoch)
-
-    def write_test_result_rpc(self):
-        for e in range(self.epochs):
-            accuracy = rpc_distributed.global_communicator.wait_and_return_test_result(e)
-            self.writer.add_scalar('Accuracy/test', accuracy, e)
-
     def test_local(self, epoch):
         self.model.eval()
         correct = 0
@@ -435,35 +349,6 @@ class GeneralManager:
         self.rpc_communicator.model_avg_rpc.set_acc(accuracy)
         self.writer.add_scalar('test_accuracy/train_time', accuracy, time_as_step)
         self.writer.add_scalar('test_accuracy/train_epoch', accuracy, epoch)
-
-    def test_local_top(self, epoch, topk=(1,)):  # 添加 topk 参数，支持多种 Top-N 精度
-        self.model.eval()
-        topk_correct = {k: 0 for k in topk}  # 初始化每个 Top-N 精度的正确计数
-        total = 0
-        with torch.no_grad():
-            for data, target in self.data_manager.test_loader:
-                data, target = data.to(self.device), target.to(self.device)
-                output = self.model(data)
-                
-                # 获取前 topk 个类别及其对应的索引
-                _, pred = output.topk(max(topk), dim=1, largest=True, sorted=True)  # pred 形状为 (batch_size, max(topk))
-                pred = pred.t()  # 转置使 pred 的形状为 (max(topk), batch_size)
-                
-                # target shape: (batch_size), pred shape: (max(topk), batch_size)
-                correct = pred.eq(target.view(1, -1).expand_as(pred))  # shape: (max(topk), batch_size)
-                
-                for k in topk:
-                    topk_correct[k] += correct[:k].reshape(-1).float().sum(0).item()  # 计算 Top-k 精度的正确数
-                
-                total += target.size(0)
-
-        # 计算每个 Top-k 精度
-        topk_accuracies = {f'Top-{k} Accuracy': topk_correct[k] / total for k in topk}
-        
-        # 将 Top-N 精度输出到日志
-        time_as_step = round(self.train_total_time * 1000)  # 使用训练time作为 x 轴
-        for k, acc in topk_accuracies.items():
-            self.writer.add_scalar(f'{k}/test', acc, time_as_step)
 
     def save_checkpoint(self, epoch):
         state = {
