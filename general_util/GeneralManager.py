@@ -285,6 +285,9 @@ class GeneralManager:
                     self.preconditioner.step()
 
                 self.optimizer.step()
+                if hasattr(self, "scheduler"):
+                    self.scheduler.step()
+
                 self.rpc_communicator.send_model_param()
                     
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
@@ -293,14 +296,6 @@ class GeneralManager:
                 self.train_total_time += time.time() - start_time
                 t.update()
         
-        if hasattr(self, "scheduler"):
-                self.scheduler.step()
-        elif hasattr(self, "warmup_scheduler"):
-            if epoch < 5:
-                self.warmup_scheduler.step()
-            else:
-                self.decay_scheduler.step() 
-            
         if self.writer is not None:
             self.writer.add_scalar("Total train time", self.train_total_time, epoch)
             self.writer.add_scalar('Loss/train', loss.item(), epoch)

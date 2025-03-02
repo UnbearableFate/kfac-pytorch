@@ -55,15 +55,17 @@ if __name__ == '__main__':
     is_kfac = not args.not_kfac
     
     if is_kfac:
+        print("Using KFAC")
         preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, damping=0.007,train_method='rpc',is_packaged_send=True)
     else:
+        print("Using SGD")
         preconditioner = None
 
     mgr = GeneralManager(dataset_name="CIFAR10", model=model,
                          sampler_func= None,
                          train_com_method='rpc',  is_2nd_order=is_kfac, epochs=65, device=device,
                          timestamp=timestamp,  precondtioner=preconditioner,
-                         transform_train=None, transform_test=None,experiment_name="ring_swift_resnet50",
+                         transform_train=None, transform_test=None,experiment_name="ring_swift_resnet50_",
                          recover=args.is_recover,batch_size=256)
 
     mgr.rpc_train_and_test()

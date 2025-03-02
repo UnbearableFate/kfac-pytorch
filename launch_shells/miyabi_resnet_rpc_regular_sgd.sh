@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#PBS -q regular-g
+#PBS -q debug-g
 #PBS -W group_list=xg24i002
 #PBS -l select=16:mpiprocs=1
 #PBS -l walltime=00:29:50
@@ -11,4 +11,4 @@ mpirun --mca mpi_abort_print_stack 1 \
  --report-bindings \
  /work/xg24i002/x10041/miniconda3/envs/py313/bin/python /work/xg24i002/x10041/kfac-pytorch/multi_node_resnet_cifar.py\
  --timestamp="$current_time" \
- --no-kfac
+ --not_kfac

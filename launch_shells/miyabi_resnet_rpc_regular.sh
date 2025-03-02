@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#PBS -q regular-g
+#PBS -q debug-g
 #PBS -W group_list=xg24i002
 #PBS -l select=16:mpiprocs=1
 #PBS -l walltime=00:29:50

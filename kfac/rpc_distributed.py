@@ -633,7 +633,7 @@ class KFacRPCCommunicator:
                 self.current_inverse_computation_layers.remove(layer_name)
                 self.debug_print(f"remove {layer_name} from inverse computation")
             """
-
+            return
         if late_than_local >= self.origin_world_size * 0.1 or forward_than_local <= 2: #math.ceil(self.world_size * 0.3): # local is quick, work more
             """
             if len(self.current_inverse_computation_layers) < len(self.assigned_layers):
