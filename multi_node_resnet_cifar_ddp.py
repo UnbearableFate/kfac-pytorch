@@ -8,38 +8,17 @@ from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
 from my_module.model_split import ModelSplitter
 from torchvision import transforms
-import logging
 import torch.distributed as dist
-import shutil
 from kfac.enums import ComputeMethod
-from general_util.consts import DATA_DIR, LOG_DIR, SHARE_FILES_DIR
+from general_util.consts import DATA_DIR, LOG_DIR, SHARE_FILES_DIR ,ompi_world_size, ompi_world_rank, parse_args
 
+import examples.vision.cifar_resnet as models
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-gpu = torch.device("cuda:0")
-today = datetime.date.today().strftime('%m%d')
-pg_share_file = "pg_share"
-rpc_share_fie = "rpc_share"
-
-ompi_world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', -1))
-ompi_world_rank = int(os.getenv('OMPI_COMM_WORLD_RANK', -1))
-
-from mpi4py import MPI
-if ompi_world_size == -1 or ompi_world_rank == -1:
-    ompi_world_rank = MPI.COMM_WORLD.Get_rank()
-    ompi_world_size = MPI.COMM_WORLD.Get_size()
-
-if ompi_world_rank == 0:
-    logging.basicConfig(level=logging.NOTSET)
-
 if __name__ == '__main__':
-    print(f"Start! at {datetime.datetime.now()}")
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    parser = argparse.ArgumentParser(description="experiment script")
-    parser.add_argument('--timestamp', type=str, default=timestamp)
-    args = parser.parse_args()
+    args = parse_args()
     timestamp = args.timestamp
-    print(f"timestamp: {timestamp}")
+    
     num_devices = torch.cuda.device_count()
     print(f"Number of CUDA Devices: {num_devices} at rank {ompi_world_rank} at hostname: {os.uname().nodename}")
 

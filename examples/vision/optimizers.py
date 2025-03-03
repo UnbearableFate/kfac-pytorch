@@ -25,7 +25,8 @@ def get_optimizer(
     ],
 ]:
     """Get optimizer, preconditioner, and scheduler."""
-    use_kfac = True if args.kfac_inv_update_steps > 0 else False
+    use_kfac = not args.not_kfac 
+    #use_kfac = True if args.kfac_inv_update_steps > 0 else False
 
     optimizer = optim.SGD(
         model.parameters(),

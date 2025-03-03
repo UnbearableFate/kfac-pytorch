@@ -1,30 +1,31 @@
 import math
-import random
 import time
 import torch
-import datetime
 from tqdm import tqdm
 from general_util.data_preparation import DataPreparer
 import torch.distributed as dist
-import logging
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 import os
-import kfac
-from general_util.tensor_funsion import fuse_tensors, fuse_model_paramenters, unfuse_tensors_to_model
 import kfac.rpc_distributed as rpc_distributed
 from  kfac.rpc_util.fault_sim import fault_simulator
-from kfac.rpc_util.common_util import get_model_total_l2_norm
 from general_util.consts import CHECK_POINT_PATH, DATA_DIR, LOG_DIR, SHARE_FILES_DIR
-from general_util.lr_schduler import get_scheduler ,WarmupScheduler
+from examples.vision.optimizers import get_optimizer
+
 class GeneralManager:
-    def __init__(self,experiment_name:str, dataset_name, model, 
-                 sampler_func = None, train_com_method="ddp", is_2nd_order =True,
-                   epochs=100, batch_size =64, device=torch.device("cuda:0"), timestamp="",
-                   transform_train=None, transform_test=None, precondtioner=None ,recover = False):
-        self.experiment_name_detail = None
+    def __init__(self, model, sampler_func = None,
+                 transform_train=None, transform_test=None,
+                 device=None,
+                 args=None):
+        
+        experiment_name = args.experiment_name
+        dataset_name = args.dataset_name
+        train_com_method = args.train_com_method
+        epochs = args.epochs
+        batch_size = args.batch_size
+        recover = args.recover
+        timestamp = args.timestamp
         self.writer = None
-        batch_size=batch_size
         rank = dist.get_rank()
         world_size = dist.get_world_size()
         model_name = type(model).__name__
@@ -48,18 +49,19 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=model.parameters(),lr=0.0001, momentum = 0.9) #torch.optim.Adam(model.parameters())
-        #self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs)
-        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=0.0008, epochs = epochs, steps_per_epoch = len(self.data_manager.train_loader))
-        #self.warmup_scheduler = WarmupScheduler(self.optimizer, warmup_epochs=5, base_lr=self.optimizer.param_groups[0]['lr'])
-        #self.decay_scheduler  = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=epochs-5)
-        #self.optimizer = torch.optim.Adam(model.parameters())
+        
+        args.base_lr = (
+            args.base_lr * dist.get_world_size() * args.batches_per_allreduce
+        )
 
-        if is_2nd_order:
-            assert precondtioner is not None
-            self.preconditioner = precondtioner
-        else:
-            self.preconditioner = None
+        (
+            self.optimizer,
+            self.preconditioner,
+            (self.lr_scheduler, self.kfac_scheduler),
+        ) = get_optimizer(
+            model,
+            args,
+        )
 
         if train_com_method == "rpc":
                 self.rpc_communicator:rpc_distributed.KFacRPCCommunicator \
@@ -107,28 +109,28 @@ class GeneralManager:
 
     def train_and_test(self):
         writer_path = self.log_dir
-        if self.experiment_name_detail is not None:
-            writer_path = os.path.join(writer_path,self.experiment_name_detail)
         writer_name = os.path.join(writer_path,str(self.rank))
         self.writer = SummaryWriter(
             log_dir=writer_name)
 
-        for i in range(self.start_epoch, self.epochs):
+        for i in range(self.start_epoch+1, self.epochs+1):
             self.train(epoch=i)
+            self.lr_scheduler.step()
+            if self.kfac_scheduler is not None:
+                self.kfac_scheduler.step(step=i)
             self.test_all(epoch=i)
             self.save_checkpoint(epoch=i)
-            
+            """
             train_total_time = torch.tensor(self.train_total_time, dtype=torch.int, device="cuda")  # 或者"cpu"
             dist.all_reduce(train_total_time)
             if train_total_time.item() / self.world_size > 950:
                 break
+            """
 
         self.writer.close()
 
     def rpc_train_and_test(self):
         writer_path = self.log_dir
-        if self.experiment_name_detail is not None:
-            writer_path = os.path.join(writer_path, self.experiment_name_detail)
         writer_name = os.path.join(writer_path, str(self.rank))
         self.writer = SummaryWriter(
             log_dir=writer_name)
@@ -182,15 +184,9 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
-                #self.scheduler.step()
                 t.update()
                 self.train_total_time += time.time() - start_time
         
-        if hasattr(self, "warmup_scheduler"):
-            if epoch < 5:
-                self.warmup_scheduler.step()
-            else:
-                self.decay_scheduler.step()
         if self.writer is not None:
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
             self.writer.add_scalar('Total train time', self.train_total_time, epoch)
