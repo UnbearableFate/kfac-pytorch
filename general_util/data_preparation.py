@@ -116,9 +116,9 @@ class DataPreparer:
 
         if sampler is None:
             if train_com_method == 'rpc':
-                self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7) #None
+                self.train_sampler = None #DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7) #None
             else:
-                self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7)
+                self.train_sampler = None #DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7)
         else:
             self.train_sampler = sampler(self.train_dataset,world_size,rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
 

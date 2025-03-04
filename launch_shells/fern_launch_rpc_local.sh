@@ -8,7 +8,8 @@ mpirun -np 3 \
  --model="resnet20" \
  --train-com-method="rpc" \
  --batch-size=256 \
- --base-lr=0.2 \
- --epochs=150 \
- --warmup-epochs=10 \
- --lr-decay 40 80 120 140
+ --base-lr=0.001 \
+ --epochs=60 \
+ --warmup-epochs=5 \
+ --optimizer-type="adamw" \
+ --lr-decay 20 40 55

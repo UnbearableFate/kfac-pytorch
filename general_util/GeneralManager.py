@@ -49,10 +49,6 @@ class GeneralManager:
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
         self.loss_func = nn.CrossEntropyLoss()
-        
-        args.base_lr = (
-            args.base_lr * dist.get_world_size() * args.batches_per_allreduce
-        )
 
         (
             self.optimizer,
@@ -61,7 +57,10 @@ class GeneralManager:
         ) = get_optimizer(
             model,
             args,
+            total_steps=epochs * len(self.data_manager.train_loader),
         )
+        self.lr_scheduler_type = args.lr_scheduler_type
+        self.optimizer_type = args.optimizer_type
 
         if train_com_method == "rpc":
                 self.rpc_communicator:rpc_distributed.KFacRPCCommunicator \
@@ -106,6 +105,10 @@ class GeneralManager:
 
         if fault_simulator is not None:
             fault_simulator.train_total_time_cb = self.get_total_training_time
+        
+        if rank == 0:
+            print(f"Model: {model_name}, Dataset: {dataset_name}, Experiment: {experiment_name}, Epochs: {epochs}, Batch size: {batch_size}, Recover: {recover}, Timestamp: {timestamp}")
+            print(f"Optimizer: {self.optimizer_type}, LR Scheduler: {self.lr_scheduler_type}, Train Communication Method: {train_com_method}")
 
     def train_and_test(self):
         writer_path = self.log_dir
@@ -115,7 +118,8 @@ class GeneralManager:
 
         for i in range(self.start_epoch+1, self.epochs+1):
             self.train(epoch=i)
-            self.lr_scheduler.step()
+            if self.lr_scheduler_type == "multi_step":
+                self.lr_scheduler.step()
             if self.kfac_scheduler is not None:
                 self.kfac_scheduler.step(step=i)
             self.test_all(epoch=i)
@@ -143,6 +147,8 @@ class GeneralManager:
                 self.ad_sgd_train(epoch=i)
             else:
                 self.ad_kfac_train(epoch=i)
+            if self.lr_scheduler_type == "multi_step":
+                self.lr_scheduler.step()
             self.test_local(epoch=i)
             self.save_checkpoint(epoch=i)
 
@@ -184,6 +190,8 @@ class GeneralManager:
                 if self.preconditioner is not None:
                     self.preconditioner.step()
                 self.optimizer.step()
+                if self.lr_scheduler_type == "one_cycle":
+                    self.lr_scheduler.step()
                 t.update()
                 self.train_total_time += time.time() - start_time
         
@@ -220,8 +228,8 @@ class GeneralManager:
                     self.preconditioner.step()
 
                 self.optimizer.step()
-                if hasattr(self, "scheduler"):
-                    self.scheduler.step()
+                if self.lr_scheduler_type == "one_cycle":
+                    self.lr_scheduler.step()
                 self.rpc_communicator.send_model_param()
                 
                 if com.current_t() % 30 == 29:
@@ -242,12 +250,6 @@ class GeneralManager:
                 self.train_total_time += time.time() - start_time
                 t.update()
         
-        if hasattr(self, "warmup_scheduler"):
-            if epoch < 5:
-                self.warmup_scheduler.step()
-            else:
-                self.decay_scheduler.step()
-            
         if self.writer is not None:
             self.writer.add_scalar("Total train time", self.train_total_time, epoch)
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
@@ -281,8 +283,8 @@ class GeneralManager:
                     self.preconditioner.step()
 
                 self.optimizer.step()
-                if hasattr(self, "scheduler"):
-                    self.scheduler.step()
+                if self.lr_scheduler_type == "one_cycle":
+                    self.lr_scheduler.step() 
 
                 self.rpc_communicator.send_model_param()
                     

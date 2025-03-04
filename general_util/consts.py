@@ -328,6 +328,20 @@ def parse_args() -> argparse.Namespace:
         help='communication method for training',
     )
 
+    parser.add_argument(
+        '--lr-scheduler-type',
+        type=str,
+        default="multi_step",
+        help='lr scheduler type',
+    )
+
+    parser.add_argument(
+        '--optimizer-type',
+        type=str,
+        default="sgd",
+        help='optimizer type , sgd or adamw',
+    )
+
     args = parser.parse_args()
     if 'LOCAL_RANK' in os.environ:
         args.local_rank = int(os.environ['LOCAL_RANK'])

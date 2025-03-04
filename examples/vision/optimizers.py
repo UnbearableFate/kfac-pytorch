@@ -16,6 +16,7 @@ from examples.utils import create_lr_schedule
 def get_optimizer(
     model: torch.nn.Module,
     args: argparse.Namespace,
+    total_steps: int = 0,
 ) -> tuple[
     optim.Optimizer,
     kfac.preconditioner.KFACPreconditioner | None,
@@ -28,18 +29,36 @@ def get_optimizer(
     use_kfac = not args.not_kfac 
     #use_kfac = True if args.kfac_inv_update_steps > 0 else False
 
-    optimizer = optim.SGD(
-        model.parameters(),
-        lr=args.base_lr,
-        momentum=args.momentum,
-        weight_decay=args.weight_decay,
-    )
-    lrs = create_lr_schedule(
+    if args.optimizer_type == 'sgd':
+        args.base_lr = (
+            args.base_lr * dist.get_world_size() * args.batches_per_allreduce
+        )
+        optimizer = optim.SGD(
+            model.parameters(),
+            lr=args.base_lr,
+            momentum=args.momentum,
+            weight_decay=args.weight_decay,
+        )
+    elif args.optimizer_type == 'adamw':
+        optimizer = optim.AdamW(
+            model.parameters(),
+            lr=args.base_lr,
+        )
+    
+    lr_scheduler = None
+    if args.lr_scheduler_type == 'multi_step':
+        lrs = create_lr_schedule(
         dist.get_world_size(),
         args.warmup_epochs,
         args.lr_decay,
-    )
-    lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lrs)
+        )
+        lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lrs)
+    elif args.lr_scheduler_type == "one_cycle":
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=args.base_lr,
+            total_steps=total_steps,
+        )
 
     grad_worker_fraction: kfac.enums.DistributedStrategy | float
     if args.kfac_strategy == 'comm-opt':
