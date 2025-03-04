@@ -51,13 +51,18 @@ if __name__ == '__main__':
         dist.barrier()
 
     device = torch.device(f'cuda:0')
-    model = models.get_model(args.model)
+    #model = models.get_model(args.model)
+    model = ResNetForCIFAR10(layers=34)
     model = model.to(device)
     
     if args.train_com_method == 'ddp':
         model = DDP(model)
 
     mgr = GeneralManager(model=model,device=device, args=args)
-    mgr.train_and_test()
+    if args.train_com_method == 'ddp':
+        mgr.train_and_test()
+    else:
+        mgr.rpc_train_and_test()
+
     print(f"Done! at {datetime.datetime.now()}")
     exit(0)

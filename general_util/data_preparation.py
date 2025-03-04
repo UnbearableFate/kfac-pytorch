@@ -128,10 +128,10 @@ class DataPreparer:
             self.test_sampler = None
         num_workers = 2 if train_com_method == 'ddp' else 0
         self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=(self.train_sampler is None),
-                                       sampler=self.train_sampler, num_workers=num_workers, persistent_workers =False ,pin_memory=True)
+                                       sampler=self.train_sampler, num_workers=2, persistent_workers =True,pin_memory=True, prefetch_factor=2)
         self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False,
                                       sampler=self.test_sampler,
-                                      num_workers=2, persistent_workers=False ,pin_memory=True)
+                                      num_workers=2, persistent_workers=True,pin_memory=True)
 
     def set_epoch(self,epoch):
         if self.train_sampler is not None and hasattr(self.train_sampler,"set_epoch"):

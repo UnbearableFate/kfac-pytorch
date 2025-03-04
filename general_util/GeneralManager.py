@@ -150,7 +150,7 @@ class GeneralManager:
             if self.lr_scheduler_type == "multi_step":
                 self.lr_scheduler.step()
             self.test_local(epoch=i)
-            self.save_checkpoint(epoch=i)
+            #self.save_checkpoint(epoch=i)
 
         self.writer.close()
         print(f"Rank {self.rank} : total train time: {self.train_total_time}")

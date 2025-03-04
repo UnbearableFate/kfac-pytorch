@@ -58,6 +58,7 @@ def get_optimizer(
             optimizer,
             max_lr=args.base_lr,
             total_steps=total_steps,
+            pct_start=0.2
         )
 
     grad_worker_fraction: kfac.enums.DistributedStrategy | float
@@ -90,6 +91,8 @@ def get_optimizer(
             grad_worker_fraction=grad_worker_fraction,
             grad_scaler=args.grad_scaler if 'grad_scaler' in args else None,
             skip_layers=args.kfac_skip_layers,
+            train_method=args.train_com_method,
+            is_packaged_send=True
         )
 
         def get_lambda(
