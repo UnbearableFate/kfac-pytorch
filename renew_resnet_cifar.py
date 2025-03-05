@@ -6,9 +6,10 @@ from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
 from general_util.GeneralManager import GeneralManager
 import torch.distributed as dist
 from general_util.consts import DATA_DIR, LOG_DIR, SHARE_FILES_DIR ,ompi_world_size, ompi_world_rank, parse_args
-
+from torch.distributed import rpc
 import examples.vision.cifar_resnet as models
 from torch.nn.parallel import DistributedDataParallel as DDP
+import time
 
 import logging
 
@@ -22,7 +23,7 @@ if __name__ == '__main__':
     num_devices = torch.cuda.device_count()
     print(f"Number of CUDA Devices: {num_devices} at rank {ompi_world_rank} at hostname: {os.uname().nodename}")
 
-    timeout = datetime.timedelta(seconds=120)
+    timeout = datetime.timedelta(seconds=60)
 
     if args.train_com_method == 'ddp':
         backend = 'nccl'
@@ -52,17 +53,22 @@ if __name__ == '__main__':
 
     device = torch.device(f'cuda:0')
     #model = models.get_model(args.model)
-    model = ResNetForCIFAR10(layers=34)
+    model = ResNetForCIFAR10(layers=18)
     model = model.to(device)
     
     if args.train_com_method == 'ddp':
         model = DDP(model)
-
+    start_time = time.time() 
     mgr = GeneralManager(model=model,device=device, args=args)
     if args.train_com_method == 'ddp':
         mgr.train_and_test()
     else:
         mgr.rpc_train_and_test()
-
+    
+    mgr.rpc_communicator.debug_print(f"totol time: {time.time()-start_time}")
+    dist.barrier()
+    if args.train_com_method == 'rpc':
+        rpc.shutdown()
+    dist.destroy_process_group()
     print(f"Done! at {datetime.datetime.now()}")
     exit(0)

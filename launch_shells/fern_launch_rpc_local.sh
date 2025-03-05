@@ -9,7 +9,7 @@ mpirun -np 3 \
  --train-com-method="rpc" \
  --batch-size=256 \
  --base-lr=0.001 \
- --epochs=2 \
+ --epochs=1 \
  --warmup-epochs=5 \
  --optimizer-type="adamw" \
  --lr-decay 20 40 55

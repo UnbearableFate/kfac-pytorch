@@ -117,7 +117,11 @@ class GeneralManager:
             log_dir=writer_name)
 
         for i in range(self.start_epoch+1, self.epochs+1):
+            start_time = time.time()
             self.train(epoch=i)
+            self.train_total_time += time.time() - start_time
+            if self.writer is not None:
+                self.writer.add_scalar("Total train time", self.train_total_time) 
             if self.lr_scheduler_type == "multi_step":
                 self.lr_scheduler.step()
             if self.kfac_scheduler is not None:
@@ -143,10 +147,14 @@ class GeneralManager:
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
 
         for i in range(self.start_epoch, self.epochs):
+            start_time = time.time()
             if self.preconditioner is None:
                 self.ad_sgd_train(epoch=i)
             else:
                 self.ad_kfac_train(epoch=i)
+            self.train_total_time += time.time() - start_time
+            if self.writer is not None:
+                self.writer.add_scalar("Total train time", self.train_total_time)
             if self.lr_scheduler_type == "multi_step":
                 self.lr_scheduler.step()
             self.test_local(epoch=i)
@@ -156,7 +164,6 @@ class GeneralManager:
         print(f"Rank {self.rank} : total train time: {self.train_total_time}")
         print(f"Rank {self.rank} : {self.rpc_communicator.com_statistic} at iteration {self.rpc_communicator.current_t()}")
         print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_total_time}")
-        dist.barrier()
 
     def close_all(self):
         if rpc_distributed.rpc.is_available():
@@ -177,7 +184,6 @@ class GeneralManager:
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.to(self.device)
                 target = target.to(self.device)
-                start_time = time.time()
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = self.loss_func(output, target)
@@ -193,11 +199,9 @@ class GeneralManager:
                 if self.lr_scheduler_type == "one_cycle":
                     self.lr_scheduler.step()
                 t.update()
-                self.train_total_time += time.time() - start_time
         
         if self.writer is not None:
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
-            self.writer.add_scalar('Total train time', self.train_total_time, epoch)
             self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]["lr"], epoch)
 
     def ad_kfac_train(self, epoch):
@@ -214,7 +218,6 @@ class GeneralManager:
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.to(self.device)
                 target = target.to(self.device)
-                start_time = time.time()
 
                 rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
@@ -246,12 +249,9 @@ class GeneralManager:
                     
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
-                
-                self.train_total_time += time.time() - start_time
+
                 t.update()
-        
         if self.writer is not None:
-            self.writer.add_scalar("Total train time", self.train_total_time, epoch)
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
             self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
     

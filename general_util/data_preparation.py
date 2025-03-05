@@ -126,7 +126,6 @@ class DataPreparer:
             self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
         else:
             self.test_sampler = None
-        num_workers = 2 if train_com_method == 'ddp' else 0
         self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=(self.train_sampler is None),
                                        sampler=self.train_sampler, num_workers=2, persistent_workers =True,pin_memory=True, prefetch_factor=2)
         self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False,
