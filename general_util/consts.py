@@ -108,9 +108,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--model',
         type=str,
-        default='resnet32',
-        help='ResNet model to use [20, 32, 56]',
+        default='resnet',
+        help='ResNet model',
     )
+
+    parser.add_argument(
+        '--layers',
+        type=int,
+        default=34,
+        help='number of layers in ResNet (default: 18)',
+    )
+
     parser.add_argument(
         '--batch-size',
         type=int,

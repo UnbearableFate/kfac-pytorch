@@ -1,16 +1,12 @@
 import torch
-from sympy.core.random import random
 from torch.distributed import rpc
 from typing import TYPE_CHECKING
-from mpi4py import MPI
 from kfac.rpc_util.GraphConstruct import exponential_topology_sources,exponential_topology_targets
-from kfac.rpc_util.common_util import flatten_tensor2model, compute_l2_norm
-import random
-from kfac.adsgds.common import ModelStore, rpc_work_name,RootModelAvgRPCCommunicator , compute_recv_weight_by_loss
-import torch.distributed as dist
-import time
-from torch.nn.utils import parameters_to_vector, vector_to_parameters
+from kfac.adsgds.common import ModelStore, rpc_work_name,RootModelAvgRPCCommunicator 
+from torch.nn.utils import vector_to_parameters
 from typing import Dict
+from scipy.special import expit
+from general_util.consts import extreme_threshold
 
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
@@ -50,13 +46,69 @@ class ExpTopoSwiftManager(RootModelAvgRPCCommunicator):
 
         with torch.no_grad() and self.local_model_store.lock:
             vector_to_parameters(result, self.model.parameters())
+
+    def update_dynamic_weight(self,aggregating_node_list):
+        sum_of_weight = 0
+        self.local_model_store.dynamic_weight  = 1/ self.local_model_store.loss_value
+        sum_of_weight += self.local_model_store.dynamic_weight
+
+        for rank in aggregating_node_list:
+            neighbor_store = self.neighbor_model_buffers[rank]
+            self.neighbor_model_buffers[rank].dynamic_weight = expit((neighbor_store.term - self.local_model_store.term)/self.local_model_store.term) * (1/ self.neighbor_model_buffers[rank].loss_value)
+            sum_of_weight += self.neighbor_model_buffers[rank].dynamic_weight
+        
+        self.local_model_store.dynamic_weight /= sum_of_weight
+        for rank in aggregating_node_list:
+            self.neighbor_model_buffers[rank].dynamic_weight /= sum_of_weight
+
+    def select_aggregating_node(self):
+        aggregating_node_list = []
+        for rank,neighbor_node in self.neighbor_model_buffers.items():
+            if (neighbor_node.loss_value != 0
+                and neighbor_node.has_aggregated == False
+                and self.local_model_store.term - neighbor_node.term  < extreme_threshold
+                and neighbor_node.loss_value / self.local_model_store.loss_value < 2):
+                aggregating_node_list.append(rank)
+        return aggregating_node_list 
     
+    def process_with_dynamic_weight(self):
+        self.update_local_flat_model()
+        node_states = self.rpc_communicator.get_node_states()
+        result = self.local_model_store.flatten_tensor.clone()
+        for neighbor in self.targets:
+            work = rpc.rpc_async(
+                to=rpc_work_name(neighbor),
+                func= recv_model_param,
+                args=(*self.local_model_store.getData(), self.rank , node_states)
+            )
+
+        for neighbor_store in self.neighbor_model_buffers.values():
+            if neighbor_store.loss_value == 0:
+                return
+            
+        aggregating_node_list = self.select_aggregating_node()
+        self.update_dynamic_weight(aggregating_node_list)
+        log_info = f"aggr: {aggregating_node_list} ,weight: {self.local_model_store.dynamic_weight}, "
+        result.mul_(self.local_model_store.dynamic_weight)
+
+        for rank in aggregating_node_list:
+            neighbor_store = self.neighbor_model_buffers[rank]
+            with neighbor_store.lock:
+                result.add_(neighbor_store.flatten_tensor, alpha=neighbor_store.dynamic_weight)
+                neighbor_store.has_aggregated = True
+                log_info += f"{neighbor_store.dynamic_weight} "
+
+        with torch.no_grad() and self.local_model_store.lock:
+            vector_to_parameters(result, self.model.parameters())
+
+        self.rpc_communicator.debug_print(f"model avg process done. {log_info} ,memeory usage is {self.rpc_communicator.get_memory_usage_percent()}")
+        self.rpc_communicator.com_statistic.add_send_stat("model_param", len(self.targets)) 
 
 model_avg_rpc_communicator: ExpTopoSwiftManager
 
-def recv_model_param(data, term, loss_value,from_rank):
+def recv_model_param(data, term, loss_value,from_rank,from_node_states):
     global model_avg_rpc_communicator
+    model_avg_rpc_communicator.rpc_communicator.update_node_states(from_node_states)
     if from_rank not in model_avg_rpc_communicator.neighbor_model_buffers:
-        print(f"Error: from_rank {from_rank} not in neighbor_model_buffers")
         return None
     model_avg_rpc_communicator.neighbor_model_buffers[from_rank].setDataWithLock(data, term, loss_value)

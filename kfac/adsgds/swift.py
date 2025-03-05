@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
 
 class SwiftManager(RootModelAvgRPCCommunicator):
-    def __init__(self, rank: int, model: torch.nn.Module, rpc_communicator: 'KFacRPCCommunicator'):
+    def __init__(self, rank: int, model: torch.nn.Module, rpc_communicator: 'KFacRPCCommunicator',type = "swift"):
         super().__init__(rank, model, rpc_communicator)
         self.graph = GraphConstruct.GraphConstruct(rank,self.origin_world_size, MPI.COMM_WORLD, 'ring', 'swift', p = 0.15, num_c=8)
         self.local_model_store.weight = 1 - sum(self.graph.neighbor_weights)

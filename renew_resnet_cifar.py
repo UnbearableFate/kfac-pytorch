@@ -51,8 +51,11 @@ if __name__ == '__main__':
             )
 
     device = torch.device(f'cuda:0')
-    #model = models.get_model(args.model)
-    model = ResNetForCIFAR10(layers=101)
+    if args.model == 'resnet':
+        model = ResNetForCIFAR10(layers=args.layers)
+    elif args.model == 'mlp':
+        model = MLP(num_hidden_layers=args.layers)
+
     model = model.to(device)
     
     if args.train_com_method == 'ddp':

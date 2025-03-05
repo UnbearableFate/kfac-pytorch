@@ -141,7 +141,7 @@ class KFacRPCCommunicator:
             self.node_states[i] = NodeState(i)
         self.node_state_lock = threading.Lock()
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = SwiftManager(rank, model, self)
+        self.model_avg_rpc = ExpTopoSwiftManager(rank, model, self)
         self.com_statistic = CommunicationStatics()
         global global_communicator
         global_communicator = self
