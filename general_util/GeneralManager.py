@@ -232,7 +232,7 @@ class GeneralManager:
                     self.lr_scheduler.step()
                 self.rpc_communicator.send_model_param()
                 
-                if com.current_t() % 30 == 29:
+                if com.current_t() % 98 == 97:
                     rpc_distributed.global_communicator.factor_computation_lazy_rebalance()
                     #rpc_distributed.global_communicator.task_reassign_rpc.electing_new_leader_loop()
                 

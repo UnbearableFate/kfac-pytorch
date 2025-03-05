@@ -521,9 +521,7 @@ class BaseKFACPreconditioner:
             layer.save_layer_input(input_) 
             with com.get_layer_lock(name, 'A'):
                 layer.update_a_factor(alpha=self.factor_decay)
-                com.factor_computation_ct += 1
                 is_computed = True
-                com.debug_print(f"Computed {name} A factor, shape: {layer.get_factor('A').shape}")
             
         if is_computed:
             com.send_kfac_factor_action(name, 'A')
@@ -599,7 +597,6 @@ class BaseKFACPreconditioner:
             with kfac_rpc.global_communicator.get_layer_lock(name, 'G'):
                 layer.update_g_factor(alpha=self.factor_decay)
                 is_computed = True
-                com.debug_print(f"Computed {name} G factor, shape: {layer.get_factor('G').shape}")
         
         if is_computed:
             com.send_kfac_factor_action(name, 'G')

@@ -15,7 +15,6 @@ mpirun --mca mpi_abort_print_stack 1 \
  --train-com-method="rpc" \
  --batch-size=256 \
  --base-lr=0.001 \
- --epochs=120 \
+ --epochs=60 \
  --optimizer-type="adamw" \
  --lr-scheduler-type="one_cycle" \
- --not-kfac
