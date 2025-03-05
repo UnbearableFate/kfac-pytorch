@@ -106,7 +106,11 @@ class KfacRPCLayer:
             self.recv_handled_g_version = t
 
 class KFacRPCCommunicator:
-    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,model, share_file_path ="", timestamp="" ,log_dir = "" , device = torch.device("cpu")):
+    def __init__(self, world_size, rank, preconditioner:'BaseKFACPreconditioner' ,
+                 model, share_file_path ="", timestamp="" ,
+                 log_dir = "" , device = torch.device("cpu"),steps_per_epoch = 0):
+        self.steps_per_epoch = steps_per_epoch
+        self.is_packaged_send = preconditioner.is_packaged_send
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
                 num_worker_threads=32,
@@ -201,8 +205,7 @@ class KFacRPCCommunicator:
                 target_set.add(handler_rank)
                 layer.send_trigger["G"] = True
                 log_info += f"G -> {handler_rank} @ {name} "
-        if self.rank == 0:
-            print(log_info)
+        print(f"{log_info} at {self.rank}")
 
     def compute_iter_variance(self):
     # 提取所有节点的iter值
@@ -676,6 +679,19 @@ class KFacRPCCommunicator:
             self.model_avg_rpc.send_model_param_to_buffer(node_rank, layer_name_list)
 
         self.send_model_param_callback = None
+    
+    def send_kfac_factor_action(self ,name, factor_type):
+        if (self.data_send_scheduler.can_send("factor")):
+            target_rank = self.rpc_layers[name].assigned_worker[factor_type]
+            if target_rank == self.rank:
+                return
+            if not self.is_packaged_send:
+                self.send_kfac_factor(name, factor_type)
+            else:
+                self.async_factor_send_register(name, factor_type)
+                if self.rpc_layers[name].send_trigger[factor_type]:
+                    self.send_data_package(target_rank)
+                    self.debug_print(f"send {factor_type} to {target_rank}")
 
 
 global_communicator: KFacRPCCommunicator = None

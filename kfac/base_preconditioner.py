@@ -141,8 +141,8 @@ class BaseKFACPreconditioner:
                 module.register_forward_pre_hook(self._save_input)
                 module.register_full_backward_hook(self._save_grad_output)
             elif train_method == "rpc":
-                module.register_forward_pre_hook(self._save_input_async)
-                module.register_full_backward_hook(self._save_grad_output_async)
+                module.register_forward_pre_hook(self._save_input_async_super_lazy)
+                module.register_full_backward_hook(self._save_grad_output_async_super_lazy)
 
     def __repr__(self) -> str:
         """Return representation of the preconditioner instance."""
@@ -505,6 +505,28 @@ class BaseKFACPreconditioner:
                 if kfac_rpc.global_communicator.rpc_layers[name].send_trigger["A"]:
                     
                     kfac_rpc.global_communicator.send_data_package(target_rank)
+    @torch.no_grad()
+    def _save_input_async_super_lazy(
+        self,
+        module: torch.nn.Module,
+        input_: list[torch.Tensor],
+    ) -> None:
+        """Hook for saving the input during the forward pass of a module."""
+        if not module.training :
+            return
+        name, layer = self._layers[module]
+        com = kfac_rpc.global_communicator
+        is_computed = False
+        if self.steps <= com.steps_per_epoch or (name in com.assigned_layers and com.data_send_scheduler.can_send("factor")):
+            layer.save_layer_input(input_) 
+            with com.get_layer_lock(name, 'A'):
+                layer.update_a_factor(alpha=self.factor_decay)
+                com.factor_computation_ct += 1
+                is_computed = True
+                com.debug_print(f"Computed {name} A factor, shape: {layer.get_factor('A').shape}")
+            
+        if is_computed:
+            com.send_kfac_factor_action(name, 'A')
 
     @torch.no_grad()
     def _save_grad_output(
@@ -556,3 +578,28 @@ class BaseKFACPreconditioner:
                 kfac_rpc.global_communicator.async_factor_send_register(name, 'G')
                 if rpc_layer.send_trigger["G"]:
                     kfac_rpc.global_communicator.send_data_package(target_rank)
+
+    @torch.no_grad()
+    def _save_grad_output_async_super_lazy(
+        self,
+        module: torch.nn.Module,
+        grad_input: tuple[torch.Tensor, ...] | torch.Tensor,
+        grad_output: tuple[torch.Tensor, ...] | torch.Tensor,
+    ) -> None:
+        """Hook for saving the gradient w.r.t. output in the backward pass."""
+        if not module.training:
+            return
+        name, layer = self._layers[module]
+        com = kfac_rpc.global_communicator
+        is_computed = False
+        if self.steps <= com.steps_per_epoch or (name in com.assigned_layers and com.data_send_scheduler.can_send('factor')):
+            if isinstance(grad_output, torch.Tensor):
+                    grad_output = (grad_output,)
+            layer.save_layer_grad_output(grad_output)
+            with kfac_rpc.global_communicator.get_layer_lock(name, 'G'):
+                layer.update_g_factor(alpha=self.factor_decay)
+                is_computed = True
+                com.debug_print(f"Computed {name} G factor, shape: {layer.get_factor('G').shape}")
+        
+        if is_computed:
+            com.send_kfac_factor_action(name, 'G')

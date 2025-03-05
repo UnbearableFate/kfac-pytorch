@@ -67,7 +67,7 @@ class GeneralManager:
                 = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
                     preconditioner=self.preconditioner, model=model,
                     share_file_path=SHARE_FILES_DIR, timestamp=timestamp,
-                    log_dir = log_dir, device=device)
+                    log_dir = log_dir, device=device ,steps_per_epoch=len(self.data_manager.train_loader))
 
         self.start_epoch = 0
         self.checkpoint_file_path = os.path.join(CHECK_POINT_PATH, experiment_name, f"{rank}.pth")
