@@ -91,8 +91,6 @@ class GeneralManager:
             self.start_epoch = checkpoint["epoch"] + 1
             self.train_total_time = checkpoint["train_total_time"]
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
-        dist.barrier()
-
         self.dataset_name = dataset_name
         self.device = device
         self.model = model
@@ -127,7 +125,7 @@ class GeneralManager:
             if self.kfac_scheduler is not None:
                 self.kfac_scheduler.step(step=i)
             self.test_all(epoch=i)
-            self.save_checkpoint(epoch=i)
+            #self.save_checkpoint(epoch=i)
             """
             train_total_time = torch.tensor(self.train_total_time, dtype=torch.int, device="cuda")  # 或者"cpu"
             dist.all_reduce(train_total_time)
@@ -259,7 +257,6 @@ class GeneralManager:
         self.model.train()
         self.data_manager.set_epoch(epoch)
         train_loader = self.data_manager.train_loader
-        com = rpc_distributed.global_communicator
         with (tqdm(
                 total=math.ceil(len(train_loader)),
                 bar_format='{l_bar}{bar:6}{r_bar}',
@@ -269,8 +266,6 @@ class GeneralManager:
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.to(self.device)
                 target = target.to(self.device)
-                start_time = time.time()
-
                 rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
                 
@@ -290,12 +285,9 @@ class GeneralManager:
                     
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
-                
-                self.train_total_time += time.time() - start_time
                 t.update()
         
         if self.writer is not None:
-            self.writer.add_scalar("Total train time", self.train_total_time, epoch)
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
             self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
 

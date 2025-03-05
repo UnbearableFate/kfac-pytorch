@@ -49,23 +49,26 @@ if __name__ == '__main__':
                 f'local_rank = {args.local_rank}, '
                 f'world_size = {dist.get_world_size()}',
             )
-        dist.barrier()
 
     device = torch.device(f'cuda:0')
     #model = models.get_model(args.model)
-    model = ResNetForCIFAR10(layers=18)
+    model = ResNetForCIFAR10(layers=101)
     model = model.to(device)
     
     if args.train_com_method == 'ddp':
         model = DDP(model)
     start_time = time.time() 
     mgr = GeneralManager(model=model,device=device, args=args)
+    dist.barrier()
     if args.train_com_method == 'ddp':
         mgr.train_and_test()
     else:
         mgr.rpc_train_and_test()
-    
-    mgr.rpc_communicator.debug_print(f"totol time: {time.time()-start_time}")
+
+    timelog = f"total time: {time.time()-start_time}"
+    if args.train_com_method == 'rpc':
+        mgr.rpc_communicator.debug_print(timelog)
+    print(timelog)
     dist.barrier()
     if args.train_com_method == 'rpc':
         rpc.shutdown()

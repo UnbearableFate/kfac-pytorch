@@ -110,7 +110,6 @@ class KFacRPCCommunicator:
                  model, share_file_path ="", timestamp="" ,
                  log_dir = "" , device = torch.device("cpu"),steps_per_epoch = 0):
         self.steps_per_epoch = steps_per_epoch
-        self.is_packaged_send = preconditioner.is_packaged_send
         if device == "cuda" or device.type == "cuda":
             options = rpc.TensorPipeRpcBackendOptions(
                 num_worker_threads=32,
@@ -150,6 +149,7 @@ class KFacRPCCommunicator:
         if preconditioner is None:
             return
         
+        self.is_packaged_send = preconditioner.is_packaged_send
         self.request_regression_record = set()
         self.rpc_layers: Dict[str,KfacRPCLayer] = {} # {layer_name: KfacRPCLayer}
         self.assigned_layers = []
