@@ -29,6 +29,8 @@ from kfac.rpc_util.fault_sim import fault_simulator
 logger = logging.getLogger('my_logger')
 logger.setLevel(logging.INFO)  # 设置日志级别
 
+normal_val = 19500
+
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
@@ -374,8 +376,6 @@ class KFacRPCCommunicator:
             if rank == self.rank:
                 continue
             self.send_data_package(rank)
-        self.computation_volume_statistic()
-        #self.facotr_comput_lazy_wl_rebal()
         self.data_send_scheduler.update_next_send_time("eigen")
 
     def compute_preconditioned_gradients(self,damping):
@@ -606,7 +606,7 @@ class KFacRPCCommunicator:
             return True
         return False
 
-    def computation_volume_statistic(self):
+    def computation_volume_statistic_and_speed(self):
         current_t = self.current_t()
         if current_t % 200 < 10:
             self.computation_volume_accumulation /= 100
@@ -614,9 +614,12 @@ class KFacRPCCommunicator:
 
         loop_time_cost = time.time() - self.loop_start_time
         self.time_cost_accumulation += loop_time_cost
-        for layer_name in self.current_inverse_computation_layers:
-            self.computation_volume_accumulation += ((self.layers_workload[layer_name]["A"]  +self.layers_workload[layer_name]["G"]))/100000 #* 0.001
+        self.computation_volume_accumulation += normal_val
+        if self.data_send_scheduler.get_next_send_type() == "eigen":
+            for layer_name in self.current_inverse_computation_layers:
+                self.computation_volume_accumulation += ((self.layers_workload[layer_name]["A"]  +self.layers_workload[layer_name]["G"]))
         self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
+        self.debug_print(f"computation volume: {self.computation_volume_accumulation}, time cost: {self.time_cost_accumulation}, speed: {self.node_states[self.rank].speed}")
 
     def get_local_node_speed(self):
         if self.node_states[self.rank].speed is not None and self.node_states[self.rank].speed != 0:
