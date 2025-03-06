@@ -24,6 +24,59 @@ from kfac.layers.base import KFACBaseLayer
 from kfac.layers.eigen import KFACEigenLayer
 from kfac.layers.inverse import KFACInverseLayer
 from kfac.layers.register import register_modules
+import pandas as pd
+
+data_A = {
+    'shape': [27, 64, 128, 256, 513, 576, 1152, 2304, 4608],
+    'avg_time_us': [749, 219, 227, 215, 341, 230, 277, 275, 257]
+}
+data_G = {
+    'shape': [10, 64, 128, 256, 512],
+    'avg_time_us': [232, 164, 175, 174, 174]
+}
+
+df_A = pd.DataFrame(data_A)
+df_G = pd.DataFrame(data_G)
+
+def estimate_time(shape, factor_type='A'):
+    # 选择查找表
+    if factor_type == 'A':
+        df = df_A
+    elif factor_type == 'G':
+        df = df_G
+    else:
+        raise ValueError("factor_type 必须是 'A' 或 'G'")
+
+    # 如果 shape 恰好在表中，直接返回
+    if shape in df['shape'].values:
+        time_us = df.loc[df['shape'] == shape, 'avg_time_us'].values[0]
+        print(f"查找表中找到直接匹配: shape={shape}, 时间={time_us} 微秒")
+        return time_us
+
+    # 找到最近的两个 shape 进行插值
+    shapes = df['shape'].values
+    if shape < shapes[0]:
+        # 比最小 shape 还小，直接返回最小 shape 的时间
+        time_us = df.iloc[0]['avg_time_us']
+        print(f"shape={shape} 小于最小 shape，使用 shape=27 的时间近似: {time_us} 微秒")
+    elif shape > shapes[-1]:
+        # 比最大 shape 还大，按比例缩放最后一个 shape
+        time_us = df.iloc[-1]['avg_time_us'] * (shape / shapes[-1])
+        print(f"shape={shape} 大于最大 shape，按比例缩放: {time_us} 微秒")
+    else:
+        # 找到最近的两个 shape 进行线性插值
+        lower = shapes[shapes < shape].max()
+        upper = shapes[shapes > shape].min()
+        time_lower = df.loc[df['shape'] == lower, 'avg_time_us'].values[0]
+        time_upper = df.loc[df['shape'] == upper, 'avg_time_us'].values[0]
+        # 线性插值计算
+        time_us = time_lower + (time_upper - time_lower) * ((shape - lower) / (upper - lower))
+        print(f"shape={shape} 在范围内，线性插值估计: {time_us:.2f} 微秒")
+
+    # 结果取整
+    time_us = round(time_us)
+    return time_us
+
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +322,7 @@ class KFACPreconditioner(BaseKFACPreconditioner):
                 loglevel,
                 f'Registered name="{name}": {repr(kfac_layer)}',
             )
-
+        """
         if self.assignment_strategy == AssignmentStrategy.COMPUTE:
             cost_func = lambda n: n**3  # noqa: E731
         elif self.assignment_strategy == AssignmentStrategy.MEMORY:
@@ -283,6 +336,14 @@ class KFACPreconditioner(BaseKFACPreconditioner):
             name: {
                 'A': cost_func(kfac_layer.module.a_factor_shape[0]),
                 'G': cost_func(kfac_layer.module.g_factor_shape[0]),
+            }
+            for name, kfac_layer in kfac_layers.values()
+        }
+        """
+        work = {
+            name: {
+                'A': estimate_time(kfac_layer.module.a_factor_shape[0],"A"),
+                'G': estimate_time(kfac_layer.module.g_factor_shape[0],"G"),
             }
             for name, kfac_layer in kfac_layers.values()
         }

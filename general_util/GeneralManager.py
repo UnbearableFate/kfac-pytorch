@@ -250,8 +250,6 @@ class GeneralManager:
                 if rpc_distributed.global_communicator.current_t() % 200 == 199:
                     rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
 
-                rpc_distributed.global_communicator.computation_volume_statistic_and_speed()
-
                 if com.task_reassign_rpc.reassign_task_callback is not None:
                     com.task_reassign_rpc.reassign_task_callback()
                 if com.update_assignment_callback is not None:

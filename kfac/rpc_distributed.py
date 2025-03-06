@@ -29,8 +29,6 @@ from kfac.rpc_util.fault_sim import fault_simulator
 logger = logging.getLogger('my_logger')
 logger.setLevel(logging.INFO)  # 设置日志级别
 
-normal_val = 19500
-
 def rpc_work_name(rank:int) -> str:
     return f"rpc_{rank}"
 
@@ -183,11 +181,11 @@ class KFacRPCCommunicator:
         self.layers_workload = preconditioner._assignment.work
         self.computation_volume_accumulation = 0
         self.time_cost_accumulation = 0
-        self.loop_start_time = 0
 
         self.gradient_computation_start = False
         self.package_sender = PackageSender(self)
         self.execution_times_statistic:Dict[str , Dict[int , list]] = {"A":{}, "G":{}}
+        self.trian_start_time = time.time()
     
     def add_execution_times_statistic(self,shape:int,type_name:str,time:float):
         assert type_name in self.execution_times_statistic
@@ -304,7 +302,6 @@ class KFacRPCCommunicator:
         rpc.shutdown()
 
     def update_self_t(self):
-        self.loop_start_time = time.time()
         self.data_send_scheduler.update_loop_counter()
         with self.node_state_lock:
             self.node_states[self.rank].iter += 1
@@ -377,6 +374,7 @@ class KFacRPCCommunicator:
                 continue
             self.send_data_package(rank)
         self.data_send_scheduler.update_next_send_time("eigen")
+        self.computation_volume_statistic_and_speed()
 
     def compute_preconditioned_gradients(self,damping):
         all_layer = set(self.rpc_layers.keys())
@@ -607,17 +605,9 @@ class KFacRPCCommunicator:
         return False
 
     def computation_volume_statistic_and_speed(self):
-        current_t = self.current_t()
-        if current_t % 200 < 10:
-            self.computation_volume_accumulation /= 100
-            self.time_cost_accumulation /= 100
-
-        loop_time_cost = time.time() - self.loop_start_time
-        self.time_cost_accumulation += loop_time_cost
-        self.computation_volume_accumulation += normal_val
-        if self.data_send_scheduler.get_next_send_type() == "eigen":
-            for layer_name in self.current_inverse_computation_layers:
-                self.computation_volume_accumulation += ((self.layers_workload[layer_name]["A"]  +self.layers_workload[layer_name]["G"]))
+        self.time_cost_accumulation = time.time() - self.trian_start_time
+        for layer_name in self.current_inverse_computation_layers:
+            self.computation_volume_accumulation += ((self.layers_workload[layer_name]["A"]  +self.layers_workload[layer_name]["G"]))
         self.node_states[self.rank].speed = int(self.computation_volume_accumulation / self.time_cost_accumulation)
         self.debug_print(f"computation volume: {self.computation_volume_accumulation}, time cost: {self.time_cost_accumulation}, speed: {self.node_states[self.rank].speed}")
 
@@ -707,7 +697,6 @@ class KFacRPCCommunicator:
                 self.async_factor_send_register(name, factor_type)
                 if self.rpc_layers[name].send_trigger[factor_type]:
                     self.send_data_package(target_rank)
-                    self.debug_print(f"send {factor_type} to {target_rank}")
 
 
 global_communicator: KFacRPCCommunicator = None
