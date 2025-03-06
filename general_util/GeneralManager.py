@@ -11,6 +11,7 @@ import kfac.rpc_distributed as rpc_distributed
 from  kfac.rpc_util.fault_sim import fault_simulator
 from general_util.consts import CHECK_POINT_PATH, DATA_DIR, LOG_DIR, SHARE_FILES_DIR
 from examples.vision.optimizers import get_optimizer
+import csv
 
 class GeneralManager:
     def __init__(self, model, sampler_func = None,
@@ -159,6 +160,15 @@ class GeneralManager:
             #self.save_checkpoint(epoch=i)
 
         self.writer.close()
+        if self.preconditioner is not None:
+            for factor_type, stat in self.rpc_communicator.execution_times_statistic.items():
+                with open(os.path.join(self.log_dir, f"execution_time_{factor_type}_{self.rank}.csv"), 'w', newline='') as csvfile:
+                    csv_writer = csv.writer(csvfile)
+                    csv_writer.writerow(["shape", "avg_time"])
+                    for shape, time_stat in stat.items():
+                        avg_time = time_stat[0] / time_stat[1]
+                        csv_writer.writerow([shape, avg_time])
+
         print(f"Rank {self.rank} : total train time: {self.train_total_time}")
         print(f"Rank {self.rank} : {self.rpc_communicator.com_statistic} at iteration {self.rpc_communicator.current_t()}")
         print(f"Rank {self.rank} : real fault rate {fault_simulator.fault_total_time / self.train_total_time}")

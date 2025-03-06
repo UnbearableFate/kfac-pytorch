@@ -141,7 +141,7 @@ class KFacRPCCommunicator:
             self.node_states[i] = NodeState(i)
         self.node_state_lock = threading.Lock()
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = ExpTopoSwiftManager(rank, model, self)
+        self.model_avg_rpc = AdpsgdManager(rank, model, self)
         self.com_statistic = CommunicationStatics()
         global global_communicator
         global_communicator = self
@@ -185,6 +185,14 @@ class KFacRPCCommunicator:
 
         self.gradient_computation_start = False
         self.package_sender = PackageSender(self)
+        self.execution_times_statistic:Dict[str , Dict[int , list]] = {"A":{}, "G":{}}
+    
+    def add_execution_times_statistic(self,shape:int,type_name:str,time:float):
+        assert type_name in self.execution_times_statistic
+        if shape not in self.execution_times_statistic:
+            self.execution_times_statistic[type_name][shape] = [0,0]
+        self.execution_times_statistic[type_name][shape][0] += time
+        self.execution_times_statistic[type_name][shape][1] += 1
 
     def update_send_trigger(self):
         target_set = set()
@@ -336,6 +344,7 @@ class KFacRPCCommunicator:
             if len(ready_list) == 0:
                 ready_list.append(random.choice(list(task_set)))
             for ready_task_name in ready_list:
+                start_time = time.time()
                 layer_name, factor_type = ready_task_name.split("#")
                 kfac_layer = self.rpc_layers[layer_name].kfac_layer
                 if factor_type == "A":
@@ -357,6 +366,10 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
+                    shape = kfac_layer._a_factor.shape[0]
+                elif factor_type == "G":
+                    shape = kfac_layer._g_factor.shape[0]
+                self.add_execution_times_statistic(shape=shape,type_name=factor_type,time=time.time()-start_time) 
         for rank in range(self.origin_world_size):
             if rank == self.rank:
                 continue
@@ -657,7 +670,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.process_with_dynamic_weight()
+            self.model_avg_rpc.process()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def restart_sick_node(self): # call by sick nodes
