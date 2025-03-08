@@ -95,7 +95,7 @@ class RPCTaskManager:
                     new_working_nodes.append(rank)
         #old_health_nodes = set(self.rpc_communicator.get_working_nodes_rank_list())
         print (f"new_working_nodes {new_working_nodes}")
-        speeds = self.rpc_communicator.get_computation_speed_dict()
+        speeds = self.rpc_communicator.get_computation_speed_dict(new_working_nodes)
         new_assignment = self.assignment.greedy_assignment_efficiency_new(self.assignment.work, new_working_nodes,
                                                                       True,
                                                                       speeds)

@@ -519,12 +519,11 @@ class BaseKFACPreconditioner:
         com = kfac_rpc.global_communicator
         is_computed = False
         if self.steps <= com.steps_per_epoch or (name in com.assigned_layers and com.data_send_scheduler.can_send("factor")):
-            start_time = time.time()
             layer.save_layer_input(input_) 
             with com.get_layer_lock(name, 'A'):
                 layer.update_a_factor(alpha=self.factor_decay)
                 is_computed = True
-            com.add_execution_times_statistic(layer.a_factor.shape[0], "A", time.time() - start_time)
+            #com.add_execution_times_statistic(layer.a_factor.shape[0], "A", time.time() - start_time)
             
         if is_computed:
             com.send_kfac_factor_action(name, 'A')
@@ -594,14 +593,13 @@ class BaseKFACPreconditioner:
         com = kfac_rpc.global_communicator
         is_computed = False
         if self.steps <= com.steps_per_epoch or (name in com.assigned_layers and com.data_send_scheduler.can_send('factor')):
-            start_time = time.time()
             if isinstance(grad_output, torch.Tensor):
                     grad_output = (grad_output,)
             layer.save_layer_grad_output(grad_output)
             with kfac_rpc.global_communicator.get_layer_lock(name, 'G'):
                 layer.update_g_factor(alpha=self.factor_decay)
                 is_computed = True
-            com.add_execution_times_statistic(layer.g_factor.shape[0], "G", time.time() - start_time)
+            #com.add_execution_times_statistic(layer.g_factor.shape[0], "G", time.time() - start_time)
         
         if is_computed:
             com.send_kfac_factor_action(name, 'G')

@@ -54,9 +54,10 @@ class NodeState():
         self.iter = 0
         self.health = 0
         self.speed = 0
+        self.timestamp = time.time()
 
     def __str__(self):
-        return f"R{self.rank} :t{self.iter},s{self.speed}, h{self.health}"
+        return f"R{self.rank} :t{self.iter},ts{self.timestamp}, h{self.health}"
 
 
 class KfacRPCLayer:
@@ -188,6 +189,9 @@ class KFacRPCCommunicator:
         self.trian_start_time = time.time()
     
     def add_execution_times_statistic(self,shape:int,type_name:str,time:float):
+        """
+        deprecated
+        """
         assert type_name in self.execution_times_statistic
         if shape not in self.execution_times_statistic:
             self.execution_times_statistic[type_name][shape] = [0,0]
@@ -365,10 +369,7 @@ class KFacRPCCommunicator:
                 task_set.remove(ready_task_name)
                 if factor_type == "A":
                     task_set.add(layer_name + "#G")
-                    shape = kfac_layer._a_factor.shape[0]
-                elif factor_type == "G":
-                    shape = kfac_layer._g_factor.shape[0]
-                self.add_execution_times_statistic(shape=shape,type_name=factor_type,time=time.time()-start_time) 
+                #self.add_execution_times_statistic(shape=shape,type_name=factor_type,time=time.time()-start_time) 
         for rank in range(self.origin_world_size):
             if rank == self.rank:
                 continue
@@ -405,21 +406,23 @@ class KFacRPCCommunicator:
                 self.rpc_layers[layer_name].kfac_layer.update_grad(None)
             all_layer = all_layer - ready_set
 
-    def get_computation_speed_dict(self):
-        computational_efficiency = dict()
-        avg = statistics.mean([state.speed for state in self.get_working_node_state_list() if state.speed is not None and state.speed > 0])
-        self.print_rpc_state(f"avg speed: {avg}")
-        for state in self.get_working_node_state_list():
-            if avg == 0:
-                computational_efficiency[state.rank] = 1000
-                continue
-            if state.speed > 0:
-                computational_efficiency[state.rank] = state.speed
-            elif state.speed == 0:
-                computational_efficiency[state.rank] = avg
+    def get_computation_speed_dict(self, new_worker_ranks):
+        temp_node_states = self.get_node_states()
+        local_timestamp = temp_node_states[self.rank].timestamp
+        avg_of_iter = 0
+        for rank in new_worker_ranks:
+            temp_node_states[rank].iter = temp_node_states[rank].iter * local_timestamp / temp_node_states[rank].iter
+            avg_of_iter += temp_node_states[rank].iter
+        avg_of_iter /= len(new_worker_ranks)
 
-        self.print_rpc_state(f"computation efficiency: {computational_efficiency}")
-        return computational_efficiency
+        computation_efficiency = {rank: 0 for rank in new_worker_ranks}
+        for layer in self.rpc_layers.values():
+            for factor_type in ['A', 'G']:
+                assigned_worker = layer.assigned_worker[factor_type] 
+                if assigned_worker in new_worker_ranks:
+                    computation_efficiency[assigned_worker] += self.layers_workload[layer.name][factor_type] * (temp_node_states[assigned_worker].iter / avg_of_iter)
+
+        return computation_efficiency
 
     def update_inverse_workers(self, new_assignment, new_assignment_generation):
         self.task_reassign_rpc.assignment._inv_assignments = new_assignment
@@ -471,6 +474,7 @@ class KFacRPCCommunicator:
     
     def get_node_states(self):
         with self.node_state_lock:
+            self.node_states[self].timestamp = time.time()-self.trian_start_time
             return self.node_states.copy()
 
     def update_node_states(self,node_states:Dict[int,NodeState], from_leader = False):
@@ -484,7 +488,8 @@ class KFacRPCCommunicator:
                 else:
                     if node_states[rank].iter > self.node_states[rank].iter:
                         self.node_states[rank].iter = state.iter
-                        self.node_states[rank].speed = state.speed
+                        #self.node_states[rank].speed = state.speed
+                        self.node_states[rank].timestamp = state.timestamp
                     if from_leader:
                         self.node_states[rank].health = state.health
 
@@ -525,9 +530,7 @@ class KFacRPCCommunicator:
         data = self.package_sender.get_packaged_data(target_rank=target_rank)
         if data is None or len(data.keys()) == 0:
             return
-        with self.node_state_lock:
-            self.node_states[self.rank].speed = self.get_local_node_speed()
-            node_states = self.node_states.copy()
+        node_states = self.get_node_states() 
         try:
             rpc.rpc_async(
                 to=rpc_work_name(target_rank),
@@ -605,6 +608,9 @@ class KFacRPCCommunicator:
         return False
 
     def computation_volume_statistic_and_speed(self):
+        """
+        deprecated
+        """
         self.time_cost_accumulation = time.time() - self.trian_start_time
         for layer_name in self.current_inverse_computation_layers:
             self.computation_volume_accumulation += ((self.layers_workload[layer_name]["A"]  +self.layers_workload[layer_name]["G"]))
@@ -612,6 +618,9 @@ class KFacRPCCommunicator:
         self.debug_print(f"computation volume: {self.computation_volume_accumulation}, time cost: {self.time_cost_accumulation}, speed: {self.node_states[self.rank].speed}")
 
     def get_local_node_speed(self):
+        """
+        deprecated
+        """
         if self.node_states[self.rank].speed is not None and self.node_states[self.rank].speed != 0:
             return self.node_states[self.rank].speed
         elif self.time_cost_accumulation != 0:

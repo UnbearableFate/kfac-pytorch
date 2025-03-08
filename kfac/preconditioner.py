@@ -322,9 +322,9 @@ class KFACPreconditioner(BaseKFACPreconditioner):
                 loglevel,
                 f'Registered name="{name}": {repr(kfac_layer)}',
             )
-        """
+
         if self.assignment_strategy == AssignmentStrategy.COMPUTE:
-            cost_func = lambda n: n**3  # noqa: E731
+            cost_func = lambda n: n**2.5  # noqa: E731
         elif self.assignment_strategy == AssignmentStrategy.MEMORY:
             cost_func = lambda n: n**2  # noqa: E731
         else:
@@ -347,7 +347,7 @@ class KFACPreconditioner(BaseKFACPreconditioner):
             }
             for name, kfac_layer in kfac_layers.values()
         }
-
+        """
         new_group = cast(
             Callable[[List[int]], dist.ProcessGroup],
             dist.new_group,

@@ -497,7 +497,8 @@ class KAISAAssignment(WorkAssignment):
         for layer in assignments:
             for factor in assignments[layer]:
                 assert assignments[layer][factor] >= 0, "Factor assignment failed."
-
+        print("Worker loads:", worker_loads)
+        print("Assignments:", assignments)
         return assignments
 
     @staticmethod
