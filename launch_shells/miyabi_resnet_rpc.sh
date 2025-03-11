@@ -11,10 +11,10 @@ mpirun --mca mpi_abort_print_stack 1 \
  --report-bindings \
  /work/xg24i002/x10041/miniconda3/envs/py313/bin/python /work/xg24i002/x10041/kfac-pytorch/renew_resnet_cifar.py\
  --timestamp="$current_time" \
- --experiment-name="r34_adkfac_adpsgd" \
+ --experiment-name="r34_adkfac_delay0_09" \
  --train-com-method="rpc" \
  --batch-size=256 \
  --base-lr=0.001 \
- --epochs=60 \
+ --epochs=60\
  --optimizer-type="adamw" \
  --lr-scheduler-type="one_cycle"

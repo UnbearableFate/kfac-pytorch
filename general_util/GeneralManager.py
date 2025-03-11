@@ -155,7 +155,7 @@ class GeneralManager:
                 self.ad_kfac_train(epoch=i)
             self.train_total_time += time.time() - start_time
             if self.writer is not None:
-                self.writer.add_scalar("Total train time", self.train_total_time)
+                self.writer.add_scalar("Total train time", self.train_total_time,i)
             if self.lr_scheduler_type == "multi_step":
                 self.lr_scheduler.step()
             self.test_local(epoch=i)
@@ -222,7 +222,6 @@ class GeneralManager:
             return
         delay_ranks = random.choices(range(self.world_size), k=delay_num)
         if self.rank in delay_ranks:
-            self.rpc_communicator.debug_print(f"Rank {self.rank} delay {delay_time} seconds")
             time.sleep(delay_time)
             self.fault_in_last_iteraion = True
 
@@ -245,7 +244,7 @@ class GeneralManager:
                 self.optimizer.zero_grad()
                 
                 output = self.model(data)
-                self.random_delay(1,0.5)
+                self.random_delay(1,0.36)
                 loss = self.loss_func(output, target)
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 loss.backward()
@@ -258,22 +257,19 @@ class GeneralManager:
                     self.lr_scheduler.step()
                 self.rpc_communicator.send_model_param()
                 
-                if com.current_t() % 98 == 97:
+                if com.current_t() % 50 == 49:
                     rpc_distributed.global_communicator.factor_computation_lazy_rebalance()
                     rpc_distributed.global_communicator.task_reassign_rpc.electing_new_leader_loop()
                 
-                if rpc_distributed.global_communicator.current_t() % 200 == 199:
+                if rpc_distributed.global_communicator.current_t() % 103 == 102:
                     rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
-
-                if batch_idx % 50 == 49:
-                    rpc_distributed.global_communicator.print_rpc_state()
 
                 if com.task_reassign_rpc.reassign_task_callback is not None:
                     com.task_reassign_rpc.reassign_task_callback()
                 if com.update_assignment_callback is not None:
                     com.update_assignment_callback()
                     
-                if rpc_distributed.global_communicator.current_t() % 10 == 0:
+                if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
                 t.update()

@@ -11,7 +11,7 @@ mpirun --mca mpi_abort_print_stack 1 \
  --report-bindings \
  /work/xg24i002/x10041/miniconda3/envs/py313/bin/python /work/xg24i002/x10041/kfac-pytorch/renew_resnet_cifar.py\
  --timestamp="$current_time"\
- --experiment-name="resnet34_ddp_bs256_ep60_adamw_oc" \
+ --experiment-name="resnet34_ddp_bs256_ep60_adamw_oc_new_assign" \
  --kfac-inv-update-steps=100 \
  --kfac-factor-update-steps=25 \
  --batch-size=256 \
