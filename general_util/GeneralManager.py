@@ -225,6 +225,16 @@ class GeneralManager:
             time.sleep(delay_time)
             self.fault_in_last_iteraion = True
 
+    def fault_simulation(self):
+        fault_simulator.update_fault_status()
+        while fault_simulator.is_fault():
+            time.sleep(0.1)
+            fault_simulator.update_fault_status()
+
+        if fault_simulator.recover_flg:
+            self.rpc_communicator.task_reassign_rpc.resurrection_declaration()
+            fault_simulator.recover_flg = False
+
     def ad_kfac_train(self, epoch):
         self.model.train()
         self.data_manager.set_epoch(epoch)
@@ -237,6 +247,9 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
+                if epoch >= 1:
+                    self.fault_simulation()
+
                 data = data.to(self.device)
                 target = target.to(self.device)
 
@@ -244,7 +257,6 @@ class GeneralManager:
                 self.optimizer.zero_grad()
                 
                 output = self.model(data)
-                self.random_delay(1,0.36)
                 loss = self.loss_func(output, target)
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 loss.backward()

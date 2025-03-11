@@ -13,6 +13,7 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from typing import Dict
 from scipy.special import expit
 from general_util.consts import extreme_threshold
+from kfac.rpc_util.fault_sim import fault_simulator
 
 if TYPE_CHECKING:
     from kfac.rpc_distributed import KFacRPCCommunicator
@@ -139,6 +140,8 @@ model_avg_rpc_communicator: SwiftManager
 
 def recv_model_param(data, term, loss_value,from_rank,from_node_states):
     global model_avg_rpc_communicator
+    if fault_simulator.is_fault():
+        return
     model_avg_rpc_communicator.rpc_communicator.update_node_states(from_node_states)
     if from_rank not in model_avg_rpc_communicator.graph.neighbor_list:
         return None
