@@ -66,14 +66,6 @@ class RootModelAvgRPCCommunicator:
     def set_acc(self, accuracy):
         self.local_model_store.acc = accuracy
 
-    def get_local_node_speed(self):
-        if self.rpc_communicator.node_states[self.rank].speed is not None and self.rpc_communicator.node_states[self.rank].speed != 0:
-            return self.rpc_communicator.node_states[self.rank].speed
-        elif self.rpc_communicator.time_cost_accumulation != 0:
-            self.rpc_communicator.node_states[self.rank].speed = int(self.rpc_communicator.computation_volume_accumulation / self.rpc_communicator.time_cost_accumulation)
-            return self.rpc_communicator.node_states[self.rank].speed
-        return None
-
     @torch.no_grad()
     def update_local_flat_model(self):
         with self.local_model_store.lock:

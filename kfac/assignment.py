@@ -201,6 +201,8 @@ class KAISAAssignment(WorkAssignment):
             #   rank groups
             ranks_to_communication_group[ranks] = self.group_func(list(ranks))
 
+        if dist.get_rank() == 0:
+            print(f"work: {work}")
         self._inv_assignments = self.greedy_assignment(
             work,
             [list(ranks) for ranks in grad_worker_ranks],
@@ -320,86 +322,7 @@ class KAISAAssignment(WorkAssignment):
         for layer in assignments:
             for factor in assignments[layer]:
                 assert assignments[layer][factor] >= 0
-
-        return assignments
-    @staticmethod
-    def greedy_assignment_efficiency(
-            work: dict[str, dict[str, float]],
-            worker_groups: list[list[int]],
-            colocate_factors: bool,
-            computational_efficiency: dict[int, float],
-    ) -> dict[str, dict[str, int]]:
-        """Greedy constrained layer work assignments considering computational efficiency.
-
-        Assigns work units to ranks in a lowest-current load greedy approach considering
-        computational efficiency.
-
-        Args:
-            work: dict mapping layer names to a sub-dict that maps work for
-                the layer (e.g., factors) to the approximate cost of that
-                work object.
-            worker_groups: list of list of ranks where each sub-list of ranks
-                represents a worker group. All work (e.g., factor computations)
-                for a given layer will be constrained to be workers within
-                a worker group. For example, if the worker groups are
-                [[0, 1], [2, 3]], there will never be a case where the two
-                factors for a given layer are performed on worker in separate
-                groups.
-            world_size (int): world_size
-            colocate_factors (bool): if true, factors for a single layer will
-                be assigned to the same worker. Otherwise, factors for a single
-                layer can be computed on separate workers given those workers
-                are in the same group.
-            computational_efficiency: dict mapping worker ranks to their
-                computational efficiency (computation per second).
-
-        Returns:
-            dict matching the structure of the work inputs except the values
-            of the sub-dicts are the worker ranks that the corresponding factor
-            should be computed on.
-        """
-        # Initialize worker loads as time (load / efficiency)
-        worker_loads = {i: 0.0 for group in worker_groups for i in group}
-
-        # Initialize assignments dictionary
-        assignments = {layer: {factor: -1 for factor in factors} for layer, factors in work.items()}
-
-        # Calculate summed work for each layer
-        summed_work = {layer: sum(factors.values()) for layer, factors in work.items()}
-
-        # Sort layers by their total work in descending order
-        sorted_groups = sorted(summed_work, key=summed_work.get, reverse=True)
-
-        for layer in sorted_groups:
-            # Calculate total time load for each worker group
-            worker_group_loads = [
-                sum(worker_loads[i] for i in group) for group in worker_groups
-            ]
-
-            # Select the worker group with the lowest current load
-            worker_group = worker_groups[worker_group_loads.index(min(worker_group_loads))]
-
-            if colocate_factors:
-                # Assign all tasks of the layer to the least loaded worker in the selected group
-                min_worker = min(worker_group, key=lambda i: worker_loads[i])
-                # Add time load based on efficiency
-                worker_loads[min_worker] += summed_work[layer] / computational_efficiency[min_worker]
-                for factor in work[layer]:
-                    assignments[layer][factor] = min_worker
-            else:
-                # Assign tasks within the layer to workers in the group based on time load and efficiency
-                factors = sorted(work[layer].items(), key=lambda x: x[1], reverse=True)
-                for factor, cost in factors:
-                    min_worker = min(worker_group, key=lambda i: worker_loads[i])
-                    # Add time load based on efficiency
-                    worker_loads[min_worker] += cost / computational_efficiency[min_worker]
-                    assignments[layer][factor] = min_worker
-
-        # Ensure all tasks are assigned
-        for layer in assignments:
-            for factor in assignments[layer]:
-                assert assignments[layer][factor] >= 0
-
+        print("worker_loads: ", worker_loads)
         return assignments
 
     @staticmethod
@@ -497,8 +420,7 @@ class KAISAAssignment(WorkAssignment):
         for layer in assignments:
             for factor in assignments[layer]:
                 assert assignments[layer][factor] >= 0, "Factor assignment failed."
-        print("Worker loads:", worker_loads)
-        print("Assignments:", assignments)
+        print("worker_loads_new: ", worker_loads)
         return assignments
 
     @staticmethod
@@ -652,3 +574,12 @@ class KAISAAssignment(WorkAssignment):
         layer.
         """
         return self._grad_receiver_groups[layer].group
+
+if __name__ == '__main__':
+    work = {'model.conv1': {'A': 19683, 'G': 262144}, 'model.layer1.0.conv1': {'A': 191102976, 'G': 262144}, 'model.layer1.0.conv2': {'A': 191102976, 'G': 262144}, 'model.layer1.1.conv1': {'A': 191102976, 'G': 262144}, 'model.layer1.1.conv2': {'A': 191102976, 'G': 262144}, 'model.layer1.2.conv1': {'A': 191102976, 'G': 262144}, 'model.layer1.2.conv2': {'A': 191102976, 'G': 262144}, 'model.layer2.0.conv1': {'A': 191102976, 'G': 2097152}, 'model.layer2.0.conv2': {'A': 1528823808, 'G': 2097152}, 'model.layer2.0.downsample.0': {'A': 262144, 'G': 2097152}, 'model.layer2.1.conv1': {'A': 1528823808, 'G': 2097152}, 'model.layer2.1.conv2': {'A': 1528823808, 'G': 2097152}, 'model.layer2.2.conv1': {'A': 1528823808, 'G': 2097152}, 'model.layer2.2.conv2': {'A': 1528823808, 'G': 2097152}, 'model.layer2.3.conv1': {'A': 1528823808, 'G': 2097152}, 'model.layer2.3.conv2': {'A': 1528823808, 'G': 2097152}, 'model.layer3.0.conv1': {'A': 1528823808, 'G': 16777216}, 'model.layer3.0.conv2': {'A': 12230590464, 'G': 16777216}, 'model.layer3.0.downsample.0': {'A': 2097152, 'G': 16777216}, 'model.layer3.1.conv1': {'A': 12230590464, 'G': 16777216}, 'model.layer3.1.conv2': {'A': 12230590464, 'G': 16777216}, 'model.layer3.2.conv1': {'A': 12230590464, 'G': 16777216}, 'model.layer3.2.conv2': {'A': 12230590464, 'G': 16777216}, 'model.layer3.3.conv1': {'A': 12230590464, 'G': 16777216}, 'model.layer3.3.conv2': {'A': 12230590464, 'G': 16777216}, 'model.layer3.4.conv1': {'A': 12230590464, 'G': 16777216}, 'model.layer3.4.conv2': {'A': 12230590464, 'G': 16777216}, 'model.layer3.5.conv1': {'A': 12230590464, 'G': 16777216}, 'model.layer3.5.conv2': {'A': 12230590464, 'G': 16777216}, 'model.layer4.0.conv1': {'A': 12230590464, 'G': 134217728}, 'model.layer4.0.conv2': {'A': 97844723712, 'G': 134217728}, 'model.layer4.0.downsample.0': {'A': 16777216, 'G': 134217728}, 'model.layer4.1.conv1': {'A': 97844723712, 'G': 134217728}, 'model.layer4.1.conv2': {'A': 97844723712, 'G': 134217728}, 'model.layer4.2.conv1': {'A': 97844723712, 'G': 134217728}, 'model.layer4.2.conv2': {'A': 97844723712, 'G': 134217728}, 'model.fc': {'A': 135005697, 'G': 1000}}
+    world_size = 16
+    assi = KAISAAssignment.greedy_assignment(work=work, worker_groups=[list(range(world_size))], colocate_factors=True)
+    print(assi)
+    print("====================================")
+    assi2 = KAISAAssignment.greedy_assignment_efficiency_new(work=work, workers=list(range(world_size)), colocate_factors=True, computational_efficiency={i: 1.0 for i in range(world_size)})
+    print(assi2)

@@ -17,4 +17,4 @@ mpirun --mca mpi_abort_print_stack 1 \
  --base-lr=0.001 \
  --epochs=60 \
  --optimizer-type="adamw" \
- --lr-scheduler-type="one_cycle" \
+ --lr-scheduler-type="one_cycle"

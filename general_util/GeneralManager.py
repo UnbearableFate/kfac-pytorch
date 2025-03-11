@@ -1,4 +1,5 @@
 import math
+import random
 import time
 import torch
 from tqdm import tqdm
@@ -101,6 +102,7 @@ class GeneralManager:
         self.train_com_method = train_com_method
         self.batch_size = batch_size
         self.is_fault = False
+        self.fault_in_last_iteraion = False
 
         if fault_simulator is not None:
             fault_simulator.train_total_time_cb = self.get_total_training_time
@@ -160,6 +162,7 @@ class GeneralManager:
             #self.save_checkpoint(epoch=i)
 
         self.writer.close()
+        """
         if self.preconditioner is not None:
             for factor_type, stat in self.rpc_communicator.execution_times_statistic.items():
                 with open(os.path.join(self.log_dir, f"execution_time_{factor_type}_{self.rank}.csv"), 'w', newline='') as csvfile:
@@ -167,7 +170,8 @@ class GeneralManager:
                     csv_writer.writerow(["shape", "avg_time"])
                     for shape, time_stat in stat.items():
                         avg_time = time_stat[0] / time_stat[1]
-                        csv_writer.writerow([shape, avg_time])
+                        csv_writer.writerow([shape, avg_time])"
+        """
 
         print(f"Rank {self.rank} : total train time: {self.train_total_time}")
         print(f"Rank {self.rank} : {self.rpc_communicator.com_statistic} at iteration {self.rpc_communicator.current_t()}")
@@ -212,6 +216,16 @@ class GeneralManager:
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
             self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]["lr"], epoch)
 
+    def random_delay(self, delay_num,delay_time):
+        if self.fault_in_last_iteraion :
+            self.fault_in_last_iteraion = False
+            return
+        delay_ranks = random.choices(range(self.world_size), k=delay_num)
+        if self.rank in delay_ranks:
+            self.rpc_communicator.debug_print(f"Rank {self.rank} delay {delay_time} seconds")
+            time.sleep(delay_time)
+            self.fault_in_last_iteraion = True
+
     def ad_kfac_train(self, epoch):
         self.model.train()
         self.data_manager.set_epoch(epoch)
@@ -231,6 +245,7 @@ class GeneralManager:
                 self.optimizer.zero_grad()
                 
                 output = self.model(data)
+                self.random_delay(1,0.5)
                 loss = self.loss_func(output, target)
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 loss.backward()
@@ -245,17 +260,20 @@ class GeneralManager:
                 
                 if com.current_t() % 98 == 97:
                     rpc_distributed.global_communicator.factor_computation_lazy_rebalance()
-                    #rpc_distributed.global_communicator.task_reassign_rpc.electing_new_leader_loop()
+                    rpc_distributed.global_communicator.task_reassign_rpc.electing_new_leader_loop()
                 
                 if rpc_distributed.global_communicator.current_t() % 200 == 199:
                     rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
+
+                if batch_idx % 50 == 49:
+                    rpc_distributed.global_communicator.print_rpc_state()
 
                 if com.task_reassign_rpc.reassign_task_callback is not None:
                     com.task_reassign_rpc.reassign_task_callback()
                 if com.update_assignment_callback is not None:
                     com.update_assignment_callback()
                     
-                if rpc_distributed.global_communicator.current_t() % 200 == 0:
+                if rpc_distributed.global_communicator.current_t() % 10 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
 
                 t.update()

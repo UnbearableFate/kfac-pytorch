@@ -157,6 +157,7 @@ class KFacRPCCommunicator:
         self.candidate_participate_factor_computation_layers = []
         self.current_participate_factor_computation_layers = []
         self.current_inverse_computation_layers = []
+        self._inv_assignments = (preconditioner._assignment)._inv_assignments
         for name, kfac_layer in preconditioner._layers.values():
             a_handler = preconditioner._assignment.inv_worker(name, 'A')
             g_handler = preconditioner._assignment.inv_worker(name, 'G')
@@ -309,16 +310,20 @@ class KFacRPCCommunicator:
         self.data_send_scheduler.update_loop_counter()
         with self.node_state_lock:
             self.node_states[self.rank].iter += 1
+            self.node_states[self.rank].timestamp = time.time()-self.trian_start_time
+            self.node_states[self.rank].speed = (self.node_states[self.rank].iter-1) / self.node_states[self.rank].timestamp
+        
         self.is_do_kfac_this_loop = False
+        """
         if self.data_send_scheduler.get_next_send_type() is not None:
             self.is_do_kfac_this_loop = True
-            self.debug_print(f"do {self.data_send_scheduler.get_next_send_type()} this loop ,memory usage: {self.get_memory_usage_percent()}")
             if self.get_memory_usage_percent() > 0.5:
                 self.data_send_scheduler.relax_send_interval()
                 self.debug_print(f"relax send interval to {self.data_send_scheduler.intervals}")
             if self.get_memory_usage_percent() < 0.3 and self.data_send_scheduler.intervals["model_param"] > self.data_send_scheduler.start_interval["model_param"]:
                 self.data_send_scheduler.shorten_send_interval()
                 self.debug_print(f"shorten send interval to {self.data_send_scheduler.intervals}")
+        """
 
     def current_t(self):
         return self.node_states[self.rank].iter
@@ -375,7 +380,7 @@ class KFacRPCCommunicator:
                 continue
             self.send_data_package(rank)
         self.data_send_scheduler.update_next_send_time("eigen")
-        self.computation_volume_statistic_and_speed()
+        #self.computation_volume_statistic_and_speed()
 
     def compute_preconditioned_gradients(self,damping):
         all_layer = set(self.rpc_layers.keys())
@@ -408,20 +413,19 @@ class KFacRPCCommunicator:
 
     def get_computation_speed_dict(self, new_worker_ranks):
         temp_node_states = self.get_node_states()
-        local_timestamp = temp_node_states[self.rank].timestamp
-        avg_of_iter = 0
-        for rank in new_worker_ranks:
-            temp_node_states[rank].iter = temp_node_states[rank].iter * local_timestamp / temp_node_states[rank].iter
-            avg_of_iter += temp_node_states[rank].iter
-        avg_of_iter /= len(new_worker_ranks)
-
         computation_efficiency = {rank: 0 for rank in new_worker_ranks}
+        """
         for layer in self.rpc_layers.values():
             for factor_type in ['A', 'G']:
                 assigned_worker = layer.assigned_worker[factor_type] 
                 if assigned_worker in new_worker_ranks:
-                    computation_efficiency[assigned_worker] += self.layers_workload[layer.name][factor_type] * (temp_node_states[assigned_worker].iter / avg_of_iter)
-
+                    computation_efficiency[assigned_worker] += self.layers_workload[layer.name][factor_type] * (temp_node_states[assigned_worker].iter / temp_node_states[assigned_worker].timestamp)
+        """
+        computation_efficiency = {rank: temp_node_states[rank].iter / temp_node_states[rank].timestamp for rank in new_worker_ranks}
+        avg_efficiency = sum(computation_efficiency.values()) / len(computation_efficiency)
+        for rank in new_worker_ranks:
+            computation_efficiency[rank] /= avg_efficiency
+        print(f"computation efficiency: {computation_efficiency}")
         return computation_efficiency
 
     def update_inverse_workers(self, new_assignment, new_assignment_generation):
@@ -442,6 +446,7 @@ class KFacRPCCommunicator:
         self.current_inverse_computation_layers = self.assigned_layers.copy()
         self.current_participate_factor_computation_layers = self.candidate_participate_factor_computation_layers.copy()
         self.update_send_trigger()
+        self._inv_assignments = new_assignment
         self.update_assignment_callback = None
 
     def get_world_size(self):
@@ -474,7 +479,7 @@ class KFacRPCCommunicator:
     
     def get_node_states(self):
         with self.node_state_lock:
-            self.node_states[self].timestamp = time.time()-self.trian_start_time
+            #self.node_states[self.rank].timestamp = time.time()-self.trian_start_time
             return self.node_states.copy()
 
     def update_node_states(self,node_states:Dict[int,NodeState], from_leader = False):
@@ -488,7 +493,7 @@ class KFacRPCCommunicator:
                 else:
                     if node_states[rank].iter > self.node_states[rank].iter:
                         self.node_states[rank].iter = state.iter
-                        #self.node_states[rank].speed = state.speed
+                        self.node_states[rank].speed = state.speed
                         self.node_states[rank].timestamp = state.timestamp
                     if from_leader:
                         self.node_states[rank].health = state.health

@@ -2,13 +2,14 @@ import time
 from random import random
 
 class FaultSimulator:
-    def __init__(self, fault_rate = 0.2, fault_continue_time = 2000):
+    def __init__(self, fault_rate = 0.2, fault_continue_time = 2000,mode = 'fault'):
         self.recover_flg = False
         self.fault_rate = fault_rate
         self.fault_continue_time = fault_continue_time
         self.fault_total_time = 0
         self.train_total_time_cb = None
         self.fault_over_time = None
+        self.mode = mode
 
     def update_fault_status(self):
         if self.fault_over_time is None and self.fault_total_time / self.train_total_time_cb() < self.fault_rate:
@@ -22,6 +23,15 @@ class FaultSimulator:
             self.recover_flg = True
 
     def is_fault(self):
-        return self.fault_over_time is not None
+        if self.mode == 'fault':
+            return self.fault_over_time is not None
+        else:
+            return False
+    
+    def is_delay(self):
+        if self.mode == 'delay':
+            return self.fault_over_time is not None
+        else:
+            return False
 
 fault_simulator = FaultSimulator(fault_rate=0.0, fault_continue_time=2.5)

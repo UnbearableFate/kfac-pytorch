@@ -324,7 +324,7 @@ class KFACPreconditioner(BaseKFACPreconditioner):
             )
 
         if self.assignment_strategy == AssignmentStrategy.COMPUTE:
-            cost_func = lambda n: n**2.5  # noqa: E731
+            cost_func = lambda n: n**3  # noqa: E731
         elif self.assignment_strategy == AssignmentStrategy.MEMORY:
             cost_func = lambda n: n**2  # noqa: E731
         else:

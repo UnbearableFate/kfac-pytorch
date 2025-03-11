@@ -1,16 +1,16 @@
 #!/bin/bash
 
 current_time=$(date "+%Y%m%d%H%M")
-mpirun -np 4 \
+mpirun -np 8 \
  /home/yu/miniconda3/envs/py311/bin/python /home/yu/workspace/kfac-pytorch/renew_resnet_cifar.py \
  --timestamp="$current_time" \
- --experiment-name="resnet18_rpc" \
- --model="resnet" \
- --layers=34 \
+ --experiment-name="mlp_test" \
+ --model="mlp" \
+ --layers=8 \
+ --dataset="FashionMNIST" \
  --train-com-method="rpc" \
- --batch-size=256 \
+ --batch-size=64 \
  --base-lr=0.001 \
- --epochs=2 \
- --warmup-epochs=5 \
+ --epochs=3 \
  --optimizer-type="adamw" \
- --lr-decay 20 40 55
+ --lr-scheduler-type="one_cycle"

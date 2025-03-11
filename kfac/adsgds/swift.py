@@ -133,7 +133,6 @@ class SwiftManager(RootModelAvgRPCCommunicator):
         with torch.no_grad() and self.local_model_store.lock:
             vector_to_parameters(result, self.model.parameters())
 
-        self.rpc_communicator.debug_print(f"model avg process done. {log_info} ,memeory usage is {self.rpc_communicator.get_memory_usage_percent()}")
         self.rpc_communicator.com_statistic.add_send_stat("model_param", len(self.graph.neighbor_list))
 
 model_avg_rpc_communicator: SwiftManager

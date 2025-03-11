@@ -56,12 +56,11 @@ delay_list_dict = [
     [0.004, 0.0055, 0.0506, 0.1451, 0.0862, 0.0365, 0.0095, 0.046, 0.116, 0.0207, 0.0056, 0.0395, 0.0476, 0.0403, 0.0086, 0.0179]
 ]
 
-slowness_threshold = 150 # 正常节点阈值
-extreme_threshold = 600 # 极端节点阈值
-relative_lag_threshold = 0.05
-extreme_relative_lag_threshold = 0.4 # 极端相对滞后阈值
+slowness_threshold = 100 # 正常节点阈值
+extreme_threshold = 500 # 极端节点阈值
+relative_lag_threshold = 0.08
+extreme_relative_lag_threshold = 0.3 # 极端相对滞后阈值
 max_election_period = 20
-relative_lag_threshold = 0.05
 
 def parse_args() -> argparse.Namespace:
     """Get cmd line args."""
