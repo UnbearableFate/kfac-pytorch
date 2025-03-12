@@ -231,7 +231,7 @@ class GeneralManager:
             time.sleep(0.1)
             fault_simulator.update_fault_status()
 
-        if fault_simulator.recover_flg:
+        if fault_simulator.recover_flg and self.preconditioner is not None:
             self.rpc_communicator.task_reassign_rpc.resurrection_declaration()
             fault_simulator.recover_flg = False
 
@@ -300,6 +300,9 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
+                if epoch >= 1:
+                    self.fault_simulation()
+
                 data = data.to(self.device)
                 target = target.to(self.device)
                 rpc_distributed.global_communicator.update_self_t()

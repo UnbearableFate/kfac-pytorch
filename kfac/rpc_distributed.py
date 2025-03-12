@@ -146,7 +146,7 @@ class KFacRPCCommunicator:
         self.com_statistic = CommunicationStatics()
         global global_communicator
         global_communicator = self
-
+        self.trian_start_time = time.time()
         if preconditioner is None:
             return
         
@@ -187,7 +187,6 @@ class KFacRPCCommunicator:
         self.gradient_computation_start = False
         self.package_sender = PackageSender(self)
         self.execution_times_statistic:Dict[str , Dict[int , list]] = {"A":{}, "G":{}}
-        self.trian_start_time = time.time()
     
     def add_execution_times_statistic(self,shape:int,type_name:str,time:float):
         """
@@ -677,7 +676,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.process_with_dynamic_weight()
+            self.model_avg_rpc.process()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def restart_sick_node(self): # call by sick nodes

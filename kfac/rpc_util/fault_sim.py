@@ -34,4 +34,4 @@ class FaultSimulator:
         else:
             return False
 
-fault_simulator = FaultSimulator(fault_rate=0.2, fault_continue_time=10)
+fault_simulator = FaultSimulator(fault_rate=0.2, fault_continue_time=6)
