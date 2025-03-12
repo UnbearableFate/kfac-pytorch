@@ -247,8 +247,8 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                if epoch >= 1:
-                    self.fault_simulation()
+                #if epoch >= 1:
+                #    self.fault_simulation()
 
                 data = data.to(self.device)
                 target = target.to(self.device)
@@ -300,8 +300,8 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                if epoch >= 1:
-                    self.fault_simulation()
+                #if epoch >= 1:
+                #    self.fault_simulation()
 
                 data = data.to(self.device)
                 target = target.to(self.device)

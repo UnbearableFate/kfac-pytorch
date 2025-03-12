@@ -11,11 +11,11 @@ mpirun --mca mpi_abort_print_stack 1 \
  --report-bindings \
  /work/xg24i002/x10041/miniconda3/envs/py313/bin/python /work/xg24i002/x10041/kfac-pytorch/renew_resnet_cifar.py\
  --timestamp="$current_time" \
- --experiment-name="rpc_1st_fault_02" \
+ --experiment-name="rpc_1st_93" \
  --train-com-method="rpc" \
  --batch-size=256 \
  --base-lr=0.001 \
- --epochs=120 \
+ --epochs=100 \
  --optimizer-type="adamw" \
  --lr-scheduler-type="one_cycle" \
  --not-kfac \

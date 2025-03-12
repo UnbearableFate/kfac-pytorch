@@ -676,7 +676,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.process()
+            self.model_avg_rpc.process_with_dynamic_weight()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def restart_sick_node(self): # call by sick nodes

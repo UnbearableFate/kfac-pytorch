@@ -9,7 +9,7 @@ class DataSendScheduler:
             send_intervals = {'model_param': 29, 'factor': 20, 'eigen': 100}
             self.next_send = {'model_param': 9, 'factor': 2, 'eigen': 5}
         else:
-            send_intervals = {'model_param': 27}
+            send_intervals = {'model_param': 29}
             self.next_send = {'model_param': 9}
         self.intervals = dict(send_intervals)
         self.start_interval = dict(send_intervals)
