@@ -235,5 +235,6 @@ def exponential_topology_sources(world_size, rank):
 if __name__ == "__main__":
     rank = MPI.COMM_WORLD.Get_rank()
     size = MPI.COMM_WORLD.Get_size()
-    ga = GraphConstruct(rank,size, MPI.COMM_WORLD, 'clique-ring', 'swift', p = 0.1, num_c=7)
+    #ga = GraphConstruct(rank,size, MPI.COMM_WORLD, 'clique-ring', 'swift', p = 0.1, num_c=4)
+    ga = GraphConstruct(rank,size, MPI.COMM_WORLD, 'erdos-renyi', 'swift', p = 0.25, num_c=4)
     print(f"Rank: {rank}, Neighbors: {ga.neighbor_list}, Weights: {ga.neighbor_weights}")

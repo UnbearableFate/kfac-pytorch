@@ -14,6 +14,7 @@ import logging
 from kfac.adsgds.exp_swift import ExpTopoSwiftManager
 from kfac.adsgds.adpsgd import AdpsgdManager
 from kfac.adsgds.swift import SwiftManager
+from kfac.adsgds.aedfl import AedflManager
 import kfac.rpc_task_manager as task_manager
 from kfac.rpc_util.send_scheduler import DataSendScheduler ,PackageSender
 import numpy as np
@@ -142,7 +143,7 @@ class KFacRPCCommunicator:
             self.node_states[i] = NodeState(i)
         self.node_state_lock = threading.Lock()
         self.init_logger(rank,log_dir)
-        self.model_avg_rpc = SwiftManager(rank, model, self)
+        self.model_avg_rpc = AedflManager(rank, model, self)
         self.com_statistic = CommunicationStatics()
         global global_communicator
         global_communicator = self
@@ -676,7 +677,7 @@ class KFacRPCCommunicator:
 
     def send_model_param(self):
         if self.data_send_scheduler.can_send("model_param"):
-            self.model_avg_rpc.process_with_dynamic_weight()
+            self.model_avg_rpc.process()
             self.data_send_scheduler.update_next_send_time("model_param")
 
     def restart_sick_node(self): # call by sick nodes

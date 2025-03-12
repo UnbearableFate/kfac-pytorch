@@ -50,11 +50,12 @@ if __name__ == '__main__':
                 f'world_size = {dist.get_world_size()}',
             )
 
-    device = torch.device(f'cuda:0')
     if args.model == 'resnet':
         model = ResNetForCIFAR10(layers=args.layers)
+        device = torch.device(f'cuda:0')
     elif args.model == 'mlp':
         model = MLP(num_hidden_layers=args.layers)
+        device = torch.device(f'cpu')
 
     model = model.to(device)
     
