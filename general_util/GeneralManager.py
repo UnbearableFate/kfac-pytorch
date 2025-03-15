@@ -247,8 +247,8 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                #if epoch >= 1:
-                #    self.fault_simulation()
+                if epoch >= 1:
+                    self.fault_simulation()
 
                 data = data.to(self.device)
                 target = target.to(self.device)
@@ -257,6 +257,7 @@ class GeneralManager:
                 self.optimizer.zero_grad()
                 
                 output = self.model(data)
+                #self.random_delay(1,0.18)
                 loss = self.loss_func(output, target)
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 loss.backward()
@@ -269,11 +270,11 @@ class GeneralManager:
                     self.lr_scheduler.step()
                 self.rpc_communicator.send_model_param()
                 
-                if com.current_t() % 50 == 49:
+                if com.current_t() % 50 == 40:
                     rpc_distributed.global_communicator.factor_computation_lazy_rebalance()
                     rpc_distributed.global_communicator.task_reassign_rpc.electing_new_leader_loop()
                 
-                if rpc_distributed.global_communicator.current_t() % 103 == 102:
+                if rpc_distributed.global_communicator.current_t() % 100 == 90:
                     rpc_distributed.global_communicator.task_reassign_rpc.check_and_reassign()
 
                 if com.task_reassign_rpc.reassign_task_callback is not None:
@@ -309,6 +310,9 @@ class GeneralManager:
                 self.optimizer.zero_grad()
                 
                 output = self.model(data)
+
+                self.random_delay(1,0.36)
+
                 loss = self.loss_func(output, target)
                 self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
                 loss.backward()

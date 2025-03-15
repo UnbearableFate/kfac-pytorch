@@ -16,7 +16,7 @@ class AdpsgdManager(RootModelAvgRPCCommunicator):
     def __init__(self, rank: int, model: torch.nn.Module, rpc_communicator: 'KFacRPCCommunicator'):
         super().__init__(rank, model, rpc_communicator)
         self.recv_buf = ModelStore(self.local_model_store.flatten_tensor)
-        #self.graph = GraphConstruct.GraphConstruct(rank,self.origin_world_size, MPI.COMM_WORLD, 'ring', 'adpsgd', p = 0.15, num_c=8)
+        self.graph = GraphConstruct.GraphConstruct(rank,self.origin_world_size, MPI.COMM_WORLD, 'ring', 'swift', p = 0.15, num_c=8)
         global model_avg_rpc_communicator
         model_avg_rpc_communicator = self
     
@@ -26,9 +26,9 @@ class AdpsgdManager(RootModelAvgRPCCommunicator):
     def process(self):
         self.update_local_flat_model()
         # randomly select a neighbor to exchange model from wolrd_size-1 neighbors
-        rank_list = list(range(self.origin_world_size))
-        rank_list.remove(self.rank)
-        target_neighbor = random.choice(rank_list)
+        #rank_list = list(range(self.origin_world_size))
+        #rank_list.remove(self.rank)
+        target_neighbor = random.choice(self.graph.getNeighbors(self.rank))
         with self.rpc_communicator.node_state_lock:
             node_states = self.rpc_communicator.node_states.copy()
         rpc.rpc_async(
