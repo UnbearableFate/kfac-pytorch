@@ -13,3 +13,4 @@ mpirun --host fern01,fern02 \
  --epochs=100 \
  --lr-scheduler-type="one_cycle" \
  --optimizer-type="adamw" \
+ --degree-noniid=0.3 \

@@ -349,6 +349,13 @@ def parse_args() -> argparse.Namespace:
         help='optimizer type , sgd or adamw',
     )
 
+    parser.add_argument(
+        '--degree-noniid',
+        type=float,
+        default=0,
+        help='degree of non-iid data distribution',
+    )
+
     args = parser.parse_args()
     if 'LOCAL_RANK' in os.environ:
         args.local_rank = int(os.environ['LOCAL_RANK'])

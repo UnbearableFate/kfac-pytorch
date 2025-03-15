@@ -2,13 +2,14 @@ import datetime
 import os
 import torch
 from torch.utils import collect_env
-from my_module.custom_resnet import ResNetForCIFAR10, MLP ,SimpleCNN
+from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 import torch.distributed as dist
 from general_util.consts import DATA_DIR, LOG_DIR, SHARE_FILES_DIR ,ompi_world_size, ompi_world_rank, parse_args
 from torch.distributed import rpc
 import examples.vision.cifar_resnet as models
 from torch.nn.parallel import DistributedDataParallel as DDP
+from my_module.my_swin import SwinTransformer, SwinTransformerBlockV2
 import time
 
 import logging
@@ -56,6 +57,17 @@ if __name__ == '__main__':
     elif args.model == 'mlp':
         model = MLP(num_hidden_layers=args.layers)
         device = torch.device(f'cpu')
+    elif args.model == 'swin':
+        model = SwinTransformer(
+            patch_size=[2, 2],            # 更小的patch_size以适应32x32输入
+            embed_dim=96,
+            depths=[2, 2, 6, 2],
+            num_heads=[3, 6, 12, 24],
+            window_size=[4, 4],           # 缩小window_size以适应更小的图像尺寸
+            num_classes=10,
+            stochastic_depth_prob=0.2,
+        )
+        device = torch.device(f'cuda:0')
 
     model = model.to(device)
     

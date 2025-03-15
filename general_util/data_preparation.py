@@ -7,47 +7,144 @@ from torch.utils.data import Sampler
 import numpy as np
 from enum import Enum
 
+import math
+import random
+from torch.utils.data import Sampler
 
-
-class SimpleNonIIDSampler(Sampler):
-    def __init__(self, dataset, world_size, rank):
-        super().__init__()
+class NonIidSampler(Sampler):
+    """
+    根据 degree_noniid 参数生成非IID采样序列，并在每个 epoch 开始时打乱顺序。
+    
+    数据分区逻辑：
+      1. 根据 dataset.targets 将所有样本按标签分组。
+      2. 按每个 worker 分得样本数计算非IID部分（ceil(total * degree_noniid)）和 IID 部分。
+      3. 对每个标签按照 degree_noniid 划分出非IID数据，其余作为 IID 数据。
+      4. 通过轮转方式为每个 worker 分配非IID数据，再为 IID 数据分配不重叠的片段。
+      5. 最终合并非IID和 IID 部分构成当前 worker 的样本索引。
+    
+    set_epoch 方法可以在每个 epoch 开始时更新随机种子，从而打乱当前 worker 内部的顺序。
+    """
+    def __init__(self, dataset, world_size, rank, degree_noniid=0.7, seed=1234):
+        """
+        参数：
+         - dataset: 训练数据集，要求具有 targets 属性（记录每个样本的标签）
+         - num_workers: 总共的 worker 数量
+         - rank: 当前 worker 的编号（0-indexed）
+         - degree_noniid: 非IID程度，取值范围 [0, 1]
+         - seed: 随机种子，用于数据划分和后续打乱
+        """
         self.dataset = dataset
+        self.num_workers = world_size
         self.rank = rank
-        self.world_size = world_size
-        self.epoch = 0
-
-        # 数据集按标签排序
-        self.sorted_indices = self.sort_dataset_by_labels()
-
-        # 根据 world_size 划分数据集
-        self.partitioned_indices = self.partition_dataset()
-
-    def sort_dataset_by_labels(self):
-        # 获取标签并排序
-        labels = np.array(self.dataset.targets)
-        sorted_indices = labels.argsort()
-        return sorted_indices
-
-    def partition_dataset(self):
-        # 分割数据集
-        num_samples = len(self.sorted_indices) // self.world_size
-        partitions = [self.sorted_indices[i * num_samples: (i + 1) * num_samples] for i in range(self.world_size)]
-        return partitions
-
-    def __iter__(self):
-        # 打乱当前节点的数据
-        np.random.seed(self.epoch)  # 保证每个 epoch 打乱方式一致
-        indices = self.partitioned_indices[self.rank]
-        np.random.shuffle(indices)
-        return iter(indices)
-
-    def __len__(self):
-        return len(self.partitioned_indices[self.rank])
-
+        self.degree_noniid = max(0, min(1, degree_noniid))
+        self.seed = seed
+        self.epoch = 0  # 记录当前 epoch
+        self.base_indices = self._generate_indices()
+        
+    def _generate_indices(self):
+        num_data = len(self.dataset)
+        # 按 worker 平均分配样本数量
+        partition_sizes = [1.0 / self.num_workers for _ in range(self.num_workers)]
+        total_worker_sizes = [int(p * num_data) for p in partition_sizes]
+        total_assigned = sum(total_worker_sizes)
+        rem = num_data - total_assigned
+        for i in range(rem):
+            total_worker_sizes[i] += 1
+        
+        worker_total = total_worker_sizes[self.rank]
+        non_iid_count = math.ceil(worker_total * self.degree_noniid)
+        iid_count = worker_total - non_iid_count
+        
+        # 1. 按标签分组
+        label_list = self.dataset.targets
+        label_idx_dict = {}
+        for idx, label in enumerate(label_list):
+            label_idx_dict.setdefault(label, []).append(idx)
+        
+        labels = list(label_idx_dict.keys())
+        num_labels = len(labels)
+        
+        # 2. 根据每个标签的样本数计算用于非IID分配的数量
+        total_label_niids = {}
+        for label in labels:
+            total_label_niids[label] = int(len(label_idx_dict[label]) * self.degree_noniid)
+        
+        # 调整各标签的非IID数量，使得所有 worker 需要的非IID样本总数匹配
+        non_iid_sum = sum(math.ceil(total_worker_sizes[w] * self.degree_noniid) for w in range(self.num_workers))
+        current_total_niid = sum(total_label_niids[label] for label in labels)
+        rem_adjust = non_iid_sum - current_total_niid
+        i = 0
+        while rem_adjust != 0 and i < len(labels):
+            label = labels[i]
+            if rem_adjust > 0:
+                total_label_niids[label] += 1
+                rem_adjust -= 1
+            elif rem_adjust < 0 and total_label_niids[label] > 0:
+                total_label_niids[label] -= 1
+                rem_adjust += 1
+            i += 1
+            if i >= len(labels) and rem_adjust != 0:
+                i = 0
+        
+        # 3. 对每个标签 shuffle，然后分割成非IID部分和 IID 池
+        rng = random.Random(self.seed)
+        for label in labels:
+            rng.shuffle(label_idx_dict[label])
+        non_iid_pool = {}
+        iid_pool = []
+        for label in labels:
+            niid = total_label_niids[label]
+            non_iid_pool[label] = label_idx_dict[label][:niid]
+            iid_pool.extend(label_idx_dict[label][niid:])
+        
+        # 4. 轮转方式为各 worker 分配非IID数据
+        current_non_iid = []
+        curr_label_idx = 0
+        for w in range(self.num_workers):
+            worker_non_iid = math.ceil(total_worker_sizes[w] * self.degree_noniid)
+            assigned = []
+            to_fill = worker_non_iid
+            while to_fill > 0:
+                current_label = labels[curr_label_idx % num_labels]
+                available = len(non_iid_pool[current_label])
+                take_num = min(to_fill, available)
+                if take_num > 0:
+                    # 从列表尾部取样，与原逻辑一致
+                    assigned.extend(non_iid_pool[current_label][-take_num:])
+                    non_iid_pool[current_label] = non_iid_pool[current_label][:-take_num]
+                to_fill -= take_num
+                curr_label_idx += 1
+            if w == self.rank:
+                current_non_iid = assigned
+                break
+        
+        # 5. IID 部分：先随机打乱后分段分配，每个 worker 获得不重复的片段
+        rng.shuffle(iid_pool)
+        iid_start = 0
+        for w in range(self.rank):
+            worker_iid = total_worker_sizes[w] - math.ceil(total_worker_sizes[w] * self.degree_noniid)
+            iid_start += worker_iid
+        current_iid = iid_pool[iid_start: iid_start + iid_count]
+        
+        # 合并非IID和 IID 部分，构成最终索引列表
+        final_indices = current_non_iid + current_iid
+        return final_indices
+    
     def set_epoch(self, epoch):
-        # 设置 epoch，以便重新打乱
+        """
+        在每个 epoch 开始时调用，更新 epoch 后在 __iter__ 中用新的随机种子打乱索引顺序。
+        """
         self.epoch = epoch
+        
+    def __iter__(self):
+        # 每个 epoch 用 seed+epoch 生成新的随机顺序打乱 base_indices
+        indices = self.base_indices.copy()
+        rng = random.Random(self.seed + self.epoch)
+        rng.shuffle(indices)
+        return iter(indices)
+    
+    def __len__(self):
+        return len(self.base_indices)
 
 
 cifar10_transform_train = transforms.Compose(
@@ -120,7 +217,7 @@ class DataPreparer:
             else:
                 self.train_sampler = None #DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7)
         else:
-            self.train_sampler = sampler(self.train_dataset,world_size,rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
+            self.train_sampler = sampler(dataset=self.train_dataset,world_size= world_size,rank = rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
 
         if train_com_method == 'ddp':
             self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)

@@ -3,7 +3,8 @@ import random
 import time
 import torch
 from tqdm import tqdm
-from general_util.data_preparation import DataPreparer
+from general_util.data_preparation import DataPreparer, NonIidSampler
+from functools import partial
 import torch.distributed as dist
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
@@ -47,6 +48,8 @@ class GeneralManager:
         except Exception as e:
             raise RuntimeError(f"Unable to create log directory: {log_dir}")
 
+        if args.degree_noniid > 0:
+            sampler_func =  partial(NonIidSampler, degree_noniid=args.degree_noniid)
         self.data_manager = DataPreparer(data_path_root=DATA_DIR, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
