@@ -13,6 +13,7 @@ import kfac.rpc_distributed as rpc_distributed
 from  kfac.rpc_util.fault_sim import fault_simulator
 from general_util.consts import CHECK_POINT_PATH, DATA_DIR, LOG_DIR, SHARE_FILES_DIR
 from examples.vision.optimizers import get_optimizer
+from .optimizers import get_kfac_preconditioner, get_swin_optimizer
 import csv
 
 class GeneralManager:
@@ -53,17 +54,24 @@ class GeneralManager:
         self.data_manager = DataPreparer(data_path_root=DATA_DIR, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
-        self.loss_func = nn.CrossEntropyLoss()
+        if args.model == "swin":
+            label_smoothing = 0.1
+            self.loss_func =nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+            self.optimizer, self.lr_scheduler = get_swin_optimizer(model, args)
+            self.preconditioner,self.kfac_scheduler = get_kfac_preconditioner(model, args,self.optimizer)
 
-        (
-            self.optimizer,
-            self.preconditioner,
-            (self.lr_scheduler, self.kfac_scheduler),
-        ) = get_optimizer(
-            model,
-            args,
-            total_steps=epochs * len(self.data_manager.train_loader),
-        )
+        else:
+            self.loss_func = nn.CrossEntropyLoss() 
+            (
+                self.optimizer,
+                self.preconditioner,
+                (self.lr_scheduler, self.kfac_scheduler),
+            ) = get_optimizer(
+                model,
+                args,
+                total_steps=epochs * len(self.data_manager.train_loader),
+            )
+
         self.lr_scheduler_type = args.lr_scheduler_type
         self.optimizer_type = args.optimizer_type
 
@@ -112,7 +120,7 @@ class GeneralManager:
         
         if rank == 0:
             print(f"Model: {model_name}, Dataset: {dataset_name}, Experiment: {experiment_name}, Epochs: {epochs}, Batch size: {batch_size}, Recover: {recover}, Timestamp: {timestamp}")
-            print(f"Optimizer: {self.optimizer_type}, LR Scheduler: {self.lr_scheduler_type}, Train Communication Method: {train_com_method}")
+            print(f"Optimizer: {self.optimizer}, LR Scheduler: {self.lr_scheduler}, Train Communication Method: {train_com_method}")
 
     def train_and_test(self):
         writer_path = self.log_dir
@@ -126,7 +134,7 @@ class GeneralManager:
             self.train_total_time += time.time() - start_time
             if self.writer is not None:
                 self.writer.add_scalar("Total train time", self.train_total_time) 
-            if self.lr_scheduler_type == "multi_step":
+            if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.OneCycleLR):
                 self.lr_scheduler.step()
             if self.kfac_scheduler is not None:
                 self.kfac_scheduler.step(step=i)
@@ -153,12 +161,14 @@ class GeneralManager:
         for i in range(self.start_epoch, self.epochs):
             start_time = time.time()
             if self.preconditioner is None:
-                self.ad_sgd_train(epoch=i)
+                loss = self.ad_sgd_train(epoch=i)
             else:
-                self.ad_kfac_train(epoch=i)
+                loss = self.ad_kfac_train(epoch=i)
             self.train_total_time += time.time() - start_time
             if self.writer is not None:
                 self.writer.add_scalar("Total train time", self.train_total_time,i)
+                self.writer.add_scalar('Loss/train', loss, i)
+                self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], i)
             if self.lr_scheduler_type == "multi_step":
                 self.lr_scheduler.step()
             self.test_local(epoch=i)
@@ -289,9 +299,7 @@ class GeneralManager:
                     rpc_distributed.global_communicator.print_rpc_state()
 
                 t.update()
-        if self.writer is not None:
-            self.writer.add_scalar('Loss/train', loss.item(), epoch)
-            self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
+        return loss.item()
     
     def ad_sgd_train(self, epoch):
         self.model.train()
@@ -333,10 +341,7 @@ class GeneralManager:
                     rpc_distributed.global_communicator.print_rpc_state()
                 t.update()
         
-        if self.writer is not None:
-            self.writer.add_scalar('Loss/train', loss.item(), epoch)
-            self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], epoch)
-
+        return loss.item()
 
     def test_all(self, epoch):
         self.model.eval()

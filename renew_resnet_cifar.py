@@ -27,7 +27,7 @@ if __name__ == '__main__':
     timeout = datetime.timedelta(seconds=60)
 
     if args.train_com_method == 'ddp':
-        backend = 'nccl'
+        backend = 'gloo'
     else:
         backend = 'gloo'
 

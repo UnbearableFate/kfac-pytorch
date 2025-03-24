@@ -1,0 +1,14 @@
+#!/bin/bash
+
+current_time=$(date "+%Y%m%d%H%M")
+mpirun --host fern01,fern02 \
+ -np 2 -map-by ppr:1:node \
+ /home/yu/miniconda3/envs/py311/bin/python /home/yu/workspace/kfac-pytorch/renew_resnet_cifar.py \
+ --timestamp="$current_time"\
+ --experiment-name="resnet32_ddp_multi_step_adamw" \
+ --kfac-inv-update-steps=60 \
+ --kfac-factor-update-steps=15 \
+ --batch-size=256 \
+ --model="swin" \
+ --epochs=2 \
+ --warmup-epochs=1 \

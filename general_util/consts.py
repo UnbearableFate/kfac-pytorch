@@ -63,300 +63,96 @@ extreme_relative_lag_threshold = 0.3 # 极端相对滞后阈值
 max_election_period = 20
 
 def parse_args() -> argparse.Namespace:
-    """Get cmd line args."""
-    # General settings
-    parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Example')
-    parser.add_argument(
-        '--data-dir',
-        type=str,
-        default='/tmp/cifar10',
-        metavar='D',
-        help='directory to download cifar10 dataset to',
-    )
-    parser.add_argument(
-        '--log-dir',
-        default='./logs/torch_cifar10',
-        help='TensorBoard/checkpoint directory',
-    )
-    parser.add_argument(
-        '--checkpoint-format',
-        default='checkpoint_{epoch}.pth.tar',
-        help='checkpoint file format',
-    )
-    parser.add_argument(
-        '--no-cuda',
-        action='store_true',
-        default=False,
-        help='disables CUDA training',
-    )
-    parser.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        metavar='S',
-        help='random seed (default: 42)',
-    )
-    parser.add_argument(
-        '--fp16',
-        action='store_true',
-        default=False,
-        help='use torch.cuda.amp for fp16 training (default: false)',
-    )
+    parser = argparse.ArgumentParser(description='Unified PyTorch Training')
 
-    # Training settings
-    parser.add_argument(
-        '--model',
-        type=str,
-        default='resnet',
-        help='ResNet model',
-    )
+    # ==== General Settings ====
+    parser.add_argument('--data-dir', default='/tmp/cifar10', help='Directory for dataset')
+    parser.add_argument('--data-path', default='/datasets01/imagenet_full_size/061417/', help='Alternative dataset path')
+    parser.add_argument('--dataset-name', default='CIFAR10', help='Dataset name (e.g., CIFAR10, ImageNet)')
+    parser.add_argument('--log-dir', default='./logs', help='Log directory')
+    parser.add_argument('--output-dir', default='.', help='Output directory')
+    parser.add_argument('--no-cuda', action='store_true', help='Disable CUDA')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--fp16', action='store_true', help='Use FP16 precision')
+    parser.add_argument('--amp', action='store_true', help='Use AMP mixed precision')
+    parser.add_argument('--use-deterministic-algorithms', action='store_true', help='Use deterministic algorithms')
 
-    parser.add_argument(
-        '--layers',
-        type=int,
-        default=34,
-        help='number of layers in ResNet (default: 18)',
-    )
+    # ==== Model Settings ====
+    parser.add_argument('--model', default='resnet18', help='Model name')
+    parser.add_argument('--layers', type=int, default=34, help='Number of layers in ResNet')
+    parser.add_argument('--weights', default=None, help='Pretrained weights to load')
 
-    parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=128,
-        metavar='N',
-        help='input batch size for training (default: 128)',
-    )
-    parser.add_argument(
-        '--val-batch-size',
-        type=int,
-        default=128,
-        help='input batch size for validation (default: 128)',
-    )
-    parser.add_argument(
-        '--batches-per-allreduce',
-        type=int,
-        default=1,
-        help='number of batches processed locally before '
-        'executing allreduce across workers; it multiplies '
-        'total batch size.',
-    )
-    parser.add_argument(
-        '--epochs',
-        type=int,
-        default=100,
-        metavar='N',
-        help='number of epochs to train (default: 100)',
-    )
-    parser.add_argument(
-        '--base-lr',
-        type=float,
-        default=0.1,
-        metavar='LR',
-        help='base learning rate (default: 0.1)',
-    )
-    parser.add_argument(
-        '--lr-decay',
-        nargs='+',
-        type=int,
-        default=[35, 75, 90],
-        help='epoch intervals to decay lr (default: [35, 75, 90])',
-    )
-    parser.add_argument(
-        '--warmup-epochs',
-        type=int,
-        default=5,
-        metavar='WE',
-        help='number of warmup epochs (default: 5)',
-    )
-    parser.add_argument(
-        '--momentum',
-        type=float,
-        default=0.9,
-        metavar='M',
-        help='SGD momentum (default: 0.9)',
-    )
-    parser.add_argument(
-        '--weight-decay',
-        type=float,
-        default=5e-4,
-        metavar='W',
-        help='SGD weight decay (default: 5e-4)',
-    )
-    parser.add_argument(
-        '--checkpoint-freq',
-        type=int,
-        default=10,
-        help='epochs between checkpoints',
-    )
+    # ==== Training Settings ====
+    parser.add_argument('--batch-size', default=128, type=int, help='Training batch size')
+    parser.add_argument('--val-batch-size', default=128, type=int, help='Validation batch size')
+    parser.add_argument('--epochs', default=100, type=int, help='Number of epochs')
+    parser.add_argument('--base-lr', default=0.1, type=float, help='Base learning rate')
+    parser.add_argument('--momentum', default=0.9, type=float, help='Optimizer momentum')
+    parser.add_argument('--weight-decay', default=5e-4, type=float, help='Weight decay')
+    parser.add_argument('--optimizer-type', default='sgd', choices=['sgd', 'adamw'], help='Optimizer type')
+    parser.add_argument('--clip-grad-norm', default=None, type=float, help='Gradient clipping')
 
-    # KFAC Parameters
-    parser.add_argument(
-        '--kfac-inv-update-steps',
-        type=int,
-        default=10,
-        help='iters between kfac inv ops (0 disables kfac) (default: 10)',
-    )
-    parser.add_argument(
-        '--kfac-factor-update-steps',
-        type=int,
-        default=1,
-        help='iters between kfac cov ops (default: 1)',
-    )
-    parser.add_argument(
-        '--kfac-update-steps-alpha',
-        type=float,
-        default=10,
-        help='KFAC update step multiplier (default: 10)',
-    )
-    parser.add_argument(
-        '--kfac-update-steps-decay',
-        nargs='+',
-        type=int,
-        default=None,
-        help='KFAC update step decay schedule (default None)',
-    )
-    parser.add_argument(
-        '--kfac-inv-method',
-        action='store_true',
-        default=False,
-        help='Use inverse KFAC update instead of eigen (default False)',
-    )
-    parser.add_argument(
-        '--kfac-factor-decay',
-        type=float,
-        default=0.95,
-        help='Alpha value for covariance accumulation (default: 0.95)',
-    )
-    parser.add_argument(
-        '--kfac-damping',
-        type=float,
-        default=0.003,
-        help='KFAC damping factor (defaultL 0.003)',
-    )
-    parser.add_argument(
-        '--kfac-damping-alpha',
-        type=float,
-        default=0.5,
-        help='KFAC damping decay factor (default: 0.5)',
-    )
-    parser.add_argument(
-        '--kfac-damping-decay',
-        nargs='+',
-        type=int,
-        default=None,
-        help='KFAC damping decay schedule (default None)',
-    )
-    parser.add_argument(
-        '--kfac-kl-clip',
-        type=float,
-        default=0.001,
-        help='KL clip (default: 0.001)',
-    )
-    parser.add_argument(
-        '--kfac-skip-layers',
-        nargs='+',
-        type=str,
-        default=[],
-        help='Layer types to ignore registering with KFAC (default: [])',
-    )
-    parser.add_argument(
-        '--kfac-colocate-factors',
-        action='store_true',
-        default=True,
-        help='Compute A and G for a single layer on the same worker. ',
-    )
-    parser.add_argument(
-        '--kfac-strategy',
-        type=str,
-        default='comm-opt',
-        help='KFAC communication optimization strategy. One of comm-opt, '
-        'mem-opt, or hybrid_opt. (default: comm-opt)',
-    )
-    parser.add_argument(
-        '--kfac-grad-worker-fraction',
-        type=float,
-        default=0.25,
-        help='Fraction of workers to compute the gradients '
-        'when using HYBRID_OPT (default: 0.25)',
-    )
+    # ==== LR Scheduler Settings ====
+    parser.add_argument('--lr-scheduler-type', default='steplr', help='LR scheduler type')
+    parser.add_argument('--lr-step-size', default=30, type=int, help='Step size for LR scheduler')
+    parser.add_argument('--lr-gamma', default=0.1, type=float, help='LR decay factor')
+    parser.add_argument('--lr-min', default=0.0, type=float, help='Minimum LR')
+    parser.add_argument('--warmup-epochs', default=0, type=int, help='Number of warmup epochs')
+    parser.add_argument('--warmup-method', default='constant', help='LR warmup method')
+    parser.add_argument('--warmup-decay', default=0.01, type=float, help='LR warmup decay factor')
 
-    parser.add_argument(
-        '--backend',
-        type=str,
-        default='nccl',
-        help='backend for distribute training (default: nccl)',
-    )
-    # Set automatically by torch distributed launch
-    parser.add_argument(
-        '--local_rank',
-        type=int,
-        default=0,
-        help='local rank for distributed training',
-    )
-    
-    parser.add_argument(
-        '--timestamp',
-        type=str,
-        default=datetime.datetime.now().strftime('%Y%m%d_%H%M'),
-        help='timestamp for the experiment',
-    )
+    # ==== Data Augmentation ====
+    parser.add_argument('--label-smoothing', default=0.0, type=float, help='Label smoothing factor')
+    parser.add_argument('--mixup-alpha', default=0.0, type=float, help='Mixup alpha')
+    parser.add_argument('--cutmix-alpha', default=0.0, type=float, help='Cutmix alpha')
+    parser.add_argument('--auto-augment', default=None, help='Auto augment policy')
+    parser.add_argument('--ra-magnitude', default=9, type=int, help='RandAugment magnitude')
+    parser.add_argument('--augmix-severity', default=3, type=int, help='AugMix severity level')
+    parser.add_argument('--random-erase', default=0.0, type=float, help='Random erase probability')
 
-    parser.add_argument(
-        '--experiment-name',
-        type=str,
-        default='cifar10_resnet',
-        help='name of the experiment',
-    )
+    # ==== Distributed Training ====
+    parser.add_argument('--backend', default='nccl', help='Distributed backend')
+    parser.add_argument('--world-size', default=1, type=int, help='Number of distributed processes')
+    parser.add_argument('--local_rank', default=0, type=int, help='Local rank for distributed training')
+    parser.add_argument('--dist-url', default='env://', help='Distributed URL')
+    parser.add_argument('--sync-bn', action='store_true', help='Use SyncBatchNorm')
+    parser.add_argument('--train-com-method', default='ddp', help='Distributed training communication method')
 
-    parser.add_argument(
-        '--recover',
-        action='store_true',
-        default=False,
-        help='recover from checkpoint',
-    )
-    
-    parser.add_argument(
-        '--not-kfac',
-        action='store_true',
-        default=False,
-        help='disable kfac',
-    )
+    # ==== EMA Settings ====
+    parser.add_argument('--model-ema', action='store_true', help='Enable model EMA')
+    parser.add_argument('--model-ema-steps', default=32, type=int, help='EMA update steps')
+    parser.add_argument('--model-ema-decay', default=0.99998, type=float, help='EMA decay rate')
 
-    parser.add_argument(
-        '--dataset-name',
-        type=str,
-        default="CIFAR10",
-        help='name of the dataset',
-    )
+    # ==== KFAC Specific Parameters ====
+    parser.add_argument('--kfac-inv-update-steps', type=int, default=10, help='Steps between KFAC inverse updates')
+    parser.add_argument('--kfac-factor-update-steps', type=int, default=1, help='Steps between KFAC factor updates')
+    parser.add_argument('--kfac-update-steps-alpha', type=float, default=10, help='Multiplier for KFAC update steps')
+    parser.add_argument('--kfac-update-steps-decay', nargs='+', type=int, default=None, help='Decay schedule for KFAC update steps')
+    parser.add_argument('--kfac-inv-method', action='store_true', help='Use inverse KFAC method')
+    parser.add_argument('--kfac-factor-decay', type=float, default=0.95, help='Factor decay for KFAC covariance accumulation')
+    parser.add_argument('--kfac-damping', type=float, default=0.003, help='KFAC damping factor')
+    parser.add_argument('--kfac-damping-alpha', type=float, default=0.5, help='Decay factor for KFAC damping')
+    parser.add_argument('--kfac-damping-decay', nargs='+', type=int, default=None, help='Damping decay schedule for KFAC')
+    parser.add_argument('--kfac-kl-clip', type=float, default=0.001, help='KL clip value for KFAC')
+    parser.add_argument('--kfac-skip-layers', nargs='+', type=str, default=[], help='Layers to skip for KFAC')
+    parser.add_argument('--kfac-colocate-factors', action='store_true', default=True, help='Colocate KFAC factors')
+    parser.add_argument('--kfac-strategy', type=str, default='comm-opt', help='KFAC communication optimization strategy')
+    parser.add_argument('--kfac-grad-worker-fraction', type=float, default=0.25, help='Gradient worker fraction for KFAC hybrid optimization')
+    parser.add_argument('--not-kfac', action='store_true', default=False, help='Disable KFAC')
 
-    parser.add_argument(
-        '--train-com-method',
-        type=str,
-        default="ddp",
-        help='communication method for training',
-    )
-
-    parser.add_argument(
-        '--lr-scheduler-type',
-        type=str,
-        default="multi_step",
-        help='lr scheduler type',
-    )
-
-    parser.add_argument(
-        '--optimizer-type',
-        type=str,
-        default="sgd",
-        help='optimizer type , sgd or adamw',
-    )
-
-    parser.add_argument(
-        '--degree-noniid',
-        type=float,
-        default=0,
-        help='degree of non-iid data distribution',
-    )
+    # ==== Miscellaneous ====
+    parser.add_argument('--print-freq', default=10, type=int, help='Print frequency')
+    parser.add_argument('--checkpoint-format', default='checkpoint_{epoch}.pth.tar', help='Checkpoint format')
+    parser.add_argument('--checkpoint-freq', default=10, type=int, help='Checkpoint frequency')
+    parser.add_argument('--recover', action='store_true', help='Recover from checkpoint')
+    parser.add_argument('--resume', default='', help='Checkpoint resume path')
+    parser.add_argument('--timestamp', default=datetime.datetime.now().strftime('%Y%m%d_%H%M'), help='Timestamp for the experiment')
+    parser.add_argument('--experiment-name', default='experiment', help='Experiment name')
+    parser.add_argument('--degree-noniid', type=float, default=0, help='Degree of non-IID distribution')
 
     args = parser.parse_args()
+
+    # Automatically set local_rank if available
     if 'LOCAL_RANK' in os.environ:
         args.local_rank = int(os.environ['LOCAL_RANK'])
     args.cuda = not args.no_cuda and torch.cuda.is_available()

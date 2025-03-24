@@ -1,15 +1,23 @@
-import os.path
-from torchvision import datasets, transforms
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data import DataLoader, BatchSampler
-
-from torch.utils.data import Sampler
-import numpy as np
-from enum import Enum
-
+import os
 import math
 import random
-from torch.utils.data import Sampler
+import time
+from enum import Enum
+from typing import Tuple
+
+import torch
+from torch.utils.data import DataLoader, Sampler
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data.dataloader import default_collate
+from torchvision import datasets, transforms
+from torchvision.transforms.functional import InterpolationMode
+
+import torchvision
+import utils
+import presets
+from sampler import RASampler
+from transforms import get_mixup_cutmix
+
 
 class NonIidSampler(Sampler):
     """
@@ -193,42 +201,136 @@ class DataPreparer:
         "CIFAR10": datasets.CIFAR10,
     }
 
-    def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None, train_transform =None,test_transform=None,train_com_method='ddp'):
+    def __init__(self, data_path_root, dataset_name, args):
         self.data_path = os.path.join(data_path_root, dataset_name)
-        if train_transform is not None:
-            self.train_transform = train_transform
-        else:
-            self.train_transform = DataPreparer.train_transform_dict[dataset_name]
-        if test_transform is not None:
-            self.test_transform = test_transform
-        else:
-            self.test_transform = DataPreparer.test_transform_dict[dataset_name]
+        
+        train_dir = os.path.join(self.data_path, "train")
+        val_dir = os.path.join(self.data_path, "val")
+        dataset, dataset_test, train_sampler, test_sampler = load_data(train_dir, val_dir, args)
 
-        print(f"data path : {self.data_path}")
-        self.train_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=True, download=False,
-                                                                     transform=self.train_transform)
-        self.test_dataset = DataPreparer.dataset_func[dataset_name](self.data_path, train=False, download=False,
-                                                                    transform=self.test_transform)
-        self.batch_size = batch_size
-
-        if sampler is None:
-            if train_com_method == 'rpc':
-                self.train_sampler = None #DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7) #None
-            else:
-                self.train_sampler = None #DistributedSampler(self.train_dataset, num_replicas=world_size, rank=rank,seed=7)
+        num_classes = len(dataset.classes)
+        mixup_cutmix = get_mixup_cutmix(
+            mixup_alpha=args.mixup_alpha, cutmix_alpha=args.cutmix_alpha, num_classes=num_classes, use_v2=args.use_v2
+        )
+        if mixup_cutmix is not None:
+            def collate_fn(batch):
+                return mixup_cutmix(*default_collate(batch))
         else:
-            self.train_sampler = sampler(dataset=self.train_dataset,world_size= world_size,rank = rank) #BatchSampler(sampler=sampler(self.train_dataset,world_size,rank),batch_size=batch_size,drop_last=False)
+            collate_fn = default_collate
 
-        if train_com_method == 'ddp':
-            self.test_sampler = DistributedSampler(self.test_dataset, num_replicas=world_size, rank=rank)
-        else:
-            self.test_sampler = None
-        self.train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=(self.train_sampler is None),
-                                       sampler=self.train_sampler, num_workers=2, persistent_workers =True,pin_memory=True, prefetch_factor=2)
-        self.test_loader = DataLoader(self.test_dataset, batch_size=batch_size, shuffle=False,
-                                      sampler=self.test_sampler,
-                                      num_workers=2, persistent_workers=True,pin_memory=True)
+        self.train_loader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            sampler=train_sampler,
+            num_workers=args.workers,
+            pin_memory=True,
+            collate_fn=collate_fn,
+        )
+        self.test_loader =  DataLoader(
+            dataset_test, batch_size=args.batch_size, sampler=test_sampler, num_workers=args.workers, pin_memory=True
+        )
+        print("Data preparation finished.")
+        print(f"Train data size: {len(dataset)}")
 
     def set_epoch(self,epoch):
         if self.train_sampler is not None and hasattr(self.train_sampler,"set_epoch"):
             self.train_sampler.set_epoch(epoch)
+
+
+def load_data(traindir, valdir, args):
+    # Data loading code
+    print("Loading data")
+    val_resize_size, val_crop_size, train_crop_size = (
+        args.val_resize_size,
+        args.val_crop_size,
+        args.train_crop_size,
+    )
+    interpolation = InterpolationMode(args.interpolation)
+
+    print("Loading training data")
+    st = time.time()
+    cache_path = _get_cache_path(traindir)
+    if args.cache_dataset and os.path.exists(cache_path):
+        # Attention, as the transforms are also cached!
+        print(f"Loading dataset_train from {cache_path}")
+        # TODO: this could probably be weights_only=True
+        dataset, _ = torch.load(cache_path, weights_only=False)
+    else:
+        # We need a default value for the variables below because args may come
+        # from train_quantization.py which doesn't define them.
+        auto_augment_policy = getattr(args, "auto_augment", None)
+        random_erase_prob = getattr(args, "random_erase", 0.0)
+        ra_magnitude = getattr(args, "ra_magnitude", None)
+        augmix_severity = getattr(args, "augmix_severity", None)
+        if args.dataset == "imagenet":
+            dataset = torchvision.datasets.ImageFolder(
+                traindir,
+                presets.ClassificationPresetTrain(
+                    crop_size=train_crop_size,
+                    interpolation=interpolation,
+                    auto_augment_policy=auto_augment_policy,
+                    random_erase_prob=random_erase_prob,
+                    ra_magnitude=ra_magnitude,
+                    augmix_severity=augmix_severity,
+                    backend=args.backend,
+                    use_v2=args.use_v2,
+                ),
+            )
+        if args.cache_dataset:
+            print(f"Saving dataset_train to {cache_path}")
+            utils.mkdir(os.path.dirname(cache_path))
+            utils.save_on_master((dataset, traindir), cache_path)
+    print("Took", time.time() - st)
+
+    print("Loading validation data")
+    cache_path = _get_cache_path(valdir)
+    if args.cache_dataset and os.path.exists(cache_path):
+        # Attention, as the transforms are also cached!
+        print(f"Loading dataset_test from {cache_path}")
+        # TODO: this could probably be weights_only=True
+        dataset_test, _ = torch.load(cache_path, weights_only=False)
+    else:
+        if args.weights and args.test_only:
+            weights = torchvision.models.get_weight(args.weights)
+            preprocessing = weights.transforms(antialias=True)
+            if args.backend == "tensor":
+                preprocessing = torchvision.transforms.Compose([torchvision.transforms.PILToTensor(), preprocessing])
+
+        else:
+            preprocessing = presets.ClassificationPresetEval(
+                crop_size=val_crop_size,
+                resize_size=val_resize_size,
+                interpolation=interpolation,
+                backend=args.backend,
+                use_v2=args.use_v2,
+            )
+
+        dataset_test = torchvision.datasets.ImageFolder(
+            valdir,
+            preprocessing,
+        )
+        if args.cache_dataset:
+            print(f"Saving dataset_test to {cache_path}")
+            utils.mkdir(os.path.dirname(cache_path))
+            utils.save_on_master((dataset_test, valdir), cache_path)
+
+    print("Creating data loaders")
+    if args.distributed:
+        if hasattr(args, "ra_sampler") and args.ra_sampler:
+            train_sampler = RASampler(dataset, shuffle=True, repetitions=args.ra_reps)
+        else:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test, shuffle=False)
+    else:
+        train_sampler = torch.utils.data.RandomSampler(dataset)
+        test_sampler = torch.utils.data.SequentialSampler(dataset_test)
+
+    return dataset, dataset_test, train_sampler, test_sampler
+
+def _get_cache_path(filepath):
+    import hashlib
+
+    h = hashlib.sha1(filepath.encode()).hexdigest()
+    cache_path = os.path.join("~", ".torch", "vision", "datasets", "imagefolder", h[:10] + ".pt")
+    cache_path = os.path.expanduser(cache_path)
+    return cache_path
