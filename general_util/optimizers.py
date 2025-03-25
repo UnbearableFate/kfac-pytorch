@@ -27,9 +27,9 @@ def get_swin_optimizer(model, args):
         ],
     )
     optimizer = AdamW(parameters, lr=lr, weight_decay=weight_decay)
-    main_lr_scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - args.warmup_epochs, eta_min=1e-5)
-    warmup_lr_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=args.warmup_epochs)
-    lr_scheduler = SequentialLR(optimizer, schedulers=[warmup_lr_scheduler, main_lr_scheduler], milestones=[args.warmup_epochs])
+    main_lr_scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - args.lr_warmup_epochs, eta_min=1e-5)
+    warmup_lr_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=args.lr_warmup_epochs)
+    lr_scheduler = SequentialLR(optimizer, schedulers=[warmup_lr_scheduler, main_lr_scheduler], milestones=[args.lr_warmup_epochs])
     return optimizer, lr_scheduler
 
 def get_kfac_preconditioner(model, args,optimizer):

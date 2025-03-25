@@ -13,10 +13,9 @@ from torchvision import datasets, transforms
 from torchvision.transforms.functional import InterpolationMode
 
 import torchvision
-import utils
-import presets
-from sampler import RASampler
-from transforms import get_mixup_cutmix
+from . import utils, presets
+from .sampler import RASampler
+from .transforms import get_mixup_cutmix
 
 
 class NonIidSampler(Sampler):
@@ -201,8 +200,8 @@ class DataPreparer:
         "CIFAR10": datasets.CIFAR10,
     }
 
-    def __init__(self, data_path_root, dataset_name, args):
-        self.data_path = os.path.join(data_path_root, dataset_name)
+    def __init__(self, args):
+        self.data_path = args.data_path
         
         train_dir = os.path.join(self.data_path, "train")
         val_dir = os.path.join(self.data_path, "val")

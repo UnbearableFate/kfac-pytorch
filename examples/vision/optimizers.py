@@ -30,33 +30,33 @@ def get_optimizer(
     #use_kfac = True if args.kfac_inv_update_steps > 0 else False
 
     if args.optimizer_type == 'sgd':
-        args.base_lr = (
-            args.base_lr * dist.get_world_size() * args.batches_per_allreduce
+        args.lr = (
+            args.lr * dist.get_world_size() * args.batches_per_allreduce
         )
         optimizer = optim.SGD(
             model.parameters(),
-            lr=args.base_lr,
+            lr=args.lr,
             momentum=args.momentum,
             weight_decay=args.weight_decay,
         )
     elif args.optimizer_type == 'adamw':
         optimizer = optim.AdamW(
             model.parameters(),
-            lr=args.base_lr,
+            lr=args.lr,
         )
     
     lr_scheduler = None
-    if args.lr_scheduler_type == 'multi_step':
+    if args.lr_scheduler == 'multi_step':
         lrs = create_lr_schedule(
         dist.get_world_size(),
-        args.warmup_epochs,
+        args.lr_warmup_epochs,
         args.lr_decay,
         )
         lr_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lrs)
-    elif args.lr_scheduler_type == "one_cycle":
+    elif args.lr_scheduler == "one_cycle":
         lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
-            max_lr=args.base_lr,
+            max_lr=args.lr,
             total_steps=total_steps,
             pct_start=0.2
         )

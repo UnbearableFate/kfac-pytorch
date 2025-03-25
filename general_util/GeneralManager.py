@@ -54,25 +54,11 @@ class GeneralManager:
         self.data_manager = DataPreparer(data_path_root=DATA_DIR, dataset_name=dataset_name, world_size=world_size, rank=rank,
                                          sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
 
-        if args.model == "swin":
-            label_smoothing = 0.1
-            self.loss_func =nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-            self.optimizer, self.lr_scheduler = get_swin_optimizer(model, args)
-            self.preconditioner,self.kfac_scheduler = get_kfac_preconditioner(model, args,self.optimizer)
+        self.loss_func =nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+        self.optimizer, self.lr_scheduler = get_swin_optimizer(model, args)
+        self.preconditioner,self.kfac_scheduler = get_kfac_preconditioner(model, args,self.optimizer)
 
-        else:
-            self.loss_func = nn.CrossEntropyLoss() 
-            (
-                self.optimizer,
-                self.preconditioner,
-                (self.lr_scheduler, self.kfac_scheduler),
-            ) = get_optimizer(
-                model,
-                args,
-                total_steps=epochs * len(self.data_manager.train_loader),
-            )
-
-        self.lr_scheduler_type = args.lr_scheduler_type
+        self.lr_scheduler_type = args.lr_scheduler
         self.optimizer_type = args.optimizer_type
 
         if train_com_method == "rpc":
