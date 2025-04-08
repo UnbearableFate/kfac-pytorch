@@ -6,7 +6,7 @@ if TYPE_CHECKING:
 class DataSendScheduler:
     def __init__(self, is_kfac:bool = True):
         if is_kfac:
-            send_intervals = {'model_param': 29, 'factor': 20, 'eigen': 100}
+            send_intervals = {'model_param': 29, 'factor': 20, 'eigen': 200}
             self.next_send = {'model_param': 9, 'factor': 2, 'eigen': 5}
         else:
             send_intervals = {'model_param': 29}

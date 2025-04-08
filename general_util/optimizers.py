@@ -3,33 +3,74 @@ import kfac
 from torch.optim import AdamW
 import torch
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
-
-
-
-lr = 0.001
-weight_decay = 0.05
-norm_weight_decay = 0.0
-bias_weight_decay = 0.0
-transformer_embedding_decay = 0.0
-label_smoothing = 0.1
-clip_grad_norm = 5.0
+from . import utils
 
 def get_swin_optimizer(model, args):
-    parameters = set_weight_decay(
+    custom_keys_weight_decay = []
+    if args.bias_weight_decay is not None:
+        custom_keys_weight_decay.append(("bias", args.bias_weight_decay))
+    if args.transformer_embedding_decay is not None:
+        for key in ["class_token", "position_embedding", "relative_position_bias_table"]:
+            custom_keys_weight_decay.append((key, args.transformer_embedding_decay))
+    parameters = utils.set_weight_decay(
         model,
-        weight_decay,
-        norm_weight_decay=norm_weight_decay,
-        custom_keys_weight_decay=[
-            ('bias', bias_weight_decay),
-            ('class_token', transformer_embedding_decay),
-            ('position_embedding', transformer_embedding_decay),
-            ('relative_position_bias_table', transformer_embedding_decay)
-        ],
+        args.weight_decay,
+        norm_weight_decay=args.norm_weight_decay,
+        custom_keys_weight_decay=custom_keys_weight_decay if len(custom_keys_weight_decay) > 0 else None,
     )
-    optimizer = AdamW(parameters, lr=lr, weight_decay=weight_decay)
-    main_lr_scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs - args.lr_warmup_epochs, eta_min=1e-5)
-    warmup_lr_scheduler = LinearLR(optimizer, start_factor=0.01, total_iters=args.lr_warmup_epochs)
-    lr_scheduler = SequentialLR(optimizer, schedulers=[warmup_lr_scheduler, main_lr_scheduler], milestones=[args.lr_warmup_epochs])
+
+    opt_name = args.opt.lower()
+    if opt_name.startswith("sgd"):
+        optimizer = torch.optim.SGD(
+            parameters,
+            lr=args.lr,
+            momentum=args.momentum,
+            weight_decay=args.weight_decay,
+            nesterov="nesterov" in opt_name,
+        )
+    elif opt_name == "rmsprop":
+        optimizer = torch.optim.RMSprop(
+            parameters, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, eps=0.0316, alpha=0.9
+        )
+    elif opt_name == "adamw":
+        optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=args.weight_decay)
+    else:
+        raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD, RMSprop and AdamW are supported.") 
+   
+    args.lr_scheduler = args.lr_scheduler.lower()
+    if args.lr_scheduler == "steplr":
+        main_lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=args.lr_gamma)
+    elif args.lr_scheduler == "cosineannealinglr":
+        main_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=args.epochs - args.lr_warmup_epochs, eta_min=args.lr_min
+        )
+    elif args.lr_scheduler == "exponentiallr":
+        main_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.lr_gamma)
+    else:
+        raise RuntimeError(
+            f"Invalid lr scheduler '{args.lr_scheduler}'. Only StepLR, CosineAnnealingLR and ExponentialLR "
+            "are supported."
+        )
+
+    if args.lr_warmup_epochs > 0:
+        if args.lr_warmup_method == "linear":
+            warmup_lr_scheduler = torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=args.lr_warmup_decay, total_iters=args.lr_warmup_epochs
+            )
+        elif args.lr_warmup_method == "constant":
+            warmup_lr_scheduler = torch.optim.lr_scheduler.ConstantLR(
+                optimizer, factor=args.lr_warmup_decay, total_iters=args.lr_warmup_epochs
+            )
+        else:
+            raise RuntimeError(
+                f"Invalid warmup lr method '{args.lr_warmup_method}'. Only linear and constant are supported."
+            )
+        lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup_lr_scheduler, main_lr_scheduler], milestones=[args.lr_warmup_epochs]
+        )
+    else:
+        lr_scheduler = main_lr_scheduler
+    
     return optimizer, lr_scheduler
 
 def get_kfac_preconditioner(model, args,optimizer):
@@ -89,64 +130,3 @@ def get_kfac_preconditioner(model, args,optimizer):
     )
 
     return preconditioner, kfac_param_scheduler
-
-def set_weight_decay(
-    model: torch.nn.Module,
-    weight_decay: float,
-    norm_weight_decay: Optional[float] = None,
-    norm_classes: Optional[List[type]] = None,
-    custom_keys_weight_decay: Optional[List[Tuple[str, float]]] = None,
-):
-    if not norm_classes:
-        norm_classes = [
-            torch.nn.modules.batchnorm._BatchNorm,
-            torch.nn.LayerNorm,
-            torch.nn.GroupNorm,
-            torch.nn.modules.instancenorm._InstanceNorm,
-            torch.nn.LocalResponseNorm,
-        ]
-    norm_classes = tuple(norm_classes)
-
-    params = {
-        "other": [],
-        "norm": [],
-    }
-    params_weight_decay = {
-        "other": weight_decay,
-        "norm": norm_weight_decay,
-    }
-    custom_keys = []
-    if custom_keys_weight_decay is not None:
-        for key, weight_decay in custom_keys_weight_decay:
-            params[key] = []
-            params_weight_decay[key] = weight_decay
-            custom_keys.append(key)
-
-    def _add_params(module, prefix=""):
-        for name, p in module.named_parameters(recurse=False):
-            if not p.requires_grad:
-                continue
-            is_custom_key = False
-            for key in custom_keys:
-                target_name = f"{prefix}.{name}" if prefix != "" and "." in key else name
-                if key == target_name:
-                    params[key].append(p)
-                    is_custom_key = True
-                    break
-            if not is_custom_key:
-                if norm_weight_decay is not None and isinstance(module, norm_classes):
-                    params["norm"].append(p)
-                else:
-                    params["other"].append(p)
-
-        for child_name, child_module in module.named_children():
-            child_prefix = f"{prefix}.{child_name}" if prefix != "" else child_name
-            _add_params(child_module, prefix=child_prefix)
-
-    _add_params(model)
-
-    param_groups = []
-    for key in params:
-        if len(params[key]) > 0:
-            param_groups.append({"params": params[key], "weight_decay": params_weight_decay[key]})
-    return param_groups

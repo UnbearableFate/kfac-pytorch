@@ -5,8 +5,13 @@
 # conda activate py313
 
 current_time=$(date "+%Y%m%d%H%M")
-
-mpirun ${NQSII_MPIOPTS} --mca mpi_abort_print_stack 1 \
- -x PATH -np 16 --map-by ppr:1:node --report-bindings \
- /work/NBB/yu_mingzhe/miniconda3/envs/py311/bin/python /work/NBB/yu_mingzhe/kfac-pytorch/multi_node_resnet_cifar_ddp.py\
- --timestamp="$current_time"
+epochs=100
+warmup_epochs=$(($epochs/5))
+mpirun -np 2 \
+ /work/NBB/yu_mingzhe/miniconda3/envs/py313/bin/python /work/NBB/yu_mingzhe/kfac-pytorch/swin_imagenet.py \
+ --timestamp="$current_time"\
+ --experiment-name="swin_test" \
+ --model='swin' \
+ --train-com-method="rpc" \
+ --data-path='/work/NBB/share/datasets/imagenet1k/' \
+ --epochs $epochs --batch-size 256 --opt adamw --lr 0.001 --weight-decay 0.05 --norm-weight-decay 0.0  --bias-weight-decay 0.0 --transformer-embedding-decay 0.0 --lr-scheduler cosineannealinglr --lr-min 0.00001 --lr-warmup-method linear  --lr-warmup-epochs $warmup_epochs --lr-warmup-decay 0.01 --amp --label-smoothing 0.1 --mixup-alpha 0.8 --clip-grad-norm 5.0 --cutmix-alpha 1.0 --random-erase 0.25 --interpolation bicubic --auto-augment ta_wide --model-ema --ra-sampler --ra-reps 4  --val-resize-size 224

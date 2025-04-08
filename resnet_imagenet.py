@@ -2,15 +2,12 @@ import datetime
 import os
 import torch
 from torch.utils import collect_env
-from my_module.custom_resnet import ResNetForCIFAR10, MLP
 from general_util.GeneralManager import GeneralManager
 import torch.distributed as dist
 from general_util.consts import SHARE_FILES_DIR ,ompi_world_size, ompi_world_rank, merged_args_parser
 from torch.distributed import rpc
-import examples.vision.cifar_resnet as models
+from torchvision.models import resnet50
 from torch.nn.parallel import DistributedDataParallel as DDP
-from my_module.my_swin import SwinTransformer, SwinTransformerBlockV2
-from torchvision.models import SwinTransformer as SwinTransformerTorch
 import time
 
 import logging
@@ -51,16 +48,8 @@ if __name__ == '__main__':
                 f'local_rank = {args.local_rank}, '
                 f'world_size = {dist.get_world_size()}',
             )
-    model = SwinTransformer(
-        patch_size=[4, 4],
-        embed_dim=96,
-        depths=[2, 2, 6, 2],
-        num_heads=[3, 6, 12, 24],
-        window_size=[7, 7],
-        stochastic_depth_prob=0.2,
-    )
+    model = resnet50()
     device = torch.device(f'cuda:0')
-
     model = model.to(device)
     
     if args.train_com_method == 'ddp':

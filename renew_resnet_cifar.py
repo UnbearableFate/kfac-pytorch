@@ -75,6 +75,7 @@ if __name__ == '__main__':
         model = DDP(model)
     start_time = time.time() 
     mgr = GeneralManager(model=model,device=device, args=args)
+    """
     dist.barrier()
     if args.train_com_method == 'ddp':
         mgr.train_and_test()
@@ -89,5 +90,6 @@ if __name__ == '__main__':
     if args.train_com_method == 'rpc':
         rpc.shutdown()
     dist.destroy_process_group()
-    print(f"Done! at {datetime.datetime.now()}")
+    print(f"Done! at {datetime.datetime.now()}")"
+    """
     exit(0)

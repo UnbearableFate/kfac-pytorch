@@ -51,16 +51,15 @@ class GeneralManager:
 
         if args.degree_noniid > 0:
             sampler_func =  partial(NonIidSampler, degree_noniid=args.degree_noniid)
-        self.data_manager = DataPreparer(data_path_root=DATA_DIR, dataset_name=dataset_name, world_size=world_size, rank=rank,
-                                         sampler=sampler_func, batch_size=batch_size, train_transform=transform_train, test_transform=transform_test,train_com_method=train_com_method)
-
+        self.data_manager = DataPreparer(args)
         self.loss_func =nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
         self.optimizer, self.lr_scheduler = get_swin_optimizer(model, args)
-        self.preconditioner,self.kfac_scheduler = get_kfac_preconditioner(model, args,self.optimizer)
-
-        self.lr_scheduler_type = args.lr_scheduler
-        self.optimizer_type = args.optimizer_type
-
+        if args.not_kfac:
+            self.preconditioner = None
+            self.kfac_scheduler = None
+        else:
+            self.preconditioner,self.kfac_scheduler = get_kfac_preconditioner(model, args,self.optimizer)
+        self.scaler = torch.amp.GradScaler("cuda") if args.amp else None
         if train_com_method == "rpc":
                 self.rpc_communicator:rpc_distributed.KFacRPCCommunicator \
                 = rpc_distributed.KFacRPCCommunicator(world_size=world_size, rank=rank,
@@ -81,14 +80,11 @@ class GeneralManager:
             model.load_state_dict(checkpoint["model"])
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.preconditioner.load_state_dict(checkpoint["preconditioner"])
-            if "scheduler" in checkpoint and hasattr(self, "schduler"):
-                self.schduler.load_state_dict(checkpoint["scheduler"])
-            if "decay_scheduler" in checkpoint and hasattr(self, "decay_scheduler"):
-                self.decay_scheduler.load_state_dict(checkpoint["decay_scheduler"])
-            if "warmup_scheduler" in checkpoint and hasattr(self, "warmup_scheduler"):
-                self.warmup_scheduler.load_state_dict(checkpoint["warmup_scheduler"])
+            self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
             self.start_epoch = checkpoint["epoch"] + 1
             self.train_total_time = checkpoint["train_total_time"]
+            if "scaler" in checkpoint:
+                self.scaler.load_state_dict(checkpoint["scaler"])
             print(f"Checkpoint loaded in rank {rank} at epoch {self.start_epoch}")
         self.dataset_name = dataset_name
         self.device = device
@@ -100,6 +96,7 @@ class GeneralManager:
         self.batch_size = batch_size
         self.is_fault = False
         self.fault_in_last_iteraion = False
+        self.args = args
 
         if fault_simulator is not None:
             fault_simulator.train_total_time_cb = self.get_total_training_time
@@ -119,13 +116,13 @@ class GeneralManager:
             self.train(epoch=i)
             self.train_total_time += time.time() - start_time
             if self.writer is not None:
-                self.writer.add_scalar("Total train time", self.train_total_time) 
-            if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.OneCycleLR):
-                self.lr_scheduler.step()
+                self.writer.add_scalar("Total train time", self.train_total_time, i) 
+            self.lr_scheduler.step()
             if self.kfac_scheduler is not None:
-                self.kfac_scheduler.step(step=i)
-            self.test_all(epoch=i)
-            #self.save_checkpoint(epoch=i)
+                self.kfac_scheduler.step()
+            if i % 10 == 0 or i >= 0.9 * self.epochs:
+                self.test_all(epoch=i)
+            self.save_checkpoint(epoch=i)
             """
             train_total_time = torch.tensor(self.train_total_time, dtype=torch.int, device="cuda")  # 或者"cpu"
             dist.all_reduce(train_total_time)
@@ -144,7 +141,7 @@ class GeneralManager:
         dist.barrier()
         print(f"rpc OK? {rpc_distributed.rpc.is_available()} ,dist OK? {dist.is_initialized()} in rank {self.rank}")
 
-        for i in range(self.start_epoch, self.epochs):
+        for i in range(self.start_epoch+1, self.epochs+1):
             start_time = time.time()
             if self.preconditioner is None:
                 loss = self.ad_sgd_train(epoch=i)
@@ -155,10 +152,12 @@ class GeneralManager:
                 self.writer.add_scalar("Total train time", self.train_total_time,i)
                 self.writer.add_scalar('Loss/train', loss, i)
                 self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]['lr'], i)
-            if self.lr_scheduler_type == "multi_step":
-                self.lr_scheduler.step()
-            self.test_local(epoch=i)
-            #self.save_checkpoint(epoch=i)
+            self.lr_scheduler.step()
+            if self.kfac_scheduler is not None:
+                self.kfac_scheduler.step(step=i) 
+            if i % 10 == 0 or i >= 0.9 * self.epochs:
+                self.test_local(epoch=i)
+            self.save_checkpoint(epoch=i)
 
         self.writer.close()
         """
@@ -196,21 +195,28 @@ class GeneralManager:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 self.optimizer.zero_grad()
-                output = self.model(data)
-                loss = self.loss_func(output, target)
-                loss.backward()
+                with torch.amp.autocast(device_type="cuda",enabled=self.scaler is not None):
+                    output = self.model(data)
+                    loss = self.loss_func(output, target)
 
-                #if self.rank not in [0,6,9,15]:
-                #    time.sleep(0.5)
-                #time.sleep(delay_list_dict[0][self.rank])
-
-                if self.preconditioner is not None:
-                    self.preconditioner.step()
-                self.optimizer.step()
-                if self.lr_scheduler_type == "one_cycle":
-                    self.lr_scheduler.step()
-                t.update()
-        
+                if self.scaler is not None:
+                    self.scaler.scale(loss).backward()
+                    if self.args.clip_grad_norm is not None:
+                        # we should unscale the gradients of optimizer's assigned params if do gradient clipping
+                        self.scaler.unscale_(self.optimizer)
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    if self.preconditioner is not None:
+                        self.preconditioner.step()
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    if self.args.clip_grad_norm is not None:
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    if self.preconditioner is not None:
+                        self.preconditioner.step()
+                    self.optimizer.step()
+                t.update() 
         if self.writer is not None:
             self.writer.add_scalar('Loss/train', loss.item(), epoch)
             self.writer.add_scalar('LR/train', self.optimizer.param_groups[0]["lr"], epoch)
@@ -246,27 +252,35 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                if epoch >= 1:
-                    self.fault_simulation()
-
                 data = data.to(self.device)
                 target = target.to(self.device)
 
                 rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
-                
-                output = self.model(data)
-                #self.random_delay(1,0.18)
-                loss = self.loss_func(output, target)
-                self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
-                loss.backward()
 
-                if self.preconditioner is not None:
-                    self.preconditioner.step()
+                with torch.amp.autocast(device_type="cuda",enabled=self.scaler is not None):
+                    output = self.model(data)
+                    loss = self.loss_func(output, target)
+                    self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
 
-                self.optimizer.step()
-                if self.lr_scheduler_type == "one_cycle":
-                    self.lr_scheduler.step()
+                if self.scaler is not None:
+                    self.scaler.scale(loss).backward()
+                    if self.args.clip_grad_norm is not None:
+                        # we should unscale the gradients of optimizer's assigned params if do gradient clipping
+                        self.scaler.unscale_(self.optimizer)
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    if self.preconditioner is not None:
+                        self.preconditioner.step()
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    if self.args.clip_grad_norm is not None:
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    if self.preconditioner is not None:
+                        self.preconditioner.step()
+                    self.optimizer.step()
+
                 self.rpc_communicator.send_model_param()
                 
                 if com.current_t() % 50 == 40:
@@ -298,31 +312,32 @@ class GeneralManager:
                 disable=(self.rank != 0)
         ) as t):
             for batch_idx, (data, target) in enumerate(train_loader):
-                #if epoch >= 1:
-                #    self.fault_simulation()
-
                 data = data.to(self.device)
                 target = target.to(self.device)
                 rpc_distributed.global_communicator.update_self_t()
                 self.optimizer.zero_grad()
-                
-                output = self.model(data)
 
-                self.random_delay(1,0.36)
+                with torch.amp.autocast(device_type="cuda",enabled=self.scaler is not None):
+                    output = self.model(data)
+                    loss = self.loss_func(output, target)
+                    self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
 
-                loss = self.loss_func(output, target)
-                self.rpc_communicator.model_avg_rpc.set_loss(loss.item())
-                loss.backward()
-
-                if self.preconditioner is not None:
-                    self.preconditioner.step()
-
-                self.optimizer.step()
-                if self.lr_scheduler_type == "one_cycle":
-                    self.lr_scheduler.step() 
+                if self.scaler is not None:
+                    self.scaler.scale(loss).backward()
+                    if self.args.clip_grad_norm is not None:
+                        # we should unscale the gradients of optimizer's assigned params if do gradient clipping
+                        self.scaler.unscale_(self.optimizer)
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    if self.args.clip_grad_norm is not None:
+                        nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                    self.optimizer.step()
 
                 self.rpc_communicator.send_model_param()
-                    
+
                 if rpc_distributed.global_communicator.current_t() % 200 == 0:
                     rpc_distributed.global_communicator.print_rpc_state()
                 t.update()
@@ -379,13 +394,11 @@ class GeneralManager:
             'preconditioner': self.preconditioner.state_dict() if self.preconditioner is not None else None,
             'epoch': epoch,
             'train_total_time': self.train_total_time,
+            'lr_scheduler': self.lr_scheduler.state_dict()
         }
-        if hasattr(self, "scheduler"):
-            state["scheduler"] = self.scheduler.state_dict()
-        if hasattr(self, "warmup_scheduler"):
-            state["warmup_scheduler"] = self.warmup_scheduler.state_dict()
-        if hasattr(self, "decay_scheduler"):
-            state["decay_scheduler"] = self.decay_scheduler.state_dict()
+        if self.scaler is not None:
+            state["scaler"] = self.scaler.state_dict()
+
         try:
             temp_path = self.checkpoint_file_path + ".temp"
             torch.save(state, temp_path)

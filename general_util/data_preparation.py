@@ -205,7 +205,7 @@ class DataPreparer:
         
         train_dir = os.path.join(self.data_path, "train")
         val_dir = os.path.join(self.data_path, "val")
-        dataset, dataset_test, train_sampler, test_sampler = load_data(train_dir, val_dir, args)
+        dataset, dataset_test, self.train_sampler, self.test_sampler = load_data(train_dir, val_dir, args)
 
         num_classes = len(dataset.classes)
         mixup_cutmix = get_mixup_cutmix(
@@ -220,13 +220,13 @@ class DataPreparer:
         self.train_loader = DataLoader(
             dataset,
             batch_size=args.batch_size,
-            sampler=train_sampler,
+            sampler=self.train_sampler,
             num_workers=args.workers,
             pin_memory=True,
             collate_fn=collate_fn,
         )
         self.test_loader =  DataLoader(
-            dataset_test, batch_size=args.batch_size, sampler=test_sampler, num_workers=args.workers, pin_memory=True
+            dataset_test, batch_size=args.batch_size, sampler=self.test_sampler, num_workers=args.workers, pin_memory=True
         )
         print("Data preparation finished.")
         print(f"Train data size: {len(dataset)}")
@@ -261,20 +261,19 @@ def load_data(traindir, valdir, args):
         random_erase_prob = getattr(args, "random_erase", 0.0)
         ra_magnitude = getattr(args, "ra_magnitude", None)
         augmix_severity = getattr(args, "augmix_severity", None)
-        if args.dataset == "imagenet":
-            dataset = torchvision.datasets.ImageFolder(
-                traindir,
-                presets.ClassificationPresetTrain(
-                    crop_size=train_crop_size,
-                    interpolation=interpolation,
-                    auto_augment_policy=auto_augment_policy,
-                    random_erase_prob=random_erase_prob,
-                    ra_magnitude=ra_magnitude,
-                    augmix_severity=augmix_severity,
-                    backend=args.backend,
-                    use_v2=args.use_v2,
-                ),
-            )
+        dataset = torchvision.datasets.ImageFolder(
+            traindir,
+            presets.ClassificationPresetTrain(
+                crop_size=train_crop_size,
+                interpolation=interpolation,
+                auto_augment_policy=auto_augment_policy,
+                random_erase_prob=random_erase_prob,
+                ra_magnitude=ra_magnitude,
+                augmix_severity=augmix_severity,
+                backend=args.backend,
+                use_v2=args.use_v2,
+            ),
+        )
         if args.cache_dataset:
             print(f"Saving dataset_train to {cache_path}")
             utils.mkdir(os.path.dirname(cache_path))
@@ -314,15 +313,20 @@ def load_data(traindir, valdir, args):
             utils.save_on_master((dataset_test, valdir), cache_path)
 
     print("Creating data loaders")
-    if args.distributed:
+    if True:
         if hasattr(args, "ra_sampler") and args.ra_sampler:
             train_sampler = RASampler(dataset, shuffle=True, repetitions=args.ra_reps)
         else:
             train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-        test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test, shuffle=False)
+        if args.train_com_method == "ddp":
+            test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test, shuffle=False)
+        else:
+            test_sampler = None
+    """
     else:
         train_sampler = torch.utils.data.RandomSampler(dataset)
         test_sampler = torch.utils.data.SequentialSampler(dataset_test)
+    """
 
     return dataset, dataset_test, train_sampler, test_sampler
 
