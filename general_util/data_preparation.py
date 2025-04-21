@@ -194,7 +194,7 @@ class DataPreparer:
     }
 
     def __init__(self, data_path_root, dataset_name, world_size, rank, batch_size=64, sampler=None, train_transform =None,test_transform=None,train_com_method='ddp'):
-        self.data_path = os.path.join(data_path_root, dataset_name)
+        self.data_path = os.path.join(data_path_root, dataset_name.lower())
         if train_transform is not None:
             self.train_transform = train_transform
         else:
