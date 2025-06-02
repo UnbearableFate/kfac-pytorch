@@ -41,6 +41,8 @@ dev = [
     "tox",
     "types-tqdm",
     "virtualenv",
+    "tqdm",
+    
 ]
 
 [tool.codespell]

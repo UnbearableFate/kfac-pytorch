@@ -2,14 +2,13 @@
 
 current_time=$(date "+%Y%m%d%H%M")
 mpirun -np 1 \
- /home/yu/miniconda3/envs/py311/bin/python /home/yu/workspace/kfac-pytorch/renew_resnet_cifar.py \
+ python renew_resnet_cifar.py \
  --timestamp="$current_time"\
  --experiment-name="swin_kfac" \
- --kfac-inv-update-steps=20 \
- --kfac-factor-update-steps=2 \
  --batch-size=256 \
  --base-lr=0.001 \
  --epochs=50 \
  --lr-scheduler-type="one_cycle" \
  --model="swin" \
  --optimizer-type="adamw" \
+ --not-kfac \

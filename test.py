@@ -1,140 +1,108 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-from torchvision.models import mobilenet_v3_small
-from torchvision.models import shufflenet_v2_x0_5
-from torchvision.models import alexnet
-from my_module.custom_resnet import ResNetForCIFAR10 ,SimpleCNN
-import os
-from torch.utils.data import DataLoader
-from my_module.model_split import ModelSplitter
-
-today = "0923"
-DATA_DIR = ""
-LOG_DIR = ""
-Share_DIR = ""
-if os.path.exists("/home/yu"):
-    DATA_DIR = "/home/yu/data"
-    LOG_DIR = "/home/yu/workspace/kfac-pytorch/runs"+today
-    Share_DIR = "/home/yu/workspace/kfac-pytorch/share_files"
-elif os.path.exists("/Users/unbearablefate"):
-    DATA_DIR = "/Users/unbearablefate/workspace/data"
-    LOG_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/runs"+today
-    Share_DIR = "/Users/unbearablefate/workspace/kfac-pytorch/share_files"
-elif os.path.exists("/work/NBB/yu_mingzhe/kfac-pytorch"):
-    DATA_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data"
-    LOG_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/runs"+today
-    Share_DIR = "/work/NBB/yu_mingzhe/kfac-pytorch/data/share_files"
-
-# 设置设备
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from typing import List
 
 
-def replace_relu_inplace(module):
-    for name, child in module.named_children():
-        if isinstance(child, nn.ReLU) and child.inplace:
-            setattr(module, name, nn.ReLU(inplace=False))
-        elif isinstance(child, nn.SiLU) and child.inplace:
-            setattr(module, name, nn.SiLU(inplace=False))
-        else:
-            replace_relu_inplace(child)
 
-# 数据预处理和加载
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),  # 调整 CIFAR-10 图片大小
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-])
-
-transform2 = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
-trainset = torchvision.datasets.CIFAR10(root=DATA_DIR+"/CIFAR10", train=True, download=False, transform=cifar10_transform_train)
-trainloader = DataLoader(trainset, batch_size=16, shuffle=True, num_workers=2)
-
-testset = torchvision.datasets.CIFAR10(root=DATA_DIR+"/CIFAR10", train=False, download=False, transform=cifar10_transform_test)
-testloader = DataLoader(testset, batch_size=16, shuffle=False, num_workers=2)
-
-# 加载 MobileNetV3 模型并进行修改以适应 CIFAR-10
-#model = alexnet(num_classes = 10)
-#replace_relu_inplace(model)
-
-#model = SimpleCNN()
-#model = ModelSplitter(model, 128)
-
-model = CustomMiniMobileNetV3Small(num_classes=10)
-#model  = torchvision.models.efficientnet_b0(num_classes = 10)
-#replace_relu_inplace(model)
-summary(model, (3, 224, 224))
-
-model.to(device)
-# 定义损失函数和优化器
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-preconditioner = kfac.preconditioner.KFACPreconditioner(model=model, skip_layers=["block.0.0","block.1.0"])
-
-# 训练模型
-def train(model, trainloader, criterion, optimizer, device):
-    model.train()
-    for epoch in range(1):  # 训练10个epoch
-        index = 1 
-        for inputs, labels in trainloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-
-            preconditioner.step()
-            optimizer.step()
-
-            if index >=3 :
-                break
-
-# 测试模型
-def test(model, testloader, device):
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for inputs, labels in testloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    print(f'Accuracy: {100 * correct / total}%')
-
-# 训练和测试
-
-import math
-
-def exponential_topology_neighbors(world_size, rank):
+def block_diag_left_matmul(blocks_A: List[torch.Tensor], B: torch.Tensor) -> torch.Tensor:
     """
-    Generate a list of neighbor ranks in an exponential topology.
-
-    Args:
-        world_size (int): Total number of nodes in the topology.
-        rank (int): The rank of the current node (0 <= rank < world_size).
-
-    Returns:
-        list: A list of neighbor ranks.
-    """
-    max_dimension = int(math.ceil(math.log2(world_size)))
-    neighbors = []
-    for k in range(max_dimension):
-        offset = 1 << k  # Calculate 2^k
-        neighbor = (rank + offset) % world_size
-        if neighbor != rank:
-            neighbors.append(neighbor)
-    return neighbors
-
-if __name__ == '__main__':
-    exponential_topology_neighbors(16, 3)
+    Compute Y = A @ B where A = block_diag(blocks_A).
     
+    - blocks_A: [A0, A1, ..., Ap-1], each Ai of shape (di, di).
+    - B: Tensor of shape (D, M), where D = sum(di).
+    
+    Returns:
+        Y of shape (D, M) given by:
+        [A0 @ B0; A1 @ B1; ...; Ap-1 @ Bp-1],
+        where Bi is the slice of B corresponding to rows of Ai.
+    """
+    # 1. Determine split sizes along rows of B
+    split_sizes = [Ai.shape[0] for Ai in blocks_A]
+    # 2. Split B into matching row slices
+    B_slices = torch.split(B, split_sizes, dim=0)
+    # 3. Multiply each block independently
+    Y_slices = [Ai @ Bi for Ai, Bi in zip(blocks_A, B_slices)]
+    # 4. Concatenate back into full result
+    return torch.cat(Y_slices, dim=0)
+
+def block_diag_right_matmul(A: torch.Tensor, blocks_B: List[torch.Tensor]) -> torch.Tensor:
+    """
+    Compute Y = A @ B where B = block_diag(blocks_B).
+    
+    - A: Tensor of shape (N, D), where D = sum(dj).
+    - blocks_B: [B0, B1, ..., Bp-1], each Bj of shape (dj, dj).
+    
+    Returns:
+        Y of shape (N, D) given by:
+        [A0 @ B0, A1 @ B1, ..., Ap-1 @ Bp-1],
+        where Aj is the slice of A corresponding to columns of Bj.
+    """
+    # 1. Determine split sizes along columns of A
+    split_sizes = [Bj.shape[0] for Bj in blocks_B]
+    # 2. Split A into matching column slices
+    A_slices = torch.split(A, split_sizes, dim=1)
+    # 3. Multiply each slice with its block
+    Y_slices = [Ai @ Bj for Ai, Bj in zip(A_slices, blocks_B)]
+    # 4. Concatenate back into full result
+    return torch.cat(Y_slices, dim=1)
+
+
+def block_diag_left_matmul_compact(A_compact, B, p):
+    """
+    Y = A @ B,  A = block_diag(A0,...,A_{p-1}),
+    A_compact: (D, d) with D = p*d
+    B:         (D, M)
+    """
+    D, d = A_compact.shape
+    # 1) 把 A_compact 视为 (p, d, d)
+    A3 = A_compact.view(p, d, d)
+    # 2) 把 B 视为 (p, d, M)
+    B3 = B.view(p, d, -1)
+    # 3) 批量乘法
+    Y3 = torch.matmul(A3, B3)        # (p, d, M)
+    # 4) 重塑回 (D, M)
+    return Y3.reshape(D, B.shape[1])
+
+def block_diag_right_matmul_compact(A, B_compact, p):
+    """
+    Y = A @ B,  B = block_diag(B0,...,B_{p-1}),
+    A:         (N, D) with D = p*d
+    B_compact: (d, D)
+    """
+    N, D = A.shape
+    d = D // p
+    # 1) 把 B_compact 视为 (p, d, d)
+    B3 = B_compact.view(d, p, d).permute(1, 0, 2)  # (p, d, d)
+    # 2) 把 A 视为 (N, p, d)
+    A3 = A.view(N, p, d)
+    # 3) 分块相乘并水平拼回
+    Y_slices = [A3[:, i, :] @ B3[i] for i in range(p)]  # 每块 (N, d)
+    return torch.cat(Y_slices, dim=1)  # (N, D)
+
+
+if __name__ == "__main__":
+    # 测试 block_diag_left_matmul
+    A = torch.randn(6, 6)
+    blocks_A = [torch.randn(2, 2), torch.randn(2, 2), torch.randn(2, 2)]
+    B = torch.randn(6, 4)
+    result = block_diag_left_matmul(blocks_A, B)
+    print("block_diag_left_matmul result shape:", result.shape)  # 应该是 (6, 4)
+
+    # 测试 block_diag_right_matmul
+    A = torch.randn(4, 6)
+    blocks_B = [torch.randn(2, 2), torch.randn(2, 2), torch.randn(2, 2)]
+    result = block_diag_right_matmul(A, blocks_B)
+    print("block_diag_right_matmul result shape:", result.shape)  # 应该是 (4, 6)
+
+    # 测试 block_diag_left_matmul_compact
+    A_compact = torch.randn(12, 3)
+    B = torch.randn(12, 4)
+    p = 4
+    result = block_diag_left_matmul_compact(A_compact, B, p)
+    print("block_diag_left_matmul_compact result shape:", result.shape)  # 应该是 (12, 4)
+
+    # 测试 block_diag_right_matmul_compact
+    A = torch.randn(4, 12)
+    B_compact = torch.randn(3, 12)
+    p = 4
+    result = block_diag_right_matmul_compact(A, B_compact, p)
+    print("block_diag_right_matmul_compact result shape:", result.shape)  # 应该是 (4, 12)

@@ -55,8 +55,8 @@ if __name__ == '__main__':
         model = ResNetForCIFAR10(layers=args.layers)
         device = torch.device(f'cuda:0')
     elif args.model == 'mlp':
-        model = MLP(num_hidden_layers=args.layers)
-        device = torch.device(f'cpu')
+        model = MLP(num_hidden_layers=args.layers, hidden_size=256)
+        device = torch.device(f'cuda:0')
     elif args.model == 'swin':
         model = SwinTransformer(
             patch_size=[2, 2],            # 更小的patch_size以适应32x32输入

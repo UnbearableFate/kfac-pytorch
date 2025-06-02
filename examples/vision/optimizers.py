@@ -92,7 +92,8 @@ def get_optimizer(
             grad_scaler=args.grad_scaler if 'grad_scaler' in args else None,
             skip_layers=args.kfac_skip_layers,
             train_method=args.train_com_method,
-            is_packaged_send=True
+            is_packaged_send=True,
+            compute_eigenvalue_outer_product = False,
         )
 
         def get_lambda(
